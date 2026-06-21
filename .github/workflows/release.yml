@@ -63,7 +63,7 @@ jobs:
           fi
 
       - name: Set version from release tag
-        if: steps.npm_tag.outputs.tag == 'latest'
+        if: steps.npm_tag.outputs.tag == 'latest' && github.event_name == 'release'
         run: ./scripts/version.sh set ${GITHUB_REF_NAME#v}
 
       - name: Set version to tag + commit hash + timestamp

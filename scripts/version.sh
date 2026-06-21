@@ -81,10 +81,10 @@ case "$1" in
         bump_version
         ;;
     set)
-        set_version $2
+        set_version "${2:?version argument required}"
         ;;
     tag)
-        tag_version $2
+        tag_version "${2:?tag argument required}"
         ;;
     get)
         get_version
