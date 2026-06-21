@@ -2,9 +2,8 @@
   "name": "futrou-cli",
   "productName": "Futrou CLI",
   "version": "1.0.0",
-  "description": "Futrou CLI alias — runs npx futrou with the same arguments.",
+  "description": "Futrou CLI alias - runs npx futrou with the same arguments.",
   "bin": {
-    "futrou": "./index.cjs",
     "futrou-cli": "./index.cjs"
   },
   "types": "./index.d.ts",
