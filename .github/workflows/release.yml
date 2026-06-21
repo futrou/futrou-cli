@@ -92,9 +92,6 @@ jobs:
       - name: Publish to npm
         run: cd dist-npm && npm publish --provenance --access public --tag=${{ steps.npm_tag.outputs.tag }}
 
-      - name: Publish alias to npm
-        run: cd dist-npm-alias && npm publish --provenance --access public --tag=${{ steps.npm_tag.outputs.tag }}
-
   bump-version:
     name: Bump version
     runs-on: ubuntu-slim
