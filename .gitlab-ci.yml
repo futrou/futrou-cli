@@ -11,6 +11,8 @@ mirror:
     rules:
         - if: $CI_COMMIT_BRANCH == "main"
         - if: $CI_COMMIT_TAG
+    tags:
+        - arm64
     allow_failure: true
     script:
         - mkdir -p ~/.ssh
