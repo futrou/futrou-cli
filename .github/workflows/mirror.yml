@@ -16,25 +16,27 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Mirror to gitlab.com/futrou/futrou-cli.git
+      - name: Setup SSH
         env:
           GITLAB_SSH_KEY: ${{ secrets.GITLAB_SSH_KEY }}
         run: |
-          KEY_FILE=$(mktemp)
-          chmod 600 "$KEY_FILE"
-          echo "$GITLAB_SSH_KEY" > "$KEY_FILE"
-          export GIT_SSH_COMMAND="ssh -i $KEY_FILE -o StrictHostKeyChecking=no -o IdentitiesOnly=yes"
+          mkdir -p ~/.ssh
+          ssh-keyscan gitlab.com >> ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+          echo "$GITLAB_SSH_KEY" > ~/.ssh/key
+          chmod 600 ~/.ssh/key
+          echo -e "Host gitlab.com\n\tHostName gitlab.com\n\tIdentityFile ~/.ssh/key\n\tIdentitiesOnly yes" >> ~/.ssh/config
+          chmod 600 ~/.ssh/config
 
+      - name: Mirror to gitlab.com/futrou/futrou-cli.git
+        run: |
           git remote add gitlab git@gitlab.com:futrou/futrou-cli.git
           LOCAL=$(git rev-parse HEAD)
           REMOTE=$(git ls-remote gitlab refs/heads/main | awk '{print $1}')
-
           if [ "$LOCAL" = "$REMOTE" ]; then
             echo "Already in sync, skipping push."
-            rm -f "$KEY_FILE"
             exit 0
           fi
           echo "Local:  $LOCAL"
           echo "Remote: $REMOTE"
           git push gitlab main
-          rm -f "$KEY_FILE"
