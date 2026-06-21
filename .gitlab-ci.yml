@@ -1,27 +1,35 @@
-image: golang:1.25.6
+image: alpine/git
 
 variables:
-    GOPATH: $CI_PROJECT_DIR/.go
-    GOMODCACHE: $GOPATH/pkg/mod
-    GOCACHE: $CI_PROJECT_DIR/.gocache
     DEBIAN_FRONTEND: noninteractive
 
-cache:
-    key:
-        files:
-            - go.sum
-    paths:
-        - .go/pkg/mod/
-        - .gocache/
-
 stages:
-    - test
+    - mirror
 
-test:
-    stage: test
+mirror:
+    stage: mirror
     rules:
-        - if: $CI_COMMIT_TAG == null
+        - if: $CI_COMMIT_BRANCH == "main"
+        - if: $CI_COMMIT_TAG
+    allow_failure: true
     script:
-        - make install
-        - make build
-        - make test
+        - mkdir -p ~/.ssh
+        - ssh-keyscan github.com >> ~/.ssh/known_hosts
+        - chmod 644 ~/.ssh/known_hosts
+        - echo "$GITHUB_SSH_KEY" > ~/.ssh/key
+        - chmod 600 ~/.ssh/key
+        - printf 'Host github.com\n\tHostName github.com\n\tIdentityFile ~/.ssh/key\n\tIdentitiesOnly yes\n' >> ~/.ssh/config
+        - chmod 600 ~/.ssh/config
+        - git remote add github git@github.com:futrou/futrou-cli.git
+        - git fetch github --tags
+        - LOCAL=$(git rev-parse HEAD)
+        - REMOTE=$(git ls-remote github refs/heads/main | awk '{print $1}')
+        - |
+          if [ "$LOCAL" = "$REMOTE" ]; then
+            echo "Already in sync, skipping push."
+            exit 0
+          fi
+        - echo "Local:  $LOCAL"
+        - echo "Remote: $REMOTE"
+        - git push github HEAD:main || (git pull github main --rebase && git push github HEAD:main)
+        - git push github --tags
