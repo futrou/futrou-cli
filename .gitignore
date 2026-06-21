@@ -1,0 +1,31 @@
+# Ouput directory
+dist/
+dist-npm/
+dist-*
+bin/
+futrou/
+main/
+
+# Air temp directory
+tmp/
+
+# IDE
+.idea/
+.vscode/
+.DS_Store
+
+# .ENV local file
+.env.local
+.env.*
+!.env
+
+# Node modules
+node_modules/
+
+# AI
+.claude/
+.cursor/
+.antigravity/
+.superpowers/
+.agent/
+.skills/

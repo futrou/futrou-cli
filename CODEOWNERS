@@ -1,0 +1,7 @@
+* @thehansys
+
+# Don't automatically assign reviewers for automated MRs.
+go.mod
+go.sum
+package.json
+package-lock.json

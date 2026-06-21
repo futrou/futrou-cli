@@ -1,0 +1,143 @@
+image: golang:1.25.6
+
+variables:
+  GOPATH: $CI_PROJECT_DIR/.go
+  GOMODCACHE: $GOPATH/pkg/mod
+  GOCACHE: $CI_PROJECT_DIR/.gocache
+
+cache:
+  key:
+    files:
+      - go.sum
+  paths:
+    - .go/pkg/mod/
+    - .gocache/
+
+stages:
+  - build
+  - release
+  - deploy
+
+build:
+  stage: build
+  rules:
+    - if: $CI_COMMIT_TAG == null
+  tags:
+    - arm64
+  script:
+    - make install
+    - make build
+    - make test
+
+release:
+  stage: release
+  rules:
+    - if: $CI_COMMIT_TAG
+  tags:
+    - arm64
+  script:
+    # Install B2 CLI
+    - ARCH=$(uname -m); if [ "$ARCH" = "x86_64" ]; then B2_BIN="b2-linux"; else B2_BIN="b2-linux-aarch64"; fi
+    - curl -sLo /usr/bin/b2 "https://github.com/Backblaze/B2_Command_Line_Tool/releases/latest/download/$B2_BIN"
+    - chmod +x /usr/bin/b2
+
+    # Build
+    - |
+      make install
+      make build
+      make build-deb
+
+    # Gzip binaries and .deb files
+    - find dist/ -type f | xargs -I {} sh -c 'gzip -n -9 -c "{}" > "{}.gz" && mv "{}.gz" "{}"'
+
+    # Login to B2
+    - export DIST_NAME=$(grep DIST_NAME .env | cut -d'=' -f2)
+    - export VERSION="${CI_COMMIT_TAG#v}"
+    - /usr/bin/b2 account authorize "$B2_APPLICATION_KEY_ID" "$B2_APPLICATION_KEY" > /dev/null
+
+    # Upload all dist/ files to B2 bucket under its version
+    # e.g. https://downloads.futrou.com/nasua/1.0.0/nasua-linux-amd64.deb
+    # Upload all dist/ files to B2 bucket under latest/
+    # e.g. https://downloads.futrou.com/nasua/latest/nasua-linux-amd64.deb
+    - |
+      for file in $(find dist/ -type f); do
+        REL_PATH=${file#dist/}
+        echo "Uploading $file..."
+        /usr/bin/b2 file upload $B2_BUCKET_NAME "$file" "$DIST_NAME/$VERSION/$REL_PATH" --content-encoding gzip
+        /usr/bin/b2 file upload $B2_BUCKET_NAME "$file" "$DIST_NAME/latest/$REL_PATH" --content-encoding gzip
+      done
+    
+    # Build and upload index.json and versions.json
+    - make build-index
+    - /usr/bin/b2 file upload $B2_BUCKET_NAME dist/versions.json $DIST_NAME/versions.json 
+    - /usr/bin/b2 file upload $B2_BUCKET_NAME dist/versions.json $DIST_NAME/index.json 
+    - /usr/bin/b2 file upload $B2_BUCKET_NAME dist/index.json $DIST_NAME/$VERSION/index.json 
+    - /usr/bin/b2 file upload $B2_BUCKET_NAME dist/index.json $DIST_NAME/latest/index.json 
+    - /usr/bin/b2 file upload $B2_BUCKET_NAME dist/install.sh $DIST_NAME/install.sh
+    
+
+create-release:
+  stage: release
+  image: registry.gitlab.com/gitlab-org/release-cli:latest
+  needs:
+    - job: release
+  rules:
+    - if: $CI_COMMIT_TAG
+  script:
+    - echo "Creating release for $CI_COMMIT_TAG"
+  release:
+    name: 'Release $CI_COMMIT_TAG'
+    description: 'Created using the GitLab CI release job'
+    tag_name: '$CI_COMMIT_TAG'
+    ref: '$CI_COMMIT_TAG'
+    assets:
+      links:
+        - name: 'nasua-linux-amd64'
+          url: '${B2_BUCKET_URL}/nasua/${CI_COMMIT_TAG#v}/nasua-linux-amd64'
+        - name: 'nasua-linux-arm64'
+          url: '${B2_BUCKET_URL}/nasua/${CI_COMMIT_TAG#v}/nasua-linux-arm64'
+        - name: 'nasua-darwin-amd64'
+          url: '${B2_BUCKET_URL}/nasua/${CI_COMMIT_TAG#v}/nasua-darwin-amd64'
+        - name: 'nasua-darwin-arm64'
+          url: '${B2_BUCKET_URL}/nasua/${CI_COMMIT_TAG#v}/nasua-darwin-arm64'
+        - name: 'nasua-linux-amd64.deb'
+          url: '${B2_BUCKET_URL}/nasua/${CI_COMMIT_TAG#v}/nasua-linux-amd64.deb'
+        - name: 'nasua-linux-arm64.deb'
+          url: '${B2_BUCKET_URL}/nasua/${CI_COMMIT_TAG#v}/nasua-linux-arm64.deb'
+
+bump-version:
+  stage: release
+  needs:
+    - job: release
+  rules:
+    - if: $CI_COMMIT_TAG
+  tags:
+    - arm64
+  script:
+    # Add gitlab.com to known hosts
+    - mkdir -p ~/.ssh
+    - ssh-keyscan "gitlab.com" >> ~/.ssh/known_hosts
+    - chmod 644 ~/.ssh/known_hosts
+
+    # Add private key
+    - echo "${CI_BOT_GIT_PRIVATE_KEY}" >> ~/.ssh/key
+    - chmod 700 ~/.ssh/key
+
+    # Add config for gitlab
+    - echo -e "Host gitlab.com\n\tHostName gitlab.com\n\tUser ${CI_BOT_GIT_EMAIL}\n\tIdentityFile ~/.ssh/key" >> ~/.ssh/config
+    - chmod 744 ~/.ssh/config
+
+    # Configure git for CI Bot
+    - git config --global user.email "${CI_BOT_GIT_EMAIL}"
+    - git config --global user.name "${CI_BOT_GIT_NAME}"
+    - git clone git@gitlab.com:${CI_PROJECT_PATH}.git
+    - cd $CI_PROJECT_NAME
+    - git checkout main
+
+    # Bump version
+    - ./scripts/version.sh bump
+    - git add .env
+    - git commit -m "Bump version"    
+
+    # Push changes
+    - git push -u origin main -o ci.skip || git pull --no-rebase && git push -u origin main -o ci.skip
