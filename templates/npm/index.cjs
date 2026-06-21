@@ -10,12 +10,14 @@ const DIST_NAME = pkg.name;
 const NAME = pkg.productName || pkg.name;
 
 const PLATFORMS = [
-  { platform: 'linux',  arch: 'x64',   goos: 'linux',   goarch: 'amd64' },
-  { platform: 'linux',  arch: 'arm64',  goos: 'linux',   goarch: 'arm64' },
-  { platform: 'darwin', arch: 'x64',   goos: 'darwin',  goarch: 'amd64' },
-  { platform: 'darwin', arch: 'arm64',  goos: 'darwin',  goarch: 'arm64' },
-  { platform: 'win32',  arch: 'x64',   goos: 'windows', goarch: 'amd64' },
-  { platform: 'win32',  arch: 'arm64',  goos: 'windows', goarch: 'arm64' },
+  { platform: 'linux',   arch: 'x64',   goos: 'linux',   goarch: 'amd64' },
+  { platform: 'linux',   arch: 'arm64',  goos: 'linux',   goarch: 'arm64' },
+  { platform: 'darwin',  arch: 'x64',   goos: 'darwin',  goarch: 'amd64' },
+  { platform: 'darwin',  arch: 'arm64',  goos: 'darwin',  goarch: 'arm64' },
+  { platform: 'win32',   arch: 'x64',   goos: 'windows', goarch: 'amd64' },
+  { platform: 'win32',   arch: 'arm64',  goos: 'windows', goarch: 'arm64' },
+  { platform: 'freebsd', arch: 'x64',   goos: 'freebsd', goarch: 'amd64' },
+  { platform: 'freebsd', arch: 'arm64',  goos: 'freebsd', goarch: 'arm64' },
 ];
 
 function getBinaryName() {
