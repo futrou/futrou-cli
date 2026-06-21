@@ -12,10 +12,4 @@ else
     exit 1
 fi
 
-# Install garble if doesn't exist
-if ! command -v garble &> /dev/null; then
-    echo "Installing garble..."
-    go install mvdan.cc/garble@v0.15.0
-fi
-
 echo "✅ Installation complete!"
