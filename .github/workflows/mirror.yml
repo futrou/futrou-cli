@@ -1,0 +1,23 @@
+name: Mirror
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  mirror:
+    name: Mirror to GitLab
+    runs-on: ubuntu-slim
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Push to GitLab
+        run: |
+          git remote add gitlab git@gitlab.com:futrou/futrou-cli.git
+          git push gitlab main --force
+        env:
+          GIT_SSH_COMMAND: "ssh -i ${{ secrets.GITLAB_SSH_KEY }} -o StrictHostKeyChecking=no"
