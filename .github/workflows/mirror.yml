@@ -3,6 +3,7 @@ name: Mirror
 on:
   push:
     branches: [main]
+    tags: ['**']
 
 
 jobs:
@@ -31,22 +32,24 @@ jobs:
       - name: Mirror to gitlab.com/futrou/futrou-cli.git
         run: |
           git remote add gitlab git@gitlab.com:futrou/futrou-cli.git
+          git fetch gitlab --tags
+
           LOCAL=$(git rev-parse HEAD)
           REMOTE=$(git ls-remote gitlab refs/heads/main | awk '{print $1}')
           if [ "$LOCAL" = "$REMOTE" ]; then
             echo "Already in sync, skipping push."
-            exit 0
-          fi
-          echo "Local:  $LOCAL"
-          echo "Remote: $REMOTE"
-          if ! git push gitlab main; then
-            git fetch gitlab main
-            GITLAB_HEAD=$(git rev-parse FETCH_HEAD)
-            if git merge-base --is-ancestor "$GITLAB_HEAD" HEAD; then
-              # GitLab is behind local — should push cleanly
-              git push gitlab main
-            else
-              # Histories are distinct — rebase and push, force push as last resort
-              git pull gitlab main --rebase && git push gitlab main || git push gitlab main --force
+          else
+            echo "Local:  $LOCAL"
+            echo "Remote: $REMOTE"
+            if ! git push gitlab main; then
+              git fetch gitlab main
+              GITLAB_HEAD=$(git rev-parse FETCH_HEAD)
+              if git merge-base --is-ancestor "$GITLAB_HEAD" HEAD; then
+                git push gitlab main
+              else
+                git pull gitlab main --rebase && git push gitlab main || git push gitlab main --force
+              fi
             fi
           fi
+
+          git push gitlab --tags
