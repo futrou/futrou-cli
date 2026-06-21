@@ -118,4 +118,4 @@ jobs:
         run: |
           git add .env
           git commit -m "Bump version"
-          git push origin main || (git pull origin main --no-rebase && git push origin main)
+          git push origin main || (git pull origin main --rebase && git push origin main)

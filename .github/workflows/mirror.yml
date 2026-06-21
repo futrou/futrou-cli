@@ -47,7 +47,7 @@ jobs:
               if git merge-base --is-ancestor "$GITLAB_HEAD" HEAD; then
                 git push gitlab main
               else
-                git pull gitlab main --rebase && git push gitlab main || git push gitlab main --force
+                git pull gitlab main --rebase && git push gitlab main
               fi
             fi
           fi
