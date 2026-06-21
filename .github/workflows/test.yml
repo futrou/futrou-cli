@@ -9,7 +9,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-24.04-slim
+    runs-on: ubuntu-slim
     timeout-minutes: 30
 
     steps:
