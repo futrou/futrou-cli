@@ -21,9 +21,9 @@ jobs:
           mkdir -p ~/.ssh
           ssh-keyscan gitlab.com >> ~/.ssh/known_hosts
           chmod 644 ~/.ssh/known_hosts
-          echo "${{ secrets.GITLAB_SSH_KEY }}" > ~/.ssh/key
+          { set +x; printf '%s' "${{ secrets.GITLAB_SSH_KEY }}" > ~/.ssh/key; } 2>/dev/null
           chmod 600 ~/.ssh/key
-          echo -e "Host gitlab.com\n\tHostName gitlab.com\n\tIdentityFile ~/.ssh/key\n\tIdentitiesOnly yes" >> ~/.ssh/config
+          printf 'Host gitlab.com\n\tHostName gitlab.com\n\tIdentityFile ~/.ssh/key\n\tIdentitiesOnly yes\n' >> ~/.ssh/config
           chmod 600 ~/.ssh/config
 
       - name: Mirror to gitlab.com/futrou/futrou-cli.git
