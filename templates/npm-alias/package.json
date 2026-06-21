@@ -1,0 +1,25 @@
+{
+  "name": "futrou-cli",
+  "productName": "Futrou CLI",
+  "version": "1.0.0",
+  "description": "Futrou CLI alias — runs npx futrou with the same arguments.",
+  "bin": {
+    "futrou": "./index.cjs",
+    "futrou-cli": "./index.cjs"
+  },
+  "types": "./index.d.ts",
+  "engines": {
+    "node": ">=16"
+  },
+  "keywords": [
+    "futrou",
+    "cloud",
+    "deploy",
+    "cli"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/futrou/futrou-cli.git"
+  }
+}
