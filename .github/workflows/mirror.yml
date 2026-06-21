@@ -17,13 +17,11 @@ jobs:
           fetch-depth: 0
 
       - name: Setup SSH
-        env:
-          GITLAB_SSH_KEY: ${{ secrets.GITLAB_SSH_KEY }}
         run: |
           mkdir -p ~/.ssh
           ssh-keyscan gitlab.com >> ~/.ssh/known_hosts
           chmod 644 ~/.ssh/known_hosts
-          echo "$GITLAB_SSH_KEY" > ~/.ssh/key
+          echo "${{ secrets.GITLAB_SSH_KEY }}" > ~/.ssh/key
           chmod 600 ~/.ssh/key
           echo -e "Host gitlab.com\n\tHostName gitlab.com\n\tIdentityFile ~/.ssh/key\n\tIdentitiesOnly yes" >> ~/.ssh/config
           chmod 600 ~/.ssh/config
