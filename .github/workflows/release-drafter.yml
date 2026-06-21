@@ -26,9 +26,9 @@ jobs:
             COMMITS=$(git log --pretty=format:"- %s (%h) @%an" "${LAST_TAG}..HEAD")
           fi
 
-          BODY="**Changes**
+          BODY="## Changes
 
-          ${COMMITS}"
+${COMMITS}"
 
           DRAFT_ID=$(gh api repos/${{ github.repository }}/releases \
             --jq '.[] | select(.draft == true) | .id' | head -1)
