@@ -9,6 +9,7 @@ jobs:
     name: Mirror to GitLab
     runs-on: ubuntu-slim
     timeout-minutes: 10
+    environment: main
 
     steps:
       - uses: actions/checkout@v4
