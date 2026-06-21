@@ -89,7 +89,7 @@ jobs:
           files: dist/*
 
       - name: Publish to npm
-        run: npm publish dist-npm --provenance --access public --tag=${{ steps.npm_tag.outputs.tag }}
+        run: cd dist-npm && npm publish --provenance --access public --tag=${{ steps.npm_tag.outputs.tag }}
 
   bump-version:
     name: Bump version
