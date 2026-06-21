@@ -8,7 +8,7 @@ const NAME = pkg.productName || pkg.name;
 
 const result = spawnSync(
   'npx',
-  ['futrou', '--yes', ...process.argv.slice(2)],
+  ['--yes', 'futrou', ...process.argv.slice(2)],
   { stdio: 'inherit', shell: true }
 );
 
