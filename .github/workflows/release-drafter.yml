@@ -1,26 +1,36 @@
 name: Release Drafter
 
 on:
-    push:
-        branches:
-            - main
+  push:
+    branches: [main]
 
 permissions:
-    contents: read
+  contents: write
 
 jobs:
-    update_release_draft:
-        permissions:
-            # write permission is required to create a github release
-            contents: write
-            # write permission is required for autolabeler
-            # otherwise, read permission is required at least
-            pull-requests: read
-        runs-on: ubuntu-slim
-        steps:
-            - uses: release-drafter/release-drafter@v7
-              with:
-                  config-name: release-drafter.yml
-                  disable-autolabeler: true
-              env:
-                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  draft:
+    runs-on: ubuntu-slim
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Draft release with commits since last tag
+        run: |
+          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          if [ -z "$LAST_TAG" ]; then
+            COMMITS=$(git log --pretty=format:"- %s (%h)" HEAD)
+          else
+            COMMITS=$(git log --pretty=format:"- %s (%h)" "${LAST_TAG}..HEAD")
+          fi
+
+          BODY="**Changes**
+
+          ${COMMITS}"
+
+          gh release delete draft --yes 2>/dev/null || true
+          gh release create draft --draft --title "Draft" --notes "${BODY}"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
