@@ -1,4 +1,4 @@
-* @thehansys
+* @thehansys @futrou-bot
 
 # Don't automatically assign reviewers for automated MRs.
 go.mod
