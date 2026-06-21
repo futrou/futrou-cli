@@ -6,6 +6,11 @@ on:
     tags-ignore: ['v*']
   pull_request:
 
+env:
+  DEBIAN_FRONTEND: noninteractive
+  GO_VERSION: '1.24.x'
+  NODE_VERSION: '24.x'
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -20,7 +25,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version: ${{ env.GO_VERSION }}
           cache: true
 
       - name: Install dependencies
