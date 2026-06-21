@@ -38,4 +38,4 @@ jobs:
           fi
           echo "Local:  $LOCAL"
           echo "Remote: $REMOTE"
-          git push gitlab main --force
+          git push gitlab main || (git pull gitlab main --rebase && git push gitlab main) || git push gitlab main --force
