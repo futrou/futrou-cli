@@ -45,4 +45,9 @@ echo "-------------------------"
 
 cp install.sh install.ps1 "$DIST_DIR/"
 
+# Generate checksums for all binaries
+echo "Generating checksums..."
+(cd "$DIST_DIR" && sha256sum $DIST_NAME-* > checksums.txt)
+echo "  + checksums.txt"
+
 echo "✅ Build complete!"
