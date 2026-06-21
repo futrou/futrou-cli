@@ -14,7 +14,6 @@ on:
 env:
   DEBIAN_FRONTEND: noninteractive
   NODE_VERSION: '24.x'
-  NPM_REGISTRY: '//registry.npmjs.org'
 
 permissions:
   id-token: write
@@ -38,10 +37,10 @@ jobs:
           go-version-file: go.mod
           cache: false
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v3
         with:
           node-version: ${{ env.NODE_VERSION }}
-          registry-url: https:${{ env.NPM_REGISTRY }}
+          registry-url: 'https://registry.npmjs.org'
 
       - name: Configure git
         run: |
