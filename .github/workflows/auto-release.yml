@@ -30,29 +30,23 @@ jobs:
         run: |
           LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
 
-          # Check for existing draft release
-          DRAFT=$(gh api repos/${{ github.repository }}/releases \
-            --jq '[.[] | select(.draft == true)] | length')
-
           if [ -z "$LAST_TAG" ]; then
-            # No tags yet — release needed
             echo "needed=true" >> $GITHUB_OUTPUT
             echo "reason=no previous release" >> $GITHUB_OUTPUT
           else
-            # Check if there are commits newer than 14 days since last tag
-            CUTOFF=$(date -d '14 days ago' +%s)
-            LAST_COMMIT_DATE=$(git log -1 --format="%ct" "${LAST_TAG}..HEAD" 2>/dev/null || echo "0")
+            CUTOFF=$(date -d '7 days ago' +%s)
+            OLDEST_COMMIT_DATE=$(git log --format="%ct" "${LAST_TAG}..HEAD" | tail -1)
             COMMIT_COUNT=$(git rev-list --count "${LAST_TAG}..HEAD")
 
             if [ "$COMMIT_COUNT" -eq 0 ]; then
               echo "needed=false" >> $GITHUB_OUTPUT
               echo "reason=no commits since last release" >> $GITHUB_OUTPUT
-            elif [ "$DRAFT" -gt 0 ] || [ "$LAST_COMMIT_DATE" -lt "$CUTOFF" ]; then
+            elif [ -n "$OLDEST_COMMIT_DATE" ] && [ "$OLDEST_COMMIT_DATE" -lt "$CUTOFF" ]; then
               echo "needed=true" >> $GITHUB_OUTPUT
-              echo "reason=draft release exists or commits older than 14 days" >> $GITHUB_OUTPUT
+              echo "reason=commits older than 7 days since last release" >> $GITHUB_OUTPUT
             else
               echo "needed=false" >> $GITHUB_OUTPUT
-              echo "reason=commits are recent, no action needed" >> $GITHUB_OUTPUT
+              echo "reason=all commits are recent, no action needed" >> $GITHUB_OUTPUT
             fi
           fi
         env:
