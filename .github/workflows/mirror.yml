@@ -43,10 +43,10 @@ jobs:
             git fetch gitlab main
             GITLAB_HEAD=$(git rev-parse FETCH_HEAD)
             if git merge-base --is-ancestor "$GITLAB_HEAD" HEAD; then
-              # GitLab is behind — safe to force push
-              git push gitlab main --force
+              # GitLab is behind local — should push cleanly
+              git push gitlab main
             else
-              # Histories diverged — try rebase first
+              # Histories are distinct — rebase and push, force push as last resort
               git pull gitlab main --rebase && git push gitlab main || git push gitlab main --force
             fi
           fi
