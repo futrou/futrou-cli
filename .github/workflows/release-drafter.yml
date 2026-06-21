@@ -21,9 +21,9 @@ jobs:
         run: |
           LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
           if [ -z "$LAST_TAG" ]; then
-            COMMITS=$(git log --pretty=format:"- %s (%h) @%an" HEAD)
+            COMMITS=$(git log --pretty=format:"- %s (%h) [%an](mailto:%ae)" HEAD)
           else
-            COMMITS=$(git log --pretty=format:"- %s (%h) @%an" "${LAST_TAG}..HEAD")
+            COMMITS=$(git log --pretty=format:"- %s (%h) [%an](mailto:%ae)" "${LAST_TAG}..HEAD")
           fi
 
           printf "## Changes\n\n%s" "${COMMITS}" > /tmp/body.md
