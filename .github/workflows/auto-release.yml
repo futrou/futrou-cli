@@ -1,0 +1,87 @@
+name: Auto Release
+
+on:
+  schedule:
+    - cron: '0 9 * * *'  # daily at 9am UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  auto-release:
+    name: Auto Release
+    runs-on: ubuntu-slim
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git
+        run: |
+          git config user.name "Futrou Bot"
+          git config user.email "bot@futrou.com"
+
+      - name: Check if release is needed
+        id: check
+        run: |
+          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+
+          # Check for existing draft release
+          DRAFT=$(gh api repos/${{ github.repository }}/releases \
+            --jq '[.[] | select(.draft == true)] | length')
+
+          if [ -z "$LAST_TAG" ]; then
+            # No tags yet — release needed
+            echo "needed=true" >> $GITHUB_OUTPUT
+            echo "reason=no previous release" >> $GITHUB_OUTPUT
+          else
+            # Check if there are commits newer than 14 days since last tag
+            CUTOFF=$(date -d '14 days ago' +%s)
+            LAST_COMMIT_DATE=$(git log -1 --format="%ct" "${LAST_TAG}..HEAD" 2>/dev/null || echo "0")
+            COMMIT_COUNT=$(git rev-list --count "${LAST_TAG}..HEAD")
+
+            if [ "$COMMIT_COUNT" -eq 0 ]; then
+              echo "needed=false" >> $GITHUB_OUTPUT
+              echo "reason=no commits since last release" >> $GITHUB_OUTPUT
+            elif [ "$DRAFT" -gt 0 ] || [ "$LAST_COMMIT_DATE" -lt "$CUTOFF" ]; then
+              echo "needed=true" >> $GITHUB_OUTPUT
+              echo "reason=draft release exists or commits older than 14 days" >> $GITHUB_OUTPUT
+            else
+              echo "needed=false" >> $GITHUB_OUTPUT
+              echo "reason=commits are recent, no action needed" >> $GITHUB_OUTPUT
+            fi
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Calculate next patch version
+        id: version
+        if: steps.check.outputs.needed == 'true'
+        run: |
+          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+          VERSION=${LAST_TAG#v}
+          MAJOR=$(echo "$VERSION" | cut -d. -f1)
+          MINOR=$(echo "$VERSION" | cut -d. -f2)
+          PATCH=$(echo "$VERSION" | cut -d. -f3 | cut -d- -f1)
+          NEXT="v${MAJOR}.${MINOR}.$((PATCH + 1))"
+          echo "tag=${NEXT}" >> $GITHUB_OUTPUT
+
+      - name: Create and push tag
+        if: steps.check.outputs.needed == 'true'
+        run: |
+          echo "Releasing ${{ steps.version.outputs.tag }} — ${{ steps.check.outputs.reason }}"
+          git tag ${{ steps.version.outputs.tag }}
+          git push origin ${{ steps.version.outputs.tag }}
+
+      - name: Create GitHub Release
+        if: steps.check.outputs.needed == 'true'
+        run: |
+          gh release create ${{ steps.version.outputs.tag }} \
+            --title "Release ${{ steps.version.outputs.tag }}" \
+            --generate-notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
