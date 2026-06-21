@@ -6,7 +6,7 @@ Futrou CLI is a command-line tool for deploying and managing resources on Futrou
 - **GoLang 1.25+**
 
 ## Supported platforms
-- linux/amd64, linux/arm64, darwin/amd64, darwin/arm64, windows/amd64, windows/arm64
+- linux/amd64, linux/arm64, darwin/amd64, darwin/arm64, windows/amd64, windows/arm64, freebsd/amd64, freebsd/arm64
 
 ## Installation
 
