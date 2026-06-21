@@ -41,15 +41,7 @@ jobs:
           else
             echo "Local:  $LOCAL"
             echo "Remote: $REMOTE"
-            if ! git push gitlab main; then
-              git fetch gitlab main
-              GITLAB_HEAD=$(git rev-parse FETCH_HEAD)
-              if git merge-base --is-ancestor "$GITLAB_HEAD" HEAD; then
-                git push gitlab main
-              else
-                git pull gitlab main --rebase && git push gitlab main
-              fi
-            fi
+            git push gitlab main
           fi
 
           git push gitlab --tags
