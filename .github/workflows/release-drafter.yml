@@ -26,9 +26,12 @@ jobs:
             COMMITS=$(git log --pretty=format:"- %s (%h) @%an" "${LAST_TAG}..HEAD")
           fi
 
-          BODY="## Changes
+          printf "## Changes\n\n%s" "${COMMITS}" > /tmp/body.md
 
-${COMMITS}"
+          DRAFT_ID=$(gh api repos/${{ github.repository }}/releases \
+            --jq '.[] | select(.draft == true) | .id' | head -1)
+
+          BODY=$(cat /tmp/body.md)
 
           DRAFT_ID=$(gh api repos/${{ github.repository }}/releases \
             --jq '.[] | select(.draft == true) | .id' | head -1)
@@ -38,7 +41,8 @@ ${COMMITS}"
               -X PATCH -f body="${BODY}" > /dev/null
           else
             gh api repos/${{ github.repository }}/releases \
-              -X POST -f tag_name="" -f name="Draft" -f body="${BODY}" -F draft=true > /dev/null
+              -X POST -f tag_name="" -f name="Draft" -F draft=true \
+              -f body="${BODY}" > /dev/null
           fi
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
