@@ -117,5 +117,5 @@ jobs:
       - name: Commit and push
         run: |
           git add .env
-          git commit -m "Bump version [skip ci]"
+          git commit -m "Bump version"
           git push origin main || (git pull origin main --no-rebase && git push origin main)
