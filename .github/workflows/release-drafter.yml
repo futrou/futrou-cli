@@ -35,10 +35,10 @@ jobs:
 
           if [ -n "$DRAFT_ID" ]; then
             gh api repos/${{ github.repository }}/releases/${DRAFT_ID} \
-              -X PATCH -f body="${BODY}"
+              -X PATCH -f body="${BODY}" > /dev/null
           else
             gh api repos/${{ github.repository }}/releases \
-              -X POST -f tag_name="" -f name="Draft" -f body="${BODY}" -F draft=true
+              -X POST -f tag_name="" -f name="Draft" -f body="${BODY}" -F draft=true > /dev/null
           fi
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
