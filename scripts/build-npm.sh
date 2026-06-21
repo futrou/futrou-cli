@@ -41,24 +41,6 @@ sed -i "s/\"name\": \".*\"/\"name\": \"$DIST_NAME\"/" "$NPM_DIR/package.json"
 
 echo "-------------------------"
 echo "✅ npm package ready in $NPM_DIR/"
-
-# Build alias package (no binaries — delegates to npx futrou)
-ALIAS_DIR="dist-npm-alias"
-echo ""
-echo "Packaging $NAME $VERSION alias for npm..."
-echo "-------------------------"
-
-rm -rf "$ALIAS_DIR"
-mkdir -p "$ALIAS_DIR"
-
-cp -r templates/npm-alias/. "$ALIAS_DIR/"
-cp LICENSE "$ALIAS_DIR/LICENSE"
-
-sed -i "s/\"version\": \".*\"/\"version\": \"$VERSION\"/" "$ALIAS_DIR/package.json"
-
-echo "-------------------------"
-echo "✅ npm alias package ready in $ALIAS_DIR/"
 echo ""
 echo "To publish:"
 echo "  cd $NPM_DIR && npm publish"
-echo "  cd $ALIAS_DIR && npm publish"
