@@ -27,7 +27,7 @@ defaults:
 jobs:
   release:
     name: Release
-    runs-on: ubuntu-slim
+    runs-on: ubuntu-latest
     timeout-minutes: 30
 
     steps:
@@ -94,7 +94,7 @@ jobs:
 
   bump-version:
     name: Bump version
-    runs-on: ubuntu-slim
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     needs: release
     if: github.event_name == 'release'
