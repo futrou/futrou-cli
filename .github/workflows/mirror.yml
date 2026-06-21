@@ -15,9 +15,17 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Push to GitLab
-        run: |
-          git remote add gitlab git@gitlab.com:futrou/futrou-cli.git
-          git push gitlab main --force
+      - name: Mirror to GitLab
         env:
           GIT_SSH_COMMAND: "ssh -i ${{ secrets.GITLAB_SSH_KEY }} -o StrictHostKeyChecking=no"
+        run: |
+          git remote add gitlab git@gitlab.com:futrou/futrou-cli.git
+          LOCAL=$(git rev-parse HEAD)
+          REMOTE=$(git ls-remote gitlab refs/heads/main | awk '{print $1}')
+          if [ "$LOCAL" = "$REMOTE" ]; then
+            echo "Already in sync, skipping push."
+            exit 0
+          fi
+          echo "Local:  $LOCAL"
+          echo "Remote: $REMOTE"
+          git push gitlab main
