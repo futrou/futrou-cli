@@ -39,4 +39,4 @@ jobs:
           fi
           echo "Local:  $LOCAL"
           echo "Remote: $REMOTE"
-          git push gitlab main
+          git push gitlab main || (git pull origin main --no-rebase && git push origin main)
