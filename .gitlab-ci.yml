@@ -23,6 +23,7 @@ mirror:
         - printf 'Host github.com\n\tHostName github.com\n\tIdentityFile ~/.ssh/key\n\tIdentitiesOnly yes\n' >> ~/.ssh/config
         - chmod 600 ~/.ssh/config
         - git remote add github git@github.com:futrou/futrou-cli.git
+        - git fetch --tags
         - git fetch github --tags
         - LOCAL=$(git rev-parse HEAD)
         - REMOTE=$(git ls-remote github refs/heads/main | awk '{print $1}')
