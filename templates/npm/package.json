@@ -27,6 +27,7 @@
     "deploy",
     "cli"
   ],
+  "homepage": "https://futrou.com",
   "license": "MIT",
   "repository": {
     "type": "git",
