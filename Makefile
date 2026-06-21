@@ -20,7 +20,7 @@ test:
 	@go test ./src/...
 
 version:
-	@$(SCRIPTS_DIR)/version.sh
+	@$(SCRIPTS_DIR)/version.sh $(filter-out version,$(MAKECMDGOALS))
 
 # Forward all extra targets after 'start' as arguments to the binary.
 # Usage: make start login  OR  make start ARGS="serverlets list"
