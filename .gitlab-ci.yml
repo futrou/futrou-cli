@@ -27,12 +27,7 @@ mirror:
         - git fetch github --tags
         - LOCAL=$(git rev-parse HEAD)
         - REMOTE=$(git ls-remote github refs/heads/main | awk '{print $1}')
-        - |
-          if [ "$LOCAL" = "$REMOTE" ]; then
-            echo "Already in sync, skipping push."
-            exit 0
-          fi
-        - echo "Local:  $LOCAL"
-        - echo "Remote: $REMOTE"
+        - echo "Local $LOCAL Remote $REMOTE"
+        - "[ \"$LOCAL\" = \"$REMOTE\" ] && echo 'Already in sync.' && exit 0 || true"
         - git push github HEAD:main || (git pull github main --rebase && git push github HEAD:main)
         - git push github --tags
