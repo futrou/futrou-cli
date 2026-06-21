@@ -20,11 +20,8 @@ mirror:
         - mkdir -p ~/.ssh
         - ssh-keyscan github.com >> ~/.ssh/known_hosts
         - chmod 644 ~/.ssh/known_hosts
-        - printf '%b' "$GITHUB_SSH_KEY" > ~/.ssh/key
+        - printf '%b\n' "$GITHUB_SSH_KEY" > ~/.ssh/key
         - chmod 600 ~/.ssh/key
-        - wc -l ~/.ssh/key
-        - head -1 ~/.ssh/key
-        - tail -1 ~/.ssh/key
         - printf 'Host github.com\n\tHostName github.com\n\tIdentityFile ~/.ssh/key\n\tIdentitiesOnly yes\n' >> ~/.ssh/config
         - chmod 600 ~/.ssh/config
         - git remote add github git@github.com:futrou/futrou-cli.git
