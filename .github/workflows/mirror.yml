@@ -39,4 +39,14 @@ jobs:
           fi
           echo "Local:  $LOCAL"
           echo "Remote: $REMOTE"
-          git push gitlab main || (git pull gitlab main --rebase && git push gitlab main) || git push gitlab main --force
+          if ! git push gitlab main; then
+            git fetch gitlab main
+            GITLAB_HEAD=$(git rev-parse FETCH_HEAD)
+            if git merge-base --is-ancestor "$GITLAB_HEAD" HEAD; then
+              # GitLab is behind — safe to force push
+              git push gitlab main --force
+            else
+              # Histories diverged — try rebase first
+              git pull gitlab main --rebase && git push gitlab main || git push gitlab main --force
+            fi
+          fi
