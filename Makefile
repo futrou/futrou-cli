@@ -1,6 +1,6 @@
 SCRIPTS_DIR := ./scripts
 
-.PHONY: default install dev build build-npm release generate test version start
+.PHONY: default install dev build generate test version start
 
 default: install dev
 
@@ -12,12 +12,7 @@ dev:
 
 build:
 	@$(SCRIPTS_DIR)/build.sh
-
-build-npm:
-	@$(SCRIPTS_DIR)/build-npm.sh
-
-release: build build-npm
-
+	
 generate:
 	@$(SCRIPTS_DIR)/generate.sh
 

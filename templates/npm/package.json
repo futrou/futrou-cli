@@ -4,8 +4,10 @@
   "version": "1.0.0",
   "description": "Futrou CLI - Deploy and manage Futrou Cloud from your terminal.",
   "bin": {
-    "futrou": "./index.cjs"
+    "futrou": "./index.cjs",
+    "futrou-cli": "./index.cjs"
   },
+  "types": "./index.d.ts",
   "os": [
     "linux",
     "darwin",
@@ -27,6 +29,6 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/futrou/futrou-cli"
+    "url": "git+https://github.com/futrou/futrou-cli.git"
   }
 }

@@ -35,8 +35,9 @@ cp install.sh install.ps1 "$NPM_DIR/"
 # Copy license
 cp LICENSE "$NPM_DIR/LICENSE"
 
-# Stamp version from .env into package.json
+# Stamp version and name from .env into package.json
 sed -i "s/\"version\": \".*\"/\"version\": \"$VERSION\"/" "$NPM_DIR/package.json"
+sed -i "s/\"name\": \".*\"/\"name\": \"$DIST_NAME\"/" "$NPM_DIR/package.json"
 
 echo "-------------------------"
 echo "✅ npm package ready in $NPM_DIR/"
