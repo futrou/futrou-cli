@@ -30,7 +30,15 @@ jobs:
 
           ${COMMITS}"
 
-          gh release delete draft --yes 2>/dev/null || true
-          gh release create draft --draft --title "Draft" --notes "${BODY}"
+          DRAFT_ID=$(gh api repos/${{ github.repository }}/releases \
+            --jq '.[] | select(.draft == true) | .id' | head -1)
+
+          if [ -n "$DRAFT_ID" ]; then
+            gh api repos/${{ github.repository }}/releases/${DRAFT_ID} \
+              -X PATCH -f body="${BODY}"
+          else
+            gh api repos/${{ github.repository }}/releases \
+              -X POST -f tag_name="" -f name="Draft" -f body="${BODY}" -F draft=true
+          fi
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
