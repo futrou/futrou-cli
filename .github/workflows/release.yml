@@ -1,0 +1,121 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version_tag:
+        description: 'NPM version tag (e.g., latest, next)'
+        required: true
+        type: string
+        default: 'next'
+
+env:
+  DEBIAN_FRONTEND: noninteractive
+  NODE_VERSION: '24.x'
+  NPM_REGISTRY: '//registry.npmjs.org'
+
+permissions:
+  id-token: write
+  contents: write
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  release:
+    name: Release
+    runs-on: ubuntu-24.04-slim
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          registry-url: https:${{ env.NPM_REGISTRY }}
+          cache: 'npm'
+
+      - name: Configure git
+        run: |
+          git config --global --add safe.directory $(pwd)
+          git config --global user.email "bot@futrou.com"
+          git config --global user.name "Futrou Bot"
+
+      - name: Update npm
+        run: npm install -g npm@latest
+
+      - name: Determine NPM tag
+        id: npm_tag
+        run: |
+          if [ "${{ github.event_name }}" == "release" ]; then
+            echo "tag=latest" >> $GITHUB_OUTPUT
+          else
+            echo "tag=${{ inputs.version_tag || 'next' }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Set version from release tag
+        if: steps.npm_tag.outputs.tag == 'latest'
+        run: ./scripts/version.sh set ${GITHUB_REF_NAME#v}
+
+      - name: Set version to tag + commit hash + timestamp
+        if: steps.npm_tag.outputs.tag != 'latest'
+        run: |
+          TAG="${{ steps.npm_tag.outputs.tag }}"
+          COMMIT_HASH=$(echo "${{ github.sha }}" | cut -c1-7)
+          TIMESTAMP=$(date +%s)
+          ./scripts/version.sh tag "${TAG}-${COMMIT_HASH}-${TIMESTAMP}"
+
+      - name: Install dependencies
+        run: make install
+
+      - name: Build all platforms
+        run: make build
+
+      - name: Test before release
+        run: make test
+
+      - name: Create GitHub Release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: dist/*
+
+      - name: Publish to npm
+        run: npm publish dist-npm --provenance --access public --tag=${{ steps.npm_tag.outputs.tag }}
+
+  bump-version:
+    name: Bump version
+    runs-on: ubuntu-24.04-slim
+    timeout-minutes: 30
+    needs: release
+    if: github.event_name == 'release'
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          ref: main
+
+      - name: Configure git
+        run: |
+          git config user.name "Futrou Bot"
+          git config user.email "bot@futrou.com"
+
+      - name: Bump patch version
+        run: ./scripts/version.sh bump
+
+      - name: Commit and push
+        run: |
+          git add .env
+          git commit -m "Bump version [skip ci]"
+          git push origin main || (git pull origin main --no-rebase && git push origin main)
