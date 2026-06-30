@@ -167,7 +167,12 @@ chmod +x "$exe"
 installed_version=$("$exe" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)
 [[ -z $installed_version ]] && error "Downloaded binary failed to run"
 
-success "Futrou CLI v$installed_version installed to $exe"
+case $action in
+  Upgrading)   action_past="upgraded"   ;;
+  Downgrading) action_past="downgraded" ;;
+  *)           action_past="installed"  ;;
+esac
+success "Futrou CLI v$installed_version $action_past to $exe"
 
 # ---------------------------------------------------------------------------
 # PATH setup (skip if already in PATH)
