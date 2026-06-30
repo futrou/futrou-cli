@@ -208,7 +208,11 @@ case $action in
   Downgrading) action_past="downgraded" ;;
   *)           action_past="installed"  ;;
 esac
-success "Futrou CLI v$installed_version $action_past to $(tildify "$exe")"
+if [[ -n "$current_version" && "$action" != "Installing" ]]; then
+  success "Futrou CLI v$current_version $action_past v$installed_version"
+else
+  success "Futrou CLI v$installed_version $action_past"
+fi
 
 # ---------------------------------------------------------------------------
 # PATH setup (skip if already in PATH)
