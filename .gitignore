@@ -3,7 +3,7 @@ dist/
 dist-npm/
 dist-*
 bin/
-futrou/
+/futrou/
 main/
 
 # Air temp directory
