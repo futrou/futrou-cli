@@ -113,19 +113,19 @@ jobs:
           TAG="v${VERSION}"
           TITLE="v${VERSION}"
 
-          # If a release for this tag already exists (published or draft), update it
+          # If a release for this tag already exists, ensure it's a draft for now
           EXISTING_ID=$(gh api repos/$GITHUB_REPOSITORY/releases --jq ".[] | select(.tag_name == \"$TAG\") | .id" | head -1)
           if [ -n "$EXISTING_ID" ]; then
-            echo "Release $TAG already exists (id=$EXISTING_ID) — updating"
+            echo "Release $TAG already exists (id=$EXISTING_ID) — marking as draft"
             gh api repos/$GITHUB_REPOSITORY/releases/$EXISTING_ID \
               --method PATCH \
               --field tag_name="$TAG" \
               --field name="$TITLE" \
-              --field draft=false
+              --field draft=true
             exit 0
           fi
 
-          # Use existing untagged draft (release-drafter creates these), or create fresh
+          # Use existing untagged draft (release-drafter creates these), or create fresh draft
           DRAFT_ID=$(gh api repos/$GITHUB_REPOSITORY/releases --jq '.[] | select(.draft and .tag_name == "") | .id' | head -1)
           if [ -n "$DRAFT_ID" ]; then
             echo "Untagged draft found (id=$DRAFT_ID) — updating to $TITLE"
@@ -133,12 +133,13 @@ jobs:
               --method PATCH \
               --field tag_name="$TAG" \
               --field name="$TITLE" \
-              --field draft=false
+              --field draft=true
           else
-            echo "Creating new release $TITLE"
+            echo "Creating draft release $TITLE"
             gh release create "$TAG" \
               --title "$TITLE" \
-              --generate-notes
+              --generate-notes \
+              --draft
           fi
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

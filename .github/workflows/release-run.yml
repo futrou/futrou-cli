@@ -87,7 +87,20 @@ jobs:
         with:
           tag_name: ${{ inputs.release_tag != '' && format('v{0}', inputs.release_tag) || github.ref_name }}
           generate_release_notes: true
+          draft: true
           files: dist/*
+
+      - name: Publish release
+        if: inputs.version_tag == 'latest'
+        run: |
+          TAG="${{ inputs.release_tag != '' && format('v{0}', inputs.release_tag) || github.ref_name }}"
+          RELEASE_ID=$(gh api repos/$GITHUB_REPOSITORY/releases --jq ".[] | select(.tag_name == \"$TAG\") | .id" | head -1)
+          gh api repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID \
+            --method PATCH \
+            --field draft=false
+          echo "Published release $TAG"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Publish to npm
         run: cd dist-npm && npm publish --provenance --access public --tag=${{ inputs.version_tag }}
