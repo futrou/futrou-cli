@@ -111,7 +111,11 @@ if (-not $downloaded) {
     Invoke-RestMethod -Uri $URL -OutFile $TmpExe
     $downloaded = $true
   } catch {
-    Write-Fail "Could not download $URL`n$_"
+    if ($Version -eq "latest") {
+      Write-Fail "Failed to download latest release. Try again later.`n  $URL"
+    } else {
+      Write-Fail "Version $Version not found or binary not available for $Target.`n  $URL"
+    }
   }
 }
 
