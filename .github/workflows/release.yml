@@ -82,18 +82,18 @@ jobs:
 
           INPUT_VERSION="${{ github.event.inputs.version }}"
           if [ -n "$INPUT_VERSION" ]; then
-            NEXT="v${INPUT_VERSION#v}"
+            NEXT="${INPUT_VERSION#v}"
           else
             ENV_VERSION=$(grep '^VERSION=' .env | cut -d= -f2 | tr -d '"' | tr -d "'")
             if [ -n "$ENV_VERSION" ]; then
-              NEXT="v${ENV_VERSION}"
+              NEXT="${ENV_VERSION#v}"
             else
               LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
               VERSION=${LAST_TAG#v}
               MAJOR=$(echo "$VERSION" | cut -d. -f1)
               MINOR=$(echo "$VERSION" | cut -d. -f2)
               PATCH=$(echo "$VERSION" | cut -d. -f3 | cut -d- -f1)
-              NEXT="v${MAJOR}.${MINOR}.$((PATCH + 1))"
+              NEXT="${MAJOR}.${MINOR}.$((PATCH + 1))"
             fi
           fi
           echo "tag=${NEXT}" >> $GITHUB_OUTPUT
@@ -101,14 +101,17 @@ jobs:
       - name: Create and push tag
         if: steps.check.outputs.needed == 'true' && github.event_name != 'release'
         run: |
-          echo "Releasing ${{ steps.version.outputs.tag }} — ${{ steps.check.outputs.reason }}"
-          git tag ${{ steps.version.outputs.tag }}
-          git push origin ${{ steps.version.outputs.tag }}
+          TAG="v${{ steps.version.outputs.tag }}"
+          echo "Releasing $TAG — ${{ steps.check.outputs.reason }}"
+          git tag "$TAG"
+          git push origin "$TAG"
 
       - name: Create GitHub Release
         if: steps.check.outputs.needed == 'true' && github.event_name != 'release'
         run: |
-          TAG="${{ steps.version.outputs.tag }}"
+          VERSION="${{ steps.version.outputs.tag }}"
+          TAG="v${VERSION}"
+          TITLE="v${VERSION}"
 
           # If a published release for this tag already exists, skip
           EXISTING=$(gh release view "$TAG" --json isDraft -q '.isDraft' 2>/dev/null || echo "")
@@ -120,16 +123,16 @@ jobs:
           # Use existing draft (release-drafter creates these without a tag), or create fresh
           DRAFT_ID=$(gh api repos/$GITHUB_REPOSITORY/releases --jq '.[] | select(.draft) | .id' | head -1)
           if [ -n "$DRAFT_ID" ]; then
-            echo "Draft release found (id=$DRAFT_ID) — updating to $TAG"
+            echo "Draft release found (id=$DRAFT_ID) — updating to $TITLE"
             gh api repos/$GITHUB_REPOSITORY/releases/$DRAFT_ID \
               --method PATCH \
               --field tag_name="$TAG" \
-              --field name="$TAG" \
+              --field name="$TITLE" \
               --field draft=false
           else
-            echo "Creating new release $TAG"
+            echo "Creating new release $TITLE"
             gh release create "$TAG" \
-              --title "$TAG" \
+              --title "$TITLE" \
               --generate-notes
           fi
         env:
