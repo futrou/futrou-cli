@@ -8,7 +8,16 @@ import (
 	"strings"
 
 	"futrou-cli/src/constants"
+	"futrou-cli/src/utils"
 )
+
+func encryptToken(plaintext string) string {
+	return utils.EncryptToken(plaintext, constants.Name)
+}
+
+func decryptToken(stored string) (string, error) {
+	return utils.DecryptToken(stored, constants.Name)
+}
 
 // Config holds the persisted CLI configuration.
 // ApiKey is keyed by normalized API URL so credentials for different
