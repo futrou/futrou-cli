@@ -80,8 +80,11 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("reading config: %w", err)
 	}
 
+	// A corrupt/unparseable config file is treated like a missing one: the
+	// CLI falls back to defaults instead of surfacing a low-level JSON error,
+	// so callers see "not logged in" rather than a parse failure.
 	if err := json.Unmarshal(data, cfg); err != nil {
-		return nil, fmt.Errorf("parsing config: %w", err)
+		return &Config{ApiUrl: constants.DefaultApiUrl}, nil
 	}
 
 	if cfg.ApiUrl == "" {
