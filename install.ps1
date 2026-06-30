@@ -184,5 +184,10 @@ if (-not $NoPathUpdate) {
   }
 }
 
+# Make futrou available in the current session without restarting
+if ($env:PATH -notlike "*$BinDir*") {
+  $env:PATH = "$BinDir;$env:PATH"
+}
+
 Write-Output ""
-Write-Output "To get started, restart your terminal, then run: futrou --help"
+Write-Output "To get started, run: futrou --help"
