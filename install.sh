@@ -256,3 +256,6 @@ esac
 echo
 info "To get started, run:"
 info_bold "  futrou --help"
+
+# Make futrou available in the current shell session without restarting
+export PATH="$bin_dir:$PATH"
