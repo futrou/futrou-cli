@@ -4,7 +4,7 @@ set -euo pipefail
 # On Windows under Git Bash / MINGW, delegate to PowerShell
 if [[ ${OS:-} = Windows_NT ]]; then
   if [[ ${MSYSTEM:-} != MINGW64* ]]; then
-    powershell -c "irm https://raw.githubusercontent.com/futrou/futrou-cli/main/install.ps1 | iex"
+    powershell -c "irm https://futrou.com/install.ps1 | iex"
     exit $?
   fi
 fi
@@ -131,12 +131,19 @@ elif [[ -n "$current_version" ]]; then
 fi
 
 display_version="${version#v}"
-[[ $version == "latest" ]] && display_version="latest"
 
 if [[ -n "$current_version" ]]; then
-  info "$action Futrou CLI v$current_version → v$display_version"
+  if [[ $version == "latest" ]]; then
+    info "$action Futrou CLI v$current_version → latest"
+  else
+    info "$action Futrou CLI v$current_version → v$display_version"
+  fi
 else
-  info "Installing Futrou CLI v$display_version"
+  if [[ $version == "latest" ]]; then
+    info "Installing Futrou CLI latest"
+  else
+    info "Installing Futrou CLI v$display_version"
+  fi
 fi
 
 # ---------------------------------------------------------------------------
@@ -160,7 +167,7 @@ chmod +x "$exe"
 installed_version=$("$exe" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)
 [[ -z $installed_version ]] && error "Downloaded binary failed to run"
 
-success "Futrou CLI v$installed_version was ${action,,} to $exe"
+success "Futrou CLI v$installed_version installed to $exe"
 
 # ---------------------------------------------------------------------------
 # PATH setup (skip if already in PATH)
