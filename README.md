@@ -15,7 +15,7 @@ irm https://futrou.com/install.ps1 | iex
 ```
 
 ### npm / npx (Linux, MacOS and Windows)
-Requires [Node.js](https://nodejs.org/).
+Requires [Node.js](https://nodejs.org/) and npm.
 
 ```bash
 npm install -g futrou
