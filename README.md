@@ -80,12 +80,12 @@ make release
 
 ### Linux / macOS
 ```bash
-curl -fsSL https://raw.githubusercontent.com/futrou/futrou-cli/main/install.sh | bash
+curl -fsSL https://futrou.com/install.sh | bash
 ```
 
 ### Windows (PowerShell)
 ```powershell
-irm https://raw.githubusercontent.com/futrou/futrou-cli/main/install.ps1 | iex
+irm https://futrou.com/install.ps1 | iex
 ```
 
 ### npm / npx
