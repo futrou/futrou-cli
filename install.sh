@@ -69,7 +69,9 @@ exe_ext=''
 # Resolve version
 # ---------------------------------------------------------------------------
 GITHUB=${GITHUB:-"https://github.com"}
+GITHUB_API=${GITHUB_API:-"https://api.github.com"}
 REPO="$GITHUB/futrou/futrou-cli"
+API_REPO="$GITHUB_API/repos/futrou/futrou-cli"
 
 if [[ $# -eq 0 ]]; then
   version="latest"
@@ -82,8 +84,37 @@ if [[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
   version="v$version"
 fi
 
+fetch_json() {
+  if command -v curl >/dev/null 2>&1; then
+    curl --fail --silent --location "$1"
+  elif command -v wget >/dev/null 2>&1; then
+    wget -qO- "$1"
+  fi
+}
+
 if [[ $version == "latest" ]]; then
-  download_url="$REPO/releases/latest/download/futrou-$target$exe_ext"
+  # Find the most recent release that has the binary asset for this platform
+  asset_name="futrou-$target$exe_ext"
+  resolved_tag=""
+  page=1
+  while [[ -z "$resolved_tag" ]]; do
+    releases=$(fetch_json "$API_REPO/releases?per_page=10&page=$page") || break
+    [[ "$releases" == "[]" || -z "$releases" ]] && break
+    while IFS= read -r tag; do
+      [[ -z "$tag" ]] && continue
+      url=$(fetch_json "$API_REPO/releases/tags/$tag" 2>/dev/null | grep -o "\"browser_download_url\":\"[^\"]*$asset_name\"" | grep -o 'https://[^"]*' | head -1)
+      if [[ -n "$url" ]]; then
+        resolved_tag="$tag"
+        download_url="$url"
+        break
+      fi
+    done < <(echo "$releases" | grep -o '"tag_name":"[^"]*"' | grep -o 'v[^"]*')
+    (( page++ ))
+  done
+  if [[ -z "$resolved_tag" ]]; then
+    error "No published release with a $asset_name binary found. Try again later."
+  fi
+  version="$resolved_tag"
 else
   download_url="$REPO/releases/download/$version/futrou-$target$exe_ext"
 fi
@@ -165,11 +196,6 @@ do_download() {
 
 if ! do_download "$download_url" "$tmp_exe"; then
   rm -f "$tmp_exe"
-  # Latest 404s when a release is in progress — fall back to installed version
-  if [[ $version == "latest" && -n "$current_version" ]]; then
-    warn "Latest release not yet available (release in progress). Current version v$current_version is already up to date."
-    exit 0
-  fi
   error "Failed to download from \"$download_url\""
 fi
 
