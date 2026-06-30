@@ -179,7 +179,7 @@ if [[ -n "$current_version" ]]; then
   new_version=$("$tmp_exe" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)
   if [[ "$new_version" == "$current_version" ]]; then
     rm -f "$tmp_exe"
-    info "No upgrade available. Futrou CLI is already the latest version v$current_version."
+    success "No upgrade available. Futrou CLI is already the latest version v$current_version."
     exit 0
   fi
 fi
