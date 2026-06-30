@@ -99,52 +99,14 @@ exe="$bin_dir/futrou$exe_ext"
 mkdir -p "$bin_dir" || error "Failed to create install directory \"$bin_dir\""
 
 # ---------------------------------------------------------------------------
-# Detect existing installation and decide action label
+# Detect existing installation
 # ---------------------------------------------------------------------------
-action="Installing"
 current_version=""
-
 if [[ -x "$exe" ]]; then
   current_version=$("$exe" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)
 fi
 
-if [[ -n "$current_version" && "$version" != "latest" ]]; then
-  target_version="${version#v}"
-  if [[ "$current_version" == "$target_version" ]]; then
-    info "Futrou CLI v$current_version is already installed at $exe"
-    exit 0
-  fi
-
-  # Compare semver: split into parts and compare numerically
-  IFS='.' read -r cur_maj cur_min cur_pat <<< "$current_version"
-  IFS='.' read -r tgt_maj tgt_min tgt_pat <<< "$target_version"
-
-  if (( tgt_maj > cur_maj )) || \
-     (( tgt_maj == cur_maj && tgt_min > cur_min )) || \
-     (( tgt_maj == cur_maj && tgt_min == cur_min && tgt_pat > cur_pat )); then
-    action="Upgrading"
-  else
-    action="Downgrading"
-  fi
-elif [[ -n "$current_version" ]]; then
-  action="Upgrading"
-fi
-
-display_version="${version#v}"
-
-if [[ -n "$current_version" ]]; then
-  if [[ $version == "latest" ]]; then
-    info "$action Futrou CLI v$current_version → latest"
-  else
-    info "$action Futrou CLI v$current_version → v$display_version"
-  fi
-else
-  if [[ $version == "latest" ]]; then
-    info "Installing Futrou CLI latest"
-  else
-    info "Installing Futrou CLI v$display_version"
-  fi
-fi
+info "Checking versions..."
 
 # ---------------------------------------------------------------------------
 # Download to a temp file then atomically replace (avoids "Text file busy"
@@ -174,14 +136,36 @@ fi
 
 chmod +x "$tmp_exe"
 
-# Check if downloaded binary is the same version as what's already installed
-if [[ -n "$current_version" ]]; then
-  new_version=$("$tmp_exe" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)
-  if [[ "$new_version" == "$current_version" ]]; then
-    rm -f "$tmp_exe"
-    success "No upgrade available. Futrou CLI is already the latest version v$current_version."
-    exit 0
+# Read new version from downloaded binary
+new_version=$("$tmp_exe" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)
+
+# Already up to date?
+if [[ -n "$current_version" && "$new_version" == "$current_version" ]]; then
+  rm -f "$tmp_exe"
+  success "No upgrade available. Futrou CLI is already the latest version v$current_version."
+  exit 0
+fi
+
+# Decide action label now that we know both versions
+action="Installing"
+if [[ -n "$current_version" && -n "$new_version" ]]; then
+  IFS='.' read -r cur_maj cur_min cur_pat <<< "$current_version"
+  IFS='.' read -r new_maj new_min new_pat <<< "$new_version"
+  if (( new_maj > cur_maj )) || \
+     (( new_maj == cur_maj && new_min > cur_min )) || \
+     (( new_maj == cur_maj && new_min == cur_min && new_pat > cur_pat )); then
+    action="Upgrading"
+  else
+    action="Downgrading"
   fi
+elif [[ -n "$current_version" ]]; then
+  action="Upgrading"
+fi
+
+if [[ -n "$current_version" ]]; then
+  info "$action Futrou CLI v$current_version → v$new_version"
+else
+  info "Installing Futrou CLI v$new_version"
 fi
 
 mv -f "$tmp_exe" "$exe"
