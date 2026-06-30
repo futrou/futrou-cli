@@ -106,8 +106,6 @@ if [[ -x "$exe" ]]; then
   current_version=$("$exe" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)
 fi
 
-info "Checking versions..."
-
 # ---------------------------------------------------------------------------
 # Download to a temp file then atomically replace (avoids "Text file busy"
 # when upgrading a running binary)
@@ -117,15 +115,33 @@ tmp_exe="$bin_dir/.futrou-tmp$exe_ext"
 do_download() {
   local url="$1" dest="$2"
   if command -v curl >/dev/null 2>&1; then
-    curl --fail --location --progress-bar --output "$dest" "$url" 2>/dev/null
+    curl --fail --location --silent --output "$dest" "$url"
   elif command -v wget >/dev/null 2>&1; then
-    wget -q --show-progress -O "$dest" "$url" 2>/dev/null
+    wget -q -O "$dest" "$url"
   else
     error "curl or wget is required to install Futrou CLI"
   fi
 }
 
+# Spinner shown while downloading
+spinner_pid=""
+if [[ -t 1 ]]; then
+  (
+    frames='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+    i=0
+    while true; do
+      printf "\r${Dim}%s Checking versions...${Color_Off}" "${frames:$((i % ${#frames})):1}"
+      sleep 0.08
+      (( i++ )) || true
+    done
+  ) &
+  spinner_pid=$!
+else
+  printf "${Dim}Checking versions...${Color_Off}\n"
+fi
+
 if ! do_download "$download_url" "$tmp_exe"; then
+  [[ -n "$spinner_pid" ]] && kill "$spinner_pid" 2>/dev/null && printf "\r\033[K"
   rm -f "$tmp_exe"
   if [[ $version == "latest" ]]; then
     error "Failed to download latest release. Try again later.\n  $download_url"
@@ -136,13 +152,20 @@ fi
 
 chmod +x "$tmp_exe"
 
+# Stop spinner
+if [[ -n "$spinner_pid" ]]; then
+  kill "$spinner_pid" 2>/dev/null
+  wait "$spinner_pid" 2>/dev/null || true
+  printf "\r\033[K"
+fi
+
 # Read new version from downloaded binary
 new_version=$("$tmp_exe" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)
 
 # Already up to date?
 if [[ -n "$current_version" && "$new_version" == "$current_version" ]]; then
   rm -f "$tmp_exe"
-  success "No upgrade available. Futrou CLI is already the latest version v$current_version."
+  success "Futrou CLI is already the latest version v$current_version."
   exit 0
 fi
 
