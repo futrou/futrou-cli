@@ -56,11 +56,9 @@ $Exe         = "$BinDir\futrou.exe"
 $null = New-Item -ItemType Directory -Force -Path $BinDir
 
 # ---------------------------------------------------------------------------
-# Detect existing installation and decide action label
+# Detect existing installation
 # ---------------------------------------------------------------------------
-$Action = "Installing"
 $CurrentVersion = $null
-
 if (Test-Path $Exe) {
   try {
     $raw = & $Exe --version 2>$null
@@ -68,40 +66,34 @@ if (Test-Path $Exe) {
   } catch { }
 }
 
-if ($CurrentVersion -and $Version -ne "latest") {
-  $TargetVersion = $Version.TrimStart('v')
-  if ($CurrentVersion -eq $TargetVersion) {
-    Write-Info "Futrou CLI v$CurrentVersion is already installed at $Exe"
-    exit 0
-  }
-  $cur = [Version]$CurrentVersion
-  $tgt = [Version]$TargetVersion
-  $Action = if ($tgt -gt $cur) { "Upgrading" } elseif ($tgt -lt $cur) { "Downgrading" } else { "Reinstalling" }
-} elseif ($CurrentVersion) {
-  $Action = "Upgrading"
-}
-
-$DisplayVersion = if ($Version -eq "latest") { "latest" } else { $Version.TrimStart('v') }
-
-$DisplayVersionLabel = if ($Version -eq "latest") { "latest" } else { "v$DisplayVersion" }
-
-if ($CurrentVersion) {
-  Write-Info "$Action Futrou CLI v$CurrentVersion → $DisplayVersionLabel"
-} else {
-  Write-Info "Installing Futrou CLI $DisplayVersionLabel"
-}
-
 # ---------------------------------------------------------------------------
-# Download
+# Download with spinner
 # ---------------------------------------------------------------------------
 $TmpExe = "$BinDir\futrou-tmp.exe"
 Remove-Item -Force $TmpExe -ErrorAction SilentlyContinue
+
+# Spinner job
+$spinnerJob = $null
+if ([Environment]::UserInteractive -and -not [Console]::IsOutputRedirected) {
+  $spinnerJob = Start-Job -ScriptBlock {
+    $frames = '⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏'
+    $i = 0
+    while ($true) {
+      $f = $frames[$i % $frames.Count]
+      [Console]::Write("`r$f Checking versions...")
+      Start-Sleep -Milliseconds 80
+      $i++
+    }
+  }
+} else {
+  Write-Info "Checking versions..."
+}
 
 $downloaded = $false
 
 if (-not $DownloadWithoutCurl) {
   try {
-    curl.exe "-#SfLo" $TmpExe $URL
+    curl.exe "-#SfLo" $TmpExe $URL 2>$null
     if ($LASTEXITCODE -eq 0) { $downloaded = $true }
   } catch { }
 }
@@ -110,17 +102,58 @@ if (-not $downloaded) {
   try {
     Invoke-RestMethod -Uri $URL -OutFile $TmpExe
     $downloaded = $true
-  } catch {
-    if ($Version -eq "latest") {
-      Write-Fail "Failed to download latest release. Try again later.`n  $URL"
-    } else {
-      Write-Fail "Version $Version not found or binary not available for $Target.`n  $URL"
-    }
+  } catch { }
+}
+
+# Stop spinner
+if ($spinnerJob) {
+  Stop-Job $spinnerJob -ErrorAction SilentlyContinue
+  Remove-Job $spinnerJob -ErrorAction SilentlyContinue
+  [Console]::Write("`r" + (" " * 40) + "`r")
+}
+
+if (-not $downloaded) {
+  if ($Version -eq "latest") {
+    Write-Fail "Failed to download latest release. Try again later.`n  $URL"
+  } else {
+    Write-Fail "Version $Version not found or binary not available for $Target.`n  $URL"
   }
 }
 
 if (-not (Test-Path $TmpExe)) {
   Write-Fail "Download produced no file. Did antivirus delete it?"
+}
+
+# ---------------------------------------------------------------------------
+# Check new version before replacing
+# ---------------------------------------------------------------------------
+$NewVersion = $null
+try {
+  $raw = & $TmpExe --version 2>$null
+  if ($raw -match '(\d+\.\d+\.\d+)') { $NewVersion = $Matches[1] }
+} catch { }
+
+# Already up to date?
+if ($CurrentVersion -and $NewVersion -eq $CurrentVersion) {
+  Remove-Item -Force $TmpExe -ErrorAction SilentlyContinue
+  Write-Success "Futrou CLI is already the latest version v$CurrentVersion."
+  exit 0
+}
+
+# Decide action
+$Action = "Installing"
+if ($CurrentVersion -and $NewVersion) {
+  $cur = [Version]$CurrentVersion
+  $nw  = [Version]$NewVersion
+  $Action = if ($nw -gt $cur) { "Upgrading" } elseif ($nw -lt $cur) { "Downgrading" } else { "Installing" }
+} elseif ($CurrentVersion) {
+  $Action = "Upgrading"
+}
+
+if ($CurrentVersion -and $Action -ne "Installing") {
+  Write-Info "$Action Futrou CLI v$CurrentVersion → v$NewVersion"
+} else {
+  Write-Info "Installing Futrou CLI v$NewVersion"
 }
 
 try { Remove-Item -Force $Exe -ErrorAction SilentlyContinue } catch { }
@@ -140,13 +173,16 @@ if (-not $InstalledVersion) {
 }
 
 $ActionPast = switch ($Action) {
-  "Installing"  { "installed" }
   "Upgrading"   { "upgraded" }
   "Downgrading" { "downgraded" }
   default       { "installed" }
 }
 
-Write-Success "Futrou CLI v$InstalledVersion was $ActionPast to $Exe"
+if ($CurrentVersion -and $Action -ne "Installing") {
+  Write-Success "Futrou CLI v$CurrentVersion $ActionPast v$InstalledVersion"
+} else {
+  Write-Success "Futrou CLI v$InstalledVersion $ActionPast"
+}
 
 # ---------------------------------------------------------------------------
 # PATH update
@@ -183,15 +219,10 @@ if (-not $NoPathUpdate) {
   if ($CurrentPath -notcontains $BinDir) {
     $NewPath = ($CurrentPath + $BinDir) -join ';'
     Set-UserPath $NewPath
-    $env:PATH = $env:PATH + ";$BinDir"
+    $env:PATH = "$BinDir;$env:PATH"
     Write-Info "Added $BinDir to your PATH"
+    Write-Output ""
+    Write-Info "Reload your shell to use futrou:"
+    Write-Info "  Open a new PowerShell window and run: futrou --help"
   }
 }
-
-# Make futrou available in the current session without restarting
-if ($env:PATH -notlike "*$BinDir*") {
-  $env:PATH = "$BinDir;$env:PATH"
-}
-
-Write-Output ""
-Write-Output "To get started, run: futrou --help"
