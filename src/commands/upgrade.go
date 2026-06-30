@@ -21,7 +21,11 @@ var upgradeCommand = &cli.Command{
 			version = "latest"
 		}
 
-		fmt.Printf("Upgrading Futrou CLI %s → %s\n", constants.Version, version)
+		displayVersion := version
+		if version != "latest" && len(version) > 0 && version[0] != 'v' {
+			displayVersion = "v" + version
+		}
+		fmt.Printf("Upgrading Futrou CLI v%s → %s\n", constants.Version, displayVersion)
 
 		switch runtime.GOOS {
 		case "windows":
@@ -33,7 +37,7 @@ var upgradeCommand = &cli.Command{
 }
 
 func runUpgradeUnix(version string) error {
-	script := "https://raw.githubusercontent.com/futrou/futrou-cli/main/install.sh"
+	script := "https://futrou.com/install.sh"
 
 	// Check for curl or wget
 	var cmd *exec.Cmd
@@ -66,7 +70,7 @@ func runUpgradeUnix(version string) error {
 }
 
 func runUpgradeWindows(version string) error {
-	script := "https://raw.githubusercontent.com/futrou/futrou-cli/main/install.ps1"
+	script := "https://futrou.com/install.ps1"
 
 	var psCmd string
 	if version == "latest" {

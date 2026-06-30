@@ -147,19 +147,23 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Download
+# Download to a temp file then atomically replace (avoids "Text file busy"
+# when upgrading a running binary)
 # ---------------------------------------------------------------------------
+tmp_exe="$bin_dir/.futrou-tmp$exe_ext"
+
 if command -v curl >/dev/null 2>&1; then
-  curl --fail --location --progress-bar --output "$exe" "$download_url" ||
+  curl --fail --location --progress-bar --output "$tmp_exe" "$download_url" ||
     error "Failed to download from \"$download_url\""
 elif command -v wget >/dev/null 2>&1; then
-  wget -q --show-progress -O "$exe" "$download_url" ||
+  wget -q --show-progress -O "$tmp_exe" "$download_url" ||
     error "Failed to download from \"$download_url\""
 else
   error "curl or wget is required to install Futrou CLI"
 fi
 
-chmod +x "$exe"
+chmod +x "$tmp_exe"
+mv -f "$tmp_exe" "$exe"
 
 # ---------------------------------------------------------------------------
 # Verify
