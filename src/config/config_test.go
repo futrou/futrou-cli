@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"futrou-cli/src/utils"
 )
 
 // helpers
@@ -38,7 +40,7 @@ func TestEncryptDecrypt_roundTrip(t *testing.T) {
 	enc := encryptToken(plain)
 
 	// encrypted value must always carry the prefix — never stored as plaintext
-	if !hasPrefix(enc, encPrefix) {
+	if !hasPrefix(enc, utils.EncPrefix) {
 		t.Fatalf("encrypted value missing prefix: %q", enc)
 	}
 
@@ -53,9 +55,9 @@ func TestEncryptDecrypt_roundTrip(t *testing.T) {
 
 func TestEncryptToken_alwaysEncrypted(t *testing.T) {
 	// Token must never be stored as plaintext, even when machine ID is unavailable.
-	// deviceFingerprint falls back to cliId+userId only, but still encrypts.
+	// DeviceFingerprint falls back to cliId+userId only, but still encrypts.
 	enc := encryptToken("any-token")
-	if !hasPrefix(enc, encPrefix) {
+	if !hasPrefix(enc, utils.EncPrefix) {
 		t.Errorf("token stored as plaintext (missing enc:v1: prefix): %q", enc)
 	}
 }
@@ -89,18 +91,15 @@ func TestDecrypt_legacyPlaintext(t *testing.T) {
 }
 
 func TestDecrypt_corruptedCiphertext(t *testing.T) {
-	// Flip bytes inside a valid enc:v1: blob — simulates a different device key.
-	enc := encryptToken("my-token")
-	corrupted := encPrefix + "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+	corrupted := utils.EncPrefix + "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
 	_, err := decryptToken(corrupted)
 	if err == nil {
 		t.Error("expected error decrypting corrupted ciphertext, got nil")
 	}
-	_ = enc
 }
 
 func TestDecrypt_malformedBase64(t *testing.T) {
-	_, err := decryptToken(encPrefix + "!!!not-base64!!!")
+	_, err := decryptToken(utils.EncPrefix + "!!!not-base64!!!")
 	if err == nil {
 		t.Error("expected error for malformed base64, got nil")
 	}
@@ -108,8 +107,7 @@ func TestDecrypt_malformedBase64(t *testing.T) {
 
 func TestDecrypt_tooShortPayload(t *testing.T) {
 	// Valid base64 but fewer bytes than the AES-GCM nonce size (12 bytes).
-	import64 := encPrefix + "dG9v" // "too" — only 3 bytes
-	_, err := decryptToken(import64)
+	_, err := decryptToken(utils.EncPrefix + "dG9v") // "too" — only 3 bytes
 	if err == nil {
 		t.Error("expected error for too-short payload, got nil")
 	}
@@ -257,8 +255,7 @@ func TestLoad_envApiTokenOverride(t *testing.T) {
 // ── Save / Load round-trip ───────────────────────────────────────────────────
 
 func TestSaveLoad_roundTrip(t *testing.T) {
-	home := tempHome(t)
-	_ = home
+	tempHome(t)
 
 	cfg := &Config{ApiUrl: "https://api.futrou.com"}
 	cfg.SetToken("https://api.futrou.com", "round-trip-token")
@@ -293,8 +290,7 @@ func TestSave_doesNotWriteLegacyApiKey(t *testing.T) {
 }
 
 func TestSaveLoad_multipleURLs(t *testing.T) {
-	home := tempHome(t)
-	_ = home
+	tempHome(t)
 
 	cfg := &Config{ApiUrl: "https://api.futrou.com"}
 	cfg.SetToken("https://api.futrou.com", "prod-token")
@@ -349,81 +345,72 @@ func TestDelete_noFile(t *testing.T) {
 	}
 }
 
-// ── deviceFingerprint / key isolation ───────────────────────────────────────
+// ── DeriveKey / key isolation ────────────────────────────────────────────────
 //
 // These tests verify that changing any single component of the fingerprint
 // (CLI name, machine ID, or user ID) produces a different key, so a token
 // encrypted with one identity cannot be decrypted with another.
 
 func TestDeriveKey_differentCliId(t *testing.T) {
-	k1 := deriveKey("futrou-cli", "machine-abc", "1000")
-	k2 := deriveKey("other-app", "machine-abc", "1000")
+	k1 := utils.DeriveKey("futrou-cli", "machine-abc", "1000")
+	k2 := utils.DeriveKey("other-app", "machine-abc", "1000")
 	if string(k1) == string(k2) {
 		t.Error("different CLI names produced the same key")
 	}
 }
 
 func TestDeriveKey_differentMachineId(t *testing.T) {
-	k1 := deriveKey("futrou-cli", "machine-abc", "1000")
-	k2 := deriveKey("futrou-cli", "machine-xyz", "1000")
+	k1 := utils.DeriveKey("futrou-cli", "machine-abc", "1000")
+	k2 := utils.DeriveKey("futrou-cli", "machine-xyz", "1000")
 	if string(k1) == string(k2) {
 		t.Error("different machine IDs produced the same key")
 	}
 }
 
 func TestDeriveKey_differentUserId(t *testing.T) {
-	k1 := deriveKey("futrou-cli", "machine-abc", "1000")
-	k2 := deriveKey("futrou-cli", "machine-abc", "1001")
+	k1 := utils.DeriveKey("futrou-cli", "machine-abc", "1000")
+	k2 := utils.DeriveKey("futrou-cli", "machine-abc", "1001")
 	if string(k1) == string(k2) {
 		t.Error("different user IDs produced the same key")
 	}
 }
 
 func TestDeriveKey_sameFingerprintSameKey(t *testing.T) {
-	k1 := deriveKey("futrou-cli", "machine-abc", "1000")
-	k2 := deriveKey("futrou-cli", "machine-abc", "1000")
+	k1 := utils.DeriveKey("futrou-cli", "machine-abc", "1000")
+	k2 := utils.DeriveKey("futrou-cli", "machine-abc", "1000")
 	if string(k1) != string(k2) {
 		t.Error("same fingerprint inputs produced different keys")
 	}
 }
 
 func TestEncryptDecrypt_wrongMachineId(t *testing.T) {
-	keyA := deriveKey("futrou-cli", "machine-A", "1000")
-	keyB := deriveKey("futrou-cli", "machine-B", "1000")
+	keyA := utils.DeriveKey("futrou-cli", "machine-A", "1000")
+	keyB := utils.DeriveKey("futrou-cli", "machine-B", "1000")
 
-	enc, err := encryptWithKey("token-secret", keyA)
-	if err != nil {
-		t.Fatalf("encrypt: %v", err)
-	}
-	_, err = decryptWithKey(enc, keyB)
+	enc := utils.EncryptWithKey("token-secret", keyA)
+	_, err := utils.DecryptWithKey(enc, keyB)
 	if err == nil {
 		t.Error("expected decryption to fail with a different machine ID key")
 	}
 }
 
 func TestEncryptDecrypt_wrongUserId(t *testing.T) {
-	keyA := deriveKey("futrou-cli", "machine-abc", "1000")
-	keyB := deriveKey("futrou-cli", "machine-abc", "1001")
+	keyA := utils.DeriveKey("futrou-cli", "machine-abc", "1000")
+	keyB := utils.DeriveKey("futrou-cli", "machine-abc", "1001")
 
-	enc, err := encryptWithKey("token-secret", keyA)
-	if err != nil {
-		t.Fatalf("encrypt: %v", err)
-	}
-	_, err = decryptWithKey(enc, keyB)
+	enc := utils.EncryptWithKey("token-secret", keyA)
+	_, err := utils.DecryptWithKey(enc, keyB)
 	if err == nil {
 		t.Error("expected decryption to fail with a different user ID key")
 	}
 }
 
 func TestEncryptDecrypt_wrongCliId(t *testing.T) {
-	keyA := deriveKey("futrou-cli", "machine-abc", "1000")
-	keyB := deriveKey("other-app", "machine-abc", "1000")
+	keyA := utils.DeriveKey("futrou-cli", "machine-abc", "1000")
+	keyB := utils.DeriveKey("other-app", "machine-abc", "1000")
 
-	enc, err := encryptWithKey("token-secret", keyA)
-	if err != nil {
-		t.Fatalf("encrypt: %v", err)
-	}
-	_, err = decryptWithKey(enc, keyB)
+	enc := utils.EncryptWithKey("token-secret", keyA)
+	_, err := utils.DecryptWithKey(enc, keyB)
 	if err == nil {
 		t.Error("expected decryption to fail with a different CLI name key")
 	}
@@ -436,13 +423,10 @@ func hasPrefix(s, prefix string) bool {
 }
 
 func contains(s, sub string) bool {
-	return len(sub) > 0 && len(s) >= len(sub) &&
-		func() bool {
-			for i := 0; i <= len(s)-len(sub); i++ {
-				if s[i:i+len(sub)] == sub {
-					return true
-				}
-			}
-			return false
-		}()
+	for i := 0; i <= len(s)-len(sub); i++ {
+		if s[i:i+len(sub)] == sub {
+			return true
+		}
+	}
+	return false
 }
