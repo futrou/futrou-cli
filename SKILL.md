@@ -13,10 +13,10 @@ Futrou Cloud lets you run containerised workloads (serverlets), manage HTTP/TCP 
 
 ```bash
 # Linux / macOS
-curl -fsSL https://raw.githubusercontent.com/futrou/futrou-cli/main/install.sh | bash
+curl -fsSL https://futrou.com/install.sh | bash
 
 # Windows (PowerShell)
-irm https://raw.githubusercontent.com/futrou/futrou-cli/main/install.ps1 | iex
+irm https://futrou.com/install.ps1 | iex
 
 # npm / npx
 npm install -g futrou
