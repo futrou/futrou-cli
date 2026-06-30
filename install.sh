@@ -152,23 +152,25 @@ fi
 # ---------------------------------------------------------------------------
 tmp_exe="$bin_dir/.futrou-tmp$exe_ext"
 
-download_failed() {
-  rm -f "$tmp_exe"
-  if [[ $version == "latest" ]]; then
-    error "Download failed — a release may be in progress. Your current version is unchanged. Try again in a few minutes."
+do_download() {
+  local url="$1" dest="$2"
+  if command -v curl >/dev/null 2>&1; then
+    curl --fail --location --progress-bar --output "$dest" "$url" 2>/dev/null
+  elif command -v wget >/dev/null 2>&1; then
+    wget -q --show-progress -O "$dest" "$url" 2>/dev/null
   else
-    error "Download failed for $version — the release may not exist yet. Your current version is unchanged."
+    error "curl or wget is required to install Futrou CLI"
   fi
 }
 
-if command -v curl >/dev/null 2>&1; then
-  curl --fail --location --progress-bar --output "$tmp_exe" "$download_url" ||
-    download_failed
-elif command -v wget >/dev/null 2>&1; then
-  wget -q --show-progress -O "$tmp_exe" "$download_url" ||
-    download_failed
-else
-  error "curl or wget is required to install Futrou CLI"
+if ! do_download "$download_url" "$tmp_exe"; then
+  rm -f "$tmp_exe"
+  # Latest 404s when a release is in progress — fall back to installed version
+  if [[ $version == "latest" && -n "$current_version" ]]; then
+    warn "Latest release not yet available (release in progress). Current version v$current_version is already up to date."
+    exit 0
+  fi
+  error "Failed to download from \"$download_url\""
 fi
 
 chmod +x "$tmp_exe"
