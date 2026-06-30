@@ -93,28 +93,21 @@ fetch_json() {
 }
 
 if [[ $version == "latest" ]]; then
-  # Find the most recent release that has the binary asset for this platform
+  # Find the most recent release that has the binary asset for this platform.
+  # Assets are embedded in the list response — grep for the download URL directly.
   asset_name="futrou-$target$exe_ext"
-  resolved_tag=""
+  download_url=""
   page=1
-  while [[ -z "$resolved_tag" && $page -le 5 ]]; do
+  while [[ -z "$download_url" && $page -le 5 ]]; do
     releases=$(fetch_json "$API_REPO/releases?per_page=10&page=$page") || break
     [[ "$releases" == "[]" || -z "$releases" ]] && break
-    while IFS= read -r tag; do
-      [[ -z "$tag" ]] && continue
-      url=$(fetch_json "$API_REPO/releases/tags/$tag" 2>/dev/null | grep -o "\"browser_download_url\":\"[^\"]*$asset_name\"" | grep -o 'https://[^"]*' | head -1)
-      if [[ -n "$url" ]]; then
-        resolved_tag="$tag"
-        download_url="$url"
-        break
-      fi
-    done < <(echo "$releases" | grep -o '"tag_name":"[^"]*"' | grep -o 'v[^"]*')
+    download_url=$(echo "$releases" | grep "browser_download_url" | grep "$asset_name" | grep -o 'https://[^"]*' | head -1)
     (( page++ ))
   done
-  if [[ -z "$resolved_tag" ]]; then
+  if [[ -z "$download_url" ]]; then
     error "No published release with a $asset_name binary found. Try again later."
   fi
-  version="$resolved_tag"
+  version=$(echo "$download_url" | sed 's|.*/download/\(v[^/]*\)/.*|\1|')
 else
   download_url="$REPO/releases/download/$version/futrou-$target$exe_ext"
 fi
