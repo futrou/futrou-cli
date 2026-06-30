@@ -83,10 +83,12 @@ if ($CurrentVersion -and $Version -ne "latest") {
 
 $DisplayVersion = if ($Version -eq "latest") { "latest" } else { $Version.TrimStart('v') }
 
+$DisplayVersionLabel = if ($Version -eq "latest") { "latest" } else { "v$DisplayVersion" }
+
 if ($CurrentVersion) {
-  Write-Info "$Action Futrou CLI v$CurrentVersion → v$DisplayVersion"
+  Write-Info "$Action Futrou CLI v$CurrentVersion → $DisplayVersionLabel"
 } else {
-  Write-Info "Installing Futrou CLI v$DisplayVersion"
+  Write-Info "Installing Futrou CLI $DisplayVersionLabel"
 }
 
 # ---------------------------------------------------------------------------
