@@ -93,19 +93,28 @@ fetch_json() {
 }
 
 if [[ $version == "latest" ]]; then
-  # Find the most recent release that has the binary asset for this platform.
-  # Assets are embedded in the list response — grep for the download URL directly.
   asset_name="futrou-$target$exe_ext"
-  download_url=""
-  page=1
-  while [[ -z "$download_url" && $page -le 5 ]]; do
-    releases=$(fetch_json "$API_REPO/releases?per_page=10&page=$page") || break
-    [[ "$releases" == "[]" || -z "$releases" ]] && break
-    download_url=$(echo "$releases" | grep "browser_download_url" | grep "$asset_name" | grep -o 'https://[^"]*' | head -1)
-    (( page++ ))
-  done
-  if [[ -z "$download_url" ]]; then
-    error "No published release with a $asset_name binary found. Try again later."
+  # Try the direct latest URL first (no API call, no rate limits)
+  download_url="$REPO/releases/latest/download/$asset_name"
+  # Check if it resolves (HEAD request); on 404 fall back to API to find
+  # the most recent release that actually has the asset (e.g. release in progress)
+  if command -v curl >/dev/null 2>&1; then
+    http_code=$(curl --silent --head --location --output /dev/null --write-out "%{http_code}" "$download_url")
+  else
+    http_code=$(wget --server-response --spider "$download_url" 2>&1 | awk '/HTTP\//{code=$2} END{print code}')
+  fi
+  if [[ "$http_code" != "200" ]]; then
+    download_url=""
+    page=1
+    while [[ -z "$download_url" && $page -le 5 ]]; do
+      releases=$(fetch_json "$API_REPO/releases?per_page=10&page=$page") || break
+      [[ "$releases" == "[]" || -z "$releases" ]] && break
+      download_url=$(echo "$releases" | grep "browser_download_url" | grep "$asset_name" | grep -o 'https://[^"]*' | head -1)
+      (( page++ ))
+    done
+    if [[ -z "$download_url" ]]; then
+      error "No published release with a $asset_name binary found. Try again later."
+    fi
   fi
   version=$(echo "$download_url" | sed 's|.*/download/\(v[^/]*\)/.*|\1|')
 else
