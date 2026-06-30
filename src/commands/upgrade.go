@@ -6,8 +6,6 @@ import (
 	"os/exec"
 	"runtime"
 
-	"futrou-cli/src/constants"
-
 	"github.com/urfave/cli/v2"
 )
 
@@ -20,12 +18,6 @@ var upgradeCommand = &cli.Command{
 		if version == "" {
 			version = "latest"
 		}
-
-		displayVersion := version
-		if version != "latest" && len(version) > 0 && version[0] != 'v' {
-			displayVersion = "v" + version
-		}
-		fmt.Printf("Upgrading Futrou CLI v%s → %s\n", constants.Version, displayVersion)
 
 		switch runtime.GOOS {
 		case "windows":
