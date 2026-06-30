@@ -165,7 +165,11 @@ do_download() {
 
 if ! do_download "$download_url" "$tmp_exe"; then
   rm -f "$tmp_exe"
-  error "Failed to download from \"$download_url\""
+  if [[ $version == "latest" ]]; then
+    error "Failed to download latest release. Try again later.\n  $download_url"
+  else
+    error "Version $version not found or binary not available for $target.\n  $download_url"
+  fi
 fi
 
 chmod +x "$tmp_exe"
