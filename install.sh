@@ -97,7 +97,7 @@ if [[ $version == "latest" ]]; then
   asset_name="futrou-$target$exe_ext"
   resolved_tag=""
   page=1
-  while [[ -z "$resolved_tag" ]]; do
+  while [[ -z "$resolved_tag" && $page -le 5 ]]; do
     releases=$(fetch_json "$API_REPO/releases?per_page=10&page=$page") || break
     [[ "$releases" == "[]" || -z "$releases" ]] && break
     while IFS= read -r tag; do
