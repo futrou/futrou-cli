@@ -152,12 +152,21 @@ fi
 # ---------------------------------------------------------------------------
 tmp_exe="$bin_dir/.futrou-tmp$exe_ext"
 
+download_failed() {
+  rm -f "$tmp_exe"
+  if [[ $version == "latest" ]]; then
+    error "Download failed — a release may be in progress. Your current version is unchanged. Try again in a few minutes."
+  else
+    error "Download failed for $version — the release may not exist yet. Your current version is unchanged."
+  fi
+}
+
 if command -v curl >/dev/null 2>&1; then
   curl --fail --location --progress-bar --output "$tmp_exe" "$download_url" ||
-    error "Failed to download from \"$download_url\""
+    download_failed
 elif command -v wget >/dev/null 2>&1; then
   wget -q --show-progress -O "$tmp_exe" "$download_url" ||
-    error "Failed to download from \"$download_url\""
+    download_failed
 else
   error "curl or wget is required to install Futrou CLI"
 fi
