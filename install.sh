@@ -290,7 +290,10 @@ bash)
 esac
 
 echo
-info "To get started, run:"
+info "Reload your shell to use futrou:"
+info_bold "  exec \$SHELL"
+echo
+info "Or open a new terminal and run:"
 info_bold "  futrou --help"
 
 # Make futrou available in the current shell session without restarting
