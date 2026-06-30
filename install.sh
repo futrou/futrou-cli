@@ -98,6 +98,10 @@ exe="$bin_dir/futrou$exe_ext"
 
 mkdir -p "$bin_dir" || error "Failed to create install directory \"$bin_dir\""
 
+tildify() {
+  [[ $1 == $HOME/* ]] && echo "~/${1#$HOME/}" || echo "$1"
+}
+
 # ---------------------------------------------------------------------------
 # Detect existing installation
 # ---------------------------------------------------------------------------
@@ -204,7 +208,7 @@ case $action in
   Downgrading) action_past="downgraded" ;;
   *)           action_past="installed"  ;;
 esac
-success "Futrou CLI v$installed_version $action_past to $exe"
+success "Futrou CLI v$installed_version $action_past to $(tildify "$exe")"
 
 # ---------------------------------------------------------------------------
 # PATH setup (skip if already in PATH)
@@ -214,10 +218,6 @@ if command -v futrou >/dev/null 2>&1; then
   info "Run 'futrou --help' to get started"
   exit 0
 fi
-
-tildify() {
-  [[ $1 == $HOME/* ]] && echo "~/${1#$HOME/}" || echo "$1"
-}
 
 tilde_bin_dir=$(tildify "$bin_dir")
 quoted_install_dir="\"${install_dir//\"/\\\"}\""
