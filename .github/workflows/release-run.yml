@@ -8,6 +8,11 @@ on:
         required: false
         type: string
         default: 'latest'
+      release_tag:
+        description: 'Git tag of the release (e.g. v2.0.5). Defaults to GITHUB_REF_NAME when triggered by a release event.'
+        required: false
+        type: string
+        default: ''
 
 env:
   DEBIAN_FRONTEND: noninteractive
@@ -31,6 +36,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.release_tag != '' && inputs.release_tag || github.ref }}
 
       - uses: actions/setup-go@v6
         with:
@@ -53,7 +60,9 @@ jobs:
 
       - name: Set version from release tag
         if: inputs.version_tag == 'latest'
-        run: ./scripts/version.sh set ${GITHUB_REF_NAME#v}
+        run: |
+          TAG="${{ inputs.release_tag != '' && inputs.release_tag || github.ref_name }}"
+          ./scripts/version.sh set ${TAG#v}
 
       - name: Set version to tag + commit hash + timestamp
         if: inputs.version_tag != 'latest'
@@ -76,6 +85,7 @@ jobs:
         if: inputs.version_tag == 'latest'
         uses: softprops/action-gh-release@v3
         with:
+          tag_name: ${{ inputs.release_tag != '' && inputs.release_tag || github.ref_name }}
           generate_release_notes: true
           files: dist/*
 

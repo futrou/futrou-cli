@@ -20,6 +20,7 @@ jobs:
     timeout-minutes: 30
     outputs:
       needed: ${{ steps.check.outputs.needed }}
+      tag: ${{ steps.version.outputs.tag }}
 
     steps:
       - uses: actions/checkout@v7
@@ -110,4 +111,5 @@ jobs:
     uses: ./.github/workflows/release-run.yml
     with:
       version_tag: 'latest'
+      release_tag: ${{ needs.auto-release.outputs.tag }}
     secrets: inherit
