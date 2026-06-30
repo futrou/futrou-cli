@@ -100,3 +100,29 @@ jobs:
             --generate-notes
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  bump-version:
+    name: Bump version
+    runs-on: ubuntu-slim
+    timeout-minutes: 30
+    needs: auto-release
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          ref: main
+
+      - name: Configure git
+        run: |
+          git config user.name "Futrou Bot"
+          git config user.email "bot@futrou.com"
+
+      - name: Bump patch version
+        run: ./scripts/version.sh bump
+
+      - name: Commit and push
+        run: |
+          git add .env
+          git commit -m "Bump version"
+          git push origin main || (git pull origin main --rebase && git push origin main)
