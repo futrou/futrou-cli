@@ -22,6 +22,14 @@ type ApiClient struct {
 	token  string
 }
 
+// NormalizeApiUrl strips a trailing slash and a trailing "/v2" so that both
+// "https://api.futrou.com" and "https://api.futrou.com/v2" resolve the same.
+func NormalizeApiUrl(apiUrl string) string {
+	apiUrl = strings.TrimRight(apiUrl, "/")
+	apiUrl = strings.TrimSuffix(apiUrl, "/v2")
+	return apiUrl
+}
+
 // NewApiClient creates a client loaded from config/env.
 // apiUrl and token override config/env values when non-empty.
 func NewApiClient(apiUrl, token string) (*ApiClient, error) {
@@ -36,7 +44,7 @@ func NewApiClient(apiUrl, token string) (*ApiClient, error) {
 		cfg.ApiKey = token
 	}
 	return &ApiClient{
-		apiUrl: cfg.ApiUrl,
+		apiUrl: NormalizeApiUrl(cfg.ApiUrl),
 		token:  cfg.ApiKey,
 		client: &http.Client{Timeout: 30 * time.Second},
 	}, nil
@@ -50,7 +58,7 @@ func (ac *ApiClient) Token() string {
 // NewApiClientWithToken creates a client with explicit url and token (no config file lookup).
 func NewApiClientWithToken(apiUrl, token string) *ApiClient {
 	return &ApiClient{
-		apiUrl: apiUrl,
+		apiUrl: NormalizeApiUrl(apiUrl),
 		token:  token,
 		client: &http.Client{Timeout: 30 * time.Second},
 	}
