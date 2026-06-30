@@ -71,16 +71,8 @@ exe_ext=''
 GITHUB=${GITHUB:-"https://github.com"}
 REPO="$GITHUB/futrou/futrou-cli"
 
-# FUTROU_VERSION is injected at build time (e.g. "2.0.8").
-# The source file in git has the placeholder; the release asset has the real value.
-FUTROU_VERSION="__FUTROU_VERSION__"
-
 if [[ $# -eq 0 ]]; then
-  if [[ "$FUTROU_VERSION" == "__FUTROU_VERSION__" ]]; then
-    version="latest"
-  else
-    version="v$FUTROU_VERSION"
-  fi
+  version="latest"
 else
   version="$1"
 fi

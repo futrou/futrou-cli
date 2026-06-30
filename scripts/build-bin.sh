@@ -44,7 +44,6 @@ done
 echo "-------------------------"
 
 cp install.sh install.ps1 "$DIST_DIR/"
-sed -i "s/__FUTROU_VERSION__/$VERSION/g" "$DIST_DIR/install.sh"
 
 # Generate checksums for all binaries
 echo "Generating checksums..."
