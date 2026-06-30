@@ -74,10 +74,12 @@ var loginCommand = &cli.Command{
 		}
 
 		apiKey := loginResp.ApiToken.Id + "-" + loginResp.ApiToken.Token
-		cfg := &config.Config{
-			ApiKey: apiKey,
-			ApiUrl: apiUrl,
+		cfg, err := config.Load()
+		if err != nil {
+			return fmt.Errorf("loading config: %w", err)
 		}
+		cfg.ApiUrl = apiUrl
+		cfg.SetToken(apiUrl, apiKey)
 		if err := config.Save(cfg); err != nil {
 			return fmt.Errorf("saving config: %w", err)
 		}

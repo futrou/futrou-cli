@@ -39,6 +39,7 @@ func NewApiClient(apiUrl, token string) (*ApiClient, error) {
 	}
 	if apiUrl != "" {
 		cfg.ApiUrl = apiUrl
+		cfg.ApiKey = cfg.TokenFor(apiUrl)
 	}
 	if token != "" {
 		cfg.ApiKey = token
