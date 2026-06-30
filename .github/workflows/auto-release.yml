@@ -96,7 +96,7 @@ jobs:
         if: steps.check.outputs.needed == 'true'
         run: |
           gh release create ${{ steps.version.outputs.tag }} \
-            --title "Release ${{ steps.version.outputs.tag }}" \
+            --title "${{ steps.version.outputs.tag }}" \
             --generate-notes
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
