@@ -107,9 +107,32 @@ jobs:
       - name: Create GitHub Release
         if: steps.check.outputs.needed == 'true' && github.event_name != 'release'
         run: |
-          gh release create ${{ steps.version.outputs.tag }} \
-            --title "${{ steps.version.outputs.tag }}" \
-            --generate-notes
+          TAG="${{ steps.version.outputs.tag }}"
+
+          # Check if a release already exists for this tag (published or draft)
+          EXISTING=$(gh release view "$TAG" --json tagName,isDraft -q '.tagName' 2>/dev/null || echo "")
+
+          if [ -n "$EXISTING" ]; then
+            IS_DRAFT=$(gh release view "$TAG" --json isDraft -q '.isDraft')
+            if [ "$IS_DRAFT" = "true" ]; then
+              echo "Draft release $TAG exists — updating tag and title"
+              gh release edit "$TAG" --title "$TAG" --tag "$TAG"
+            else
+              echo "Published release $TAG already exists — skipping"
+            fi
+          else
+            # Check if any draft release exists (no tag yet) and claim it
+            DRAFT_TAG=$(gh release list --json tagName,isDraft -q '.[] | select(.isDraft) | .tagName' | head -1)
+            if [ -n "$DRAFT_TAG" ]; then
+              echo "Untagged draft release $DRAFT_TAG found — updating to $TAG"
+              gh release edit "$DRAFT_TAG" --title "$TAG" --tag "$TAG"
+            else
+              echo "Creating new release $TAG"
+              gh release create "$TAG" \
+                --title "$TAG" \
+                --generate-notes
+            fi
+          fi
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
