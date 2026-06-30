@@ -112,5 +112,15 @@ Steps to release a new version:
 4. The release pipeline will build binaries for all platforms and publish the release
 5. Done
 
+## Agent Skill
+
+Install the Futrou skill for your AI coding agent (Claude Code, Cursor, Copilot, Codex, and 14+ others):
+
+```bash
+npx skills add futrou/futrou-cli
+```
+
+The skill teaches your agent how to use the Futrou CLI and REST API — deploying serverlets, managing proxies, DNS, volumes, projects, and the MCP server at `mcp.futrou.com`.
+
 ## License
 [MIT License](LICENSE)
