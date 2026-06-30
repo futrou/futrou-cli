@@ -113,17 +113,22 @@ jobs:
           TAG="v${VERSION}"
           TITLE="v${VERSION}"
 
-          # If a published release for this tag already exists, skip
-          EXISTING=$(gh release view "$TAG" --json isDraft -q '.isDraft' 2>/dev/null || echo "")
-          if [ "$EXISTING" = "false" ]; then
-            echo "Published release $TAG already exists — skipping"
+          # If a release for this tag already exists (published or draft), update it
+          EXISTING_ID=$(gh api repos/$GITHUB_REPOSITORY/releases --jq ".[] | select(.tag_name == \"$TAG\") | .id" | head -1)
+          if [ -n "$EXISTING_ID" ]; then
+            echo "Release $TAG already exists (id=$EXISTING_ID) — updating"
+            gh api repos/$GITHUB_REPOSITORY/releases/$EXISTING_ID \
+              --method PATCH \
+              --field tag_name="$TAG" \
+              --field name="$TITLE" \
+              --field draft=false
             exit 0
           fi
 
-          # Use existing draft (release-drafter creates these without a tag), or create fresh
-          DRAFT_ID=$(gh api repos/$GITHUB_REPOSITORY/releases --jq '.[] | select(.draft) | .id' | head -1)
+          # Use existing untagged draft (release-drafter creates these), or create fresh
+          DRAFT_ID=$(gh api repos/$GITHUB_REPOSITORY/releases --jq '.[] | select(.draft and .tag_name == "") | .id' | head -1)
           if [ -n "$DRAFT_ID" ]; then
-            echo "Draft release found (id=$DRAFT_ID) — updating to $TITLE"
+            echo "Untagged draft found (id=$DRAFT_ID) — updating to $TITLE"
             gh api repos/$GITHUB_REPOSITORY/releases/$DRAFT_ID \
               --method PATCH \
               --field tag_name="$TAG" \
