@@ -14,7 +14,7 @@ curl -fsSL https://futrou.com/install.sh | bash
 irm https://futrou.com/install.ps1 | iex
 ```
 
-### npm / npx
+### npm / npx (Linux, MacOS and Windows)
 ```bash
 npm install -g futrou
 # or run without installing
