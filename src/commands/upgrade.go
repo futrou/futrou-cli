@@ -6,6 +6,8 @@ import (
 	"os/exec"
 	"runtime"
 
+	"futrou-cli/src/constants"
+
 	"github.com/urfave/cli/v2"
 )
 
@@ -29,7 +31,7 @@ var upgradeCommand = &cli.Command{
 }
 
 func runUpgradeUnix(version string) error {
-	script := "https://futrou.com/install.sh"
+	script := constants.UpgradeUnixUrl
 
 	// Check for curl or wget
 	var cmd *exec.Cmd
@@ -62,7 +64,7 @@ func runUpgradeUnix(version string) error {
 }
 
 func runUpgradeWindows(version string) error {
-	script := "https://futrou.com/install.ps1"
+	script := constants.UpgradeWindowsUrl
 
 	var psCmd string
 	if version == "latest" {

@@ -60,15 +60,21 @@ func TestLogin_oauthFlow(t *testing.T) {
 
 	// Run the login command; it will open the browser (no-op), then wait for
 	// the local callback. We drive the callback from a goroutine.
-	done := make(chan struct{ out string; err error }, 1)
+	done := make(chan struct {
+		out string
+		err error
+	}, 1)
 	go func() {
 		out, err := captureRun([]string{"futrou", "--api-url", ts.URL, "login"})
-		done <- struct{ out string; err error }{out, err}
+		done <- struct {
+			out string
+			err error
+		}{out, err}
 	}()
 
 	// Poll until the CLI's authorize endpoint is hit and we have the callback URL.
 	var resp *http.Response
-	for i := 0; i < 50; i++ {
+	for range 50 {
 		// Try to hit the authorize endpoint so we get the redirect_uri.
 		r, err := http.Get(ts.URL + "/v2/auth/oauth2/authorize?response_type=code&client_id=test-client-id&redirect_uri=http://localhost:0/callback&code_challenge=x&code_challenge_method=S256")
 		if err == nil {
@@ -160,7 +166,7 @@ func TestFetchOAuthDiscovery(t *testing.T) {
 func TestRegisterClient(t *testing.T) {
 	ts := newTestServer(t)
 	ts.on("POST", "/register", func(w http.ResponseWriter, r *http.Request) {
-		var body map[string]interface{}
+		var body map[string]any
 		json.NewDecoder(r.Body).Decode(&body)
 		if body["client_name"] != "Futrou CLI" {
 			t.Errorf("unexpected client_name: %v", body["client_name"])
@@ -180,15 +186,16 @@ func TestRegisterClient(t *testing.T) {
 func TestExchangeCode(t *testing.T) {
 	ts := newTestServer(t)
 	ts.on("POST", "/token", func(w http.ResponseWriter, r *http.Request) {
-		r.ParseForm()
-		if r.FormValue("grant_type") != "authorization_code" {
-			t.Errorf("grant_type = %q", r.FormValue("grant_type"))
+		var body map[string]string
+		json.NewDecoder(r.Body).Decode(&body)
+		if body["grant_type"] != "authorization_code" {
+			t.Errorf("grant_type = %q", body["grant_type"])
 		}
-		if r.FormValue("code") != "auth-code-123" {
-			t.Errorf("code = %q", r.FormValue("code"))
+		if body["code"] != "auth-code-123" {
+			t.Errorf("code = %q", body["code"])
 		}
-		if r.FormValue("code_verifier") != "verifier-xyz" {
-			t.Errorf("code_verifier = %q", r.FormValue("code_verifier"))
+		if body["code_verifier"] != "verifier-xyz" {
+			t.Errorf("code_verifier = %q", body["code_verifier"])
 		}
 		writeJSON(w, map[string]string{
 			"access_token": "the-access-token",
@@ -227,11 +234,12 @@ func TestLogout(t *testing.T) {
 	t.Setenv("HOME", tmpHome)
 	t.Setenv("FUTROU_API_TOKEN", "")
 
+	ts := newTestServer(t)
+
 	cfgDir := filepath.Join(tmpHome, ".futrou")
 	os.MkdirAll(cfgDir, 0700)
-	os.WriteFile(filepath.Join(cfgDir, "cli.json"), []byte(`{"apiKey":"tok"}`), 0600)
+	os.WriteFile(filepath.Join(cfgDir, "cli.json"), []byte(`{"apiUrl":"`+ts.URL+`","apiKey":"tok"}`), 0600)
 
-	ts := newTestServer(t)
 	args := []string{"futrou", "--api-url", ts.URL, "logout"}
 	out, err := captureRun(args)
 	assertNoError(t, err)
@@ -250,17 +258,22 @@ func TestLogout_noConfigFile(t *testing.T) {
 	args := []string{"futrou", "--api-url", ts.URL, "logout"}
 	out, err := captureRun(args)
 	assertNoError(t, err)
-	assertContains(t, out, "Logged out")
+	assertContains(t, out, "Not logged in")
 }
 
 func TestLogout_json(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
 	t.Setenv("FUTROU_API_TOKEN", "")
 
 	ts := newTestServer(t)
+
+	cfgDir := filepath.Join(tmpHome, ".futrou")
+	os.MkdirAll(cfgDir, 0700)
+	os.WriteFile(filepath.Join(cfgDir, "cli.json"), []byte(`{"apiUrl":"`+ts.URL+`","apiKey":"tok"}`), 0600)
+
 	args := []string{"futrou", "--api-url", ts.URL, "--log-format", "json", "logout"}
 	out, err := captureRun(args)
 	assertNoError(t, err)
 	assertContains(t, out, "logged out")
 }
-

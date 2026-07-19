@@ -14,7 +14,7 @@ import (
 
 var schemaCommand = &cli.Command{
 	Name:  "schema",
-	Usage: "Print the Futrou API v2 OpenAPI schema",
+	Usage: "Display the Futrou API v2 OpenAPI schema",
 	Action: func(c *cli.Context) error {
 		apiUrl := services.NormalizeApiUrl(globalApiUrl(c))
 		url := apiUrl + "/v2/openapi.json"

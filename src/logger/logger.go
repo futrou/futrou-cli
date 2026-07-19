@@ -98,6 +98,12 @@ func GetLogFormat() string {
 	return logFormat
 }
 
+// UseColors reports whether ANSI colors should be used for output,
+// based on whether stdout is a terminal.
+func UseColors() bool {
+	return useColors
+}
+
 func init() {
 	if lvl := os.Getenv("LOG_LEVEL"); lvl != "" {
 		SetLogLevel(lvl)
@@ -111,6 +117,7 @@ func init() {
 }
 
 func Log(l *log.Logger, level, color, format string, args ...interface{}) {
+	stopLoader()
 	ts := time.Now().Format("2006-01-02 15:04:05")
 	msg := fmt.Sprintf(format, args...)
 	if logFormat == FORMAT_JSON {

@@ -153,6 +153,58 @@ var dnsCommand = &cli.Command{
 			},
 		},
 		{
+			Name:      "logs",
+			Usage:     "View logs for a DNS zone",
+			ArgsUsage: "<id>",
+			Flags:     logFlags,
+			Action: func(c *cli.Context) error {
+				id := c.Args().First()
+				if id == "" {
+					return fmt.Errorf("DNS zone ID required")
+				}
+				client, err := requireAuth(c)
+				if err != nil {
+					return err
+				}
+				var result interface{}
+				status, err := client.RequestInto("GET", "/v2/dns/"+id+"/logs"+logQueryString(c), nil, &result)
+				if err != nil {
+					return err
+				}
+				if status >= 400 {
+					return fmt.Errorf("request failed with status %d", status)
+				}
+				return printJSON(result)
+			},
+			Subcommands: []*cli.Command{
+				{
+					Name:      "tail",
+					Usage:     "View recent logs for a DNS zone",
+					ArgsUsage: "<id>",
+					Flags:     logFlags,
+					Action: func(c *cli.Context) error {
+						id := c.Args().First()
+						if id == "" {
+							return fmt.Errorf("DNS zone ID required")
+						}
+						client, err := requireAuth(c)
+						if err != nil {
+							return err
+						}
+						var result interface{}
+						status, err := client.RequestInto("GET", "/v2/dns/"+id+"/logs/tail"+logQueryString(c), nil, &result)
+						if err != nil {
+							return err
+						}
+						if status >= 400 {
+							return fmt.Errorf("request failed with status %d", status)
+						}
+						return printJSON(result)
+					},
+				},
+			},
+		},
+		{
 			Name:  "records",
 			Usage: "Manage DNS records for a zone",
 			Subcommands: []*cli.Command{

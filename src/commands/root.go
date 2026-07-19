@@ -31,39 +31,47 @@ func globalApiUrl(c *cli.Context) string {
 	return constants.DefaultApiUrl
 }
 
-// globalApiKey returns the --api-key value walking up to the root context.
+// globalApiKey returns the --api-token value (or its hidden --api-key
+// alias) walking up to the root context.
 func globalApiKey(c *cli.Context) string {
-	if v := c.String("api-key"); v != "" {
-		return v
-	}
-	if c.Lineage() != nil {
-		for _, parent := range c.Lineage() {
-			if v := parent.String("api-key"); v != "" {
-				return v
-			}
+	for _, ctx := range append([]*cli.Context{c}, c.Lineage()...) {
+		if v := ctx.String("api-token"); v != "" {
+			return v
+		}
+		if v := ctx.String("api-key"); v != "" {
+			return v
 		}
 	}
 	return ""
 }
 
 func newApp() *cli.App {
+	app := buildApp()
+	setHelpTemplate(app)
+	return app
+}
+
+func buildApp() *cli.App {
 	return &cli.App{
 		Name:                 constants.Name,
 		Version:              constants.Version,
 		Usage:                constants.Description,
 		EnableBashCompletion: true,
+		HideVersion:          true,
 		Flags: []cli.Flag{
 			&cli.StringFlag{
 				Name:    "log-format",
 				Usage:   "Output format: text or json",
 				Value:   constants.DefaultLogFormat,
 				EnvVars: []string{constants.EnvLogFormat},
+				Hidden:  true,
 			},
 			&cli.StringFlag{
 				Name:    "log-level",
 				Usage:   "Log level: debug, info, warn, error",
 				Value:   constants.DefaultLogLevel,
 				EnvVars: []string{constants.EnvLogLevel},
+				Hidden:  true,
 			},
 			&cli.StringFlag{
 				Name:    "api-url",
@@ -72,10 +80,15 @@ func newApp() *cli.App {
 				EnvVars: []string{constants.EnvApiUrl},
 			},
 			&cli.StringFlag{
-				Name:    "api-key",
-				Aliases: []string{"api-token"},
-				Usage:   "Futrou API key (overrides stored credentials)",
+				Name:    "api-token",
+				Usage:   "Futrou API token (overrides stored credentials)",
 				EnvVars: []string{constants.EnvApiToken},
+			},
+			&cli.StringFlag{
+				Name:    "api-key",
+				Usage:   "Futrou API token (overrides stored credentials)",
+				EnvVars: []string{constants.EnvApiToken},
+				Hidden:  true,
 			},
 		},
 		Commands: []*cli.Command{
@@ -90,6 +103,7 @@ func newApp() *cli.App {
 			projectsCommand,
 			volumesCommand,
 			licenseCommand,
+			versionCommand,
 			schemaCommand,
 		},
 		Before: func(c *cli.Context) error {

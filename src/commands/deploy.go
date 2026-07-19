@@ -32,7 +32,7 @@ type DeployConfig struct {
 
 var deployCommand = &cli.Command{
 	Name:  "deploy",
-	Usage: "Deploy resources defined in futrou.json",
+	Usage: "Deploy or upgrade resources based on futrou.json config",
 	Flags: []cli.Flag{
 		&cli.StringFlag{
 			Name:    "file",

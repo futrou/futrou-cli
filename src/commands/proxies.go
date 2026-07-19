@@ -183,8 +183,35 @@ var proxiesCommand = &cli.Command{
 			},
 		},
 		{
-			Name:      "verify",
-			Usage:     "Trigger domain verification for a proxy",
+			Name:      "purge",
+			Usage:     "Purge cached responses for a proxy",
+			ArgsUsage: "<id>",
+			Action: func(c *cli.Context) error {
+				id := c.Args().First()
+				if id == "" {
+					return fmt.Errorf("proxy ID required")
+				}
+				client, err := requireAuth(c)
+				if err != nil {
+					return err
+				}
+				status, err := client.RequestInto("POST", "/v2/proxies/"+id+"/purge", nil, nil)
+				if err != nil {
+					return err
+				}
+				if status >= 400 {
+					return fmt.Errorf("request failed with status %d", status)
+				}
+				if isJSON(c) {
+					return printJSON(map[string]string{"status": "purged"})
+				}
+				fmt.Println("✓ Proxy cache purged")
+				return nil
+			},
+		},
+		{
+			Name:      "metrics",
+			Usage:     "Get metrics for a proxy",
 			ArgsUsage: "<id>",
 			Action: func(c *cli.Context) error {
 				id := c.Args().First()
@@ -196,18 +223,66 @@ var proxiesCommand = &cli.Command{
 					return err
 				}
 				var result interface{}
-				status, err := client.RequestInto("POST", "/v2/proxies/"+id+"/verify", nil, &result)
+				status, err := client.RequestInto("GET", "/v2/proxies/"+id+"/metrics", nil, &result)
 				if err != nil {
 					return err
 				}
 				if status >= 400 {
 					return fmt.Errorf("request failed with status %d", status)
 				}
-				if isJSON(c) {
-					return printJSON(result)
+				return printJSON(result)
+			},
+		},
+		{
+			Name:      "logs",
+			Usage:     "View logs for a proxy",
+			ArgsUsage: "<id>",
+			Flags:     logFlags,
+			Action: func(c *cli.Context) error {
+				id := c.Args().First()
+				if id == "" {
+					return fmt.Errorf("proxy ID required")
 				}
-				fmt.Println("✓ Verification triggered")
-				return nil
+				client, err := requireAuth(c)
+				if err != nil {
+					return err
+				}
+				var result interface{}
+				status, err := client.RequestInto("GET", "/v2/proxies/"+id+"/logs"+logQueryString(c), nil, &result)
+				if err != nil {
+					return err
+				}
+				if status >= 400 {
+					return fmt.Errorf("request failed with status %d", status)
+				}
+				return printJSON(result)
+			},
+			Subcommands: []*cli.Command{
+				{
+					Name:      "tail",
+					Usage:     "View recent logs for a proxy",
+					ArgsUsage: "<id>",
+					Flags:     logFlags,
+					Action: func(c *cli.Context) error {
+						id := c.Args().First()
+						if id == "" {
+							return fmt.Errorf("proxy ID required")
+						}
+						client, err := requireAuth(c)
+						if err != nil {
+							return err
+						}
+						var result interface{}
+						status, err := client.RequestInto("GET", "/v2/proxies/"+id+"/logs/tail"+logQueryString(c), nil, &result)
+						if err != nil {
+							return err
+						}
+						if status >= 400 {
+							return fmt.Errorf("request failed with status %d", status)
+						}
+						return printJSON(result)
+					},
+				},
 			},
 		},
 	},

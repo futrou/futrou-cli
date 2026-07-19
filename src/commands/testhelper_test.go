@@ -19,6 +19,10 @@ type testServer struct {
 	routes map[string]http.HandlerFunc
 }
 
+func init() {
+	openBrowserFunc = func(string) {} // never open a real browser during tests
+}
+
 func newTestServer(t *testing.T) *testServer {
 	t.Helper()
 	ts := &testServer{routes: make(map[string]http.HandlerFunc)}
@@ -42,7 +46,7 @@ func (ts *testServer) on(method, path string, handler http.HandlerFunc) {
 }
 
 // respond writes JSON with the given status.
-func respond(status int, body interface{}) http.HandlerFunc {
+func respond(status int, body any) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(status)
@@ -55,13 +59,13 @@ func respondEmpty(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func writeJSON(w http.ResponseWriter, v interface{}) {
+func writeJSON(w http.ResponseWriter, v any) {
 	data, _ := json.Marshal(v)
 	w.Write(data)
 }
 
 // decodeBody parses JSON request body.
-func decodeBody(r *http.Request, v interface{}) {
+func decodeBody(r *http.Request, v any) {
 	json.NewDecoder(r.Body).Decode(v)
 }
 
@@ -114,8 +118,8 @@ func captureRun(args []string) (string, error) {
 
 // fixtures
 
-func fixtureServerlet() map[string]interface{} {
-	return map[string]interface{}{
+func fixtureServerlet() map[string]any {
+	return map[string]any{
 		"id":           "sl-123",
 		"name":         "my-app",
 		"image":        "nginx:latest",
@@ -128,8 +132,8 @@ func fixtureServerlet() map[string]interface{} {
 	}
 }
 
-func fixtureProxy() map[string]interface{} {
-	return map[string]interface{}{
+func fixtureProxy() map[string]any {
+	return map[string]any{
 		"id":        "px-456",
 		"domain":    "example.com",
 		"type":      "http",
@@ -140,16 +144,16 @@ func fixtureProxy() map[string]interface{} {
 	}
 }
 
-func fixtureDNSZone() map[string]interface{} {
-	return map[string]interface{}{
+func fixtureDNSZone() map[string]any {
+	return map[string]any{
 		"id":        "dns-789",
 		"name":      "example.com",
 		"createdAt": "2026-01-01T00:00:00Z",
 	}
 }
 
-func fixtureDNSRecord() map[string]interface{} {
-	return map[string]interface{}{
+func fixtureDNSRecord() map[string]any {
+	return map[string]any{
 		"id":        "rec-001",
 		"dnsId":     "dns-789",
 		"name":      "www",
@@ -161,8 +165,8 @@ func fixtureDNSRecord() map[string]interface{} {
 	}
 }
 
-func fixtureProject() map[string]interface{} {
-	return map[string]interface{}{
+func fixtureProject() map[string]any {
+	return map[string]any{
 		"id":          "proj-abc",
 		"name":        "my-project",
 		"displayName": "My Project",
@@ -171,8 +175,8 @@ func fixtureProject() map[string]interface{} {
 	}
 }
 
-func fixtureVolume() map[string]interface{} {
-	return map[string]interface{}{
+func fixtureVolume() map[string]any {
+	return map[string]any{
 		"id":        "vol-def",
 		"name":      "my-vol",
 		"type":      "ssd",
@@ -181,8 +185,8 @@ func fixtureVolume() map[string]interface{} {
 	}
 }
 
-func fixtureAPIError(msg string) map[string]interface{} {
-	return map[string]interface{}{"message": msg, "statusCode": 401}
+func fixtureAPIError(msg string) map[string]any {
+	return map[string]any{"message": msg, "statusCode": 401}
 }
 
 // assertions

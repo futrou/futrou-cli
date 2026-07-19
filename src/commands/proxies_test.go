@@ -189,24 +189,100 @@ func TestProxiesDelete_apiError(t *testing.T) {
 	assertError(t, err)
 }
 
-func TestProxiesVerify(t *testing.T) {
+func TestProxiesPurge(t *testing.T) {
 	ts := newTestServer(t)
 	called := false
-	ts.on("POST", "/v2/proxies/px-456/verify", func(w http.ResponseWriter, r *http.Request) {
+	ts.on("POST", "/v2/proxies/px-456/purge", func(w http.ResponseWriter, r *http.Request) {
 		called = true
-		respond(200, map[string]string{"status": "pending"})(w, r)
+		respondEmpty(w, r)
 	})
 
-	out, err := runArgs(t, ts, "proxies", "verify", "px-456")
+	out, err := runArgs(t, ts, "proxies", "purge", "px-456")
 	assertNoError(t, err)
-	assertContains(t, out, "Verification triggered")
+	assertContains(t, out, "purged")
 	if !called {
-		t.Error("POST /verify was not called")
+		t.Error("POST /purge was not called")
 	}
 }
 
-func TestProxiesVerify_missingID(t *testing.T) {
+func TestProxiesPurge_missingID(t *testing.T) {
 	ts := newTestServer(t)
-	_, err := runArgs(t, ts, "proxies", "verify")
+	_, err := runArgs(t, ts, "proxies", "purge")
+	assertError(t, err)
+}
+
+func TestProxiesPurge_apiError(t *testing.T) {
+	ts := newTestServer(t)
+	ts.on("POST", "/v2/proxies/bad-id/purge", respond(404, fixtureAPIError("not found")))
+
+	_, err := runArgs(t, ts, "proxies", "purge", "bad-id")
+	assertError(t, err)
+}
+
+func TestProxiesMetrics(t *testing.T) {
+	ts := newTestServer(t)
+	ts.on("GET", "/v2/proxies/px-456/metrics", respond(200, map[string]interface{}{"requests": 42}))
+
+	out, err := runArgs(t, ts, "proxies", "metrics", "px-456")
+	assertNoError(t, err)
+	assertContains(t, out, "requests")
+}
+
+func TestProxiesMetrics_missingID(t *testing.T) {
+	ts := newTestServer(t)
+	_, err := runArgs(t, ts, "proxies", "metrics")
+	assertError(t, err)
+}
+
+func TestProxiesMetrics_apiError(t *testing.T) {
+	ts := newTestServer(t)
+	ts.on("GET", "/v2/proxies/bad-id/metrics", respond(404, fixtureAPIError("not found")))
+
+	_, err := runArgs(t, ts, "proxies", "metrics", "bad-id")
+	assertError(t, err)
+}
+
+func TestProxiesLogs(t *testing.T) {
+	ts := newTestServer(t)
+	ts.on("GET", "/v2/proxies/px-456/logs", respond(200, []interface{}{map[string]string{"message": "request handled"}}))
+
+	out, err := runArgs(t, ts, "proxies", "logs", "px-456")
+	assertNoError(t, err)
+	assertContains(t, out, "request handled")
+}
+
+func TestProxiesLogs_missingID(t *testing.T) {
+	ts := newTestServer(t)
+	_, err := runArgs(t, ts, "proxies", "logs")
+	assertError(t, err)
+}
+
+func TestProxiesLogs_withFlags(t *testing.T) {
+	ts := newTestServer(t)
+	var gotQuery string
+	ts.on("GET", "/v2/proxies/px-456/logs", func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.RawQuery
+		respond(200, []interface{}{})(w, r)
+	})
+
+	_, err := runArgs(t, ts, "proxies", "logs", "--offset", "10", "--limit", "50", "--search", "error", "px-456")
+	assertNoError(t, err)
+	assertContains(t, gotQuery, "offset=10")
+	assertContains(t, gotQuery, "limit=50")
+	assertContains(t, gotQuery, "search=error")
+}
+
+func TestProxiesLogsTail(t *testing.T) {
+	ts := newTestServer(t)
+	ts.on("GET", "/v2/proxies/px-456/logs/tail", respond(200, []interface{}{map[string]string{"message": "recent entry"}}))
+
+	out, err := runArgs(t, ts, "proxies", "logs", "tail", "px-456")
+	assertNoError(t, err)
+	assertContains(t, out, "recent entry")
+}
+
+func TestProxiesLogsTail_missingID(t *testing.T) {
+	ts := newTestServer(t)
+	_, err := runArgs(t, ts, "proxies", "logs", "tail")
 	assertError(t, err)
 }

@@ -5,7 +5,7 @@ var (
 	Version = "0.0.0"
 	Mode    = "development"
 
-	Description = "Futrou CLI - Deploy and manage Futrou Cloud from your terminal."
+	Description = "Deploy and manage Futrou Cloud from your terminal."
 )
 
 const (
@@ -14,7 +14,14 @@ const (
 	EnvLogLevel  = "LOG_LEVEL"
 	EnvLogFormat = "LOG_FORMAT"
 
-	DefaultApiUrl    = "https://api.futrou.com"
+	DocsUrl = "https://docs.futrou.com"
+	RepoUrl = "https://github.com/futrou/futrou-cli"
+
+	UpgradeUnixUrl    = "https://futrou.com/install.sh"
+	UpgradeWindowsUrl = "https://futrou.com/install.ps1"
+
+	DefaultApiUrl = "https://api.futrou.com"
+
 	DefaultLogLevel  = "info"
 	DefaultLogFormat = "plain"
 
@@ -41,5 +48,10 @@ FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
 AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.`
+SOFTWARE.
+
+This software is open source and its complete source code is available at:
+` + RepoUrl + `
+
+You are free to inspect, modify, rebuild and distribute.`
 )

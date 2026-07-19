@@ -10,12 +10,14 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"os/exec"
 	"runtime"
 	"strings"
 	"time"
 
 	"futrou-cli/src/config"
+	"futrou-cli/src/logger"
 	"futrou-cli/src/services"
 
 	"github.com/urfave/cli/v2"
@@ -23,9 +25,18 @@ import (
 
 var loginCommand = &cli.Command{
 	Name:  "login",
-	Usage: "Authenticate with Futrou Cloud via browser",
+	Usage: "Log in to Futrou Cloud on this machine",
 	Action: func(c *cli.Context) error {
 		apiUrl := services.NormalizeApiUrl(globalApiUrl(c))
+
+		// If a token is already stored for this API URL, don't start a new flow.
+		if cfg, err := config.Load(); err == nil && cfg.TokenFor(apiUrl) != "" {
+			if isJSON(c) {
+				return printJSON(map[string]string{"status": "already logged in"})
+			}
+			fmt.Printf("Already logged in to %s.\nRun 'futrou logout' to log out.\n", apiUrl)
+			return nil
+		}
 
 		discovery, err := fetchOAuthDiscovery(apiUrl)
 		if err != nil {
@@ -74,17 +85,54 @@ var loginCommand = &cli.Command{
 
 		authURL := buildAuthURL(discovery.AuthorizationEndpoint, clientID, redirectURI, challenge)
 
-		fmt.Println("Opening browser for login...")
-		fmt.Printf("\nIf your browser did not open, visit:\n  %s\n\n", authURL)
-		openBrowser(authURL)
+		const loginTimeout = 5 * time.Minute
+		expiresAt := time.Now().Add(loginTimeout)
+
+		fmt.Printf("Please visit the below link in your browser and follow the instructions:\n\n  %s\n\n", authURL)
+		openBrowserFunc(authURL)
+
+		// Tick a countdown in interactive terminals; non-interactive gets no counter.
+		interactive := isInteractiveTerminal()
+		stopCountdown := make(chan struct{})
+		if interactive {
+			go func() {
+				ticker := time.NewTicker(time.Second)
+				defer ticker.Stop()
+				for {
+					remaining := time.Until(expiresAt)
+					if remaining < 0 {
+						remaining = 0
+					}
+					logger.UpdateLoader(fmt.Sprintf("Waiting for authentication (%s remaining)...", formatDuration(remaining)))
+					select {
+					case <-stopCountdown:
+						return
+					case <-ticker.C:
+					}
+				}
+			}()
+		}
 
 		var code string
 		select {
 		case code = <-codeCh:
+			close(stopCountdown)
+			if interactive {
+				logger.StopLoader()
+			}
 		case err = <-errCh:
+			close(stopCountdown)
+			if interactive {
+				logger.StopLoader()
+			}
 			return err
-		case <-time.After(5 * time.Minute):
-			return fmt.Errorf("login timed out — no response received within 5 minutes")
+		case <-time.After(loginTimeout):
+			close(stopCountdown)
+			if interactive {
+				logger.StopLoader()
+			}
+			fmt.Println("Login link expired. Run 'futrou login' to try again.")
+			return fmt.Errorf("login timed out")
 		}
 
 		token, userEmail, err := exchangeCode(discovery.TokenEndpoint, clientID, code, verifier, redirectURI)
@@ -184,14 +232,14 @@ func buildAuthURL(authEndpoint, clientID, redirectURI, challenge string) string 
 }
 
 func exchangeCode(tokenEndpoint, clientID, code, verifier, redirectURI string) (token, email string, err error) {
-	params := url.Values{
-		"grant_type":    {"authorization_code"},
-		"client_id":     {clientID},
-		"code":          {code},
-		"code_verifier": {verifier},
-		"redirect_uri":  {redirectURI},
-	}
-	resp, err := http.PostForm(tokenEndpoint, params)
+	body, _ := json.Marshal(map[string]string{
+		"grant_type":    "authorization_code",
+		"client_id":     clientID,
+		"code":          code,
+		"code_verifier": verifier,
+		"redirect_uri":  redirectURI,
+	})
+	resp, err := http.Post(tokenEndpoint, "application/json", strings.NewReader(string(body)))
 	if err != nil {
 		return "", "", err
 	}
@@ -199,7 +247,11 @@ func exchangeCode(tokenEndpoint, clientID, code, verifier, redirectURI string) (
 
 	var result struct {
 		AccessToken string `json:"access_token"`
-		Email       string `json:"email"`
+		// The API may return the email nested under a user object or at top level.
+		Email string `json:"email"`
+		User  struct {
+			Email string `json:"email"`
+		} `json:"user"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return "", "", err
@@ -207,8 +259,40 @@ func exchangeCode(tokenEndpoint, clientID, code, verifier, redirectURI string) (
 	if result.AccessToken == "" {
 		return "", "", fmt.Errorf("no access_token in token response")
 	}
+	if result.Email == "" {
+		result.Email = result.User.Email
+	}
 	return result.AccessToken, result.Email, nil
 }
+
+func isInteractiveTerminal() bool {
+	fi, err := os.Stdout.Stat()
+	if err != nil {
+		return false
+	}
+	return (fi.Mode() & os.ModeCharDevice) != 0
+}
+
+// formatDuration renders d as h:mm:ss, m:ss, or Ns, using the coarsest
+// unit that fits.
+func formatDuration(d time.Duration) string {
+	d = d.Round(time.Second)
+	h := int(d.Hours())
+	m := int(d.Minutes()) % 60
+	s := int(d.Seconds()) % 60
+	switch {
+	case h > 0:
+		return fmt.Sprintf("%d:%02d:%02d", h, m, s)
+	case m > 0:
+		return fmt.Sprintf("%d:%02d", m, s)
+	default:
+		return fmt.Sprintf("%ds", s)
+	}
+}
+
+// openBrowserFunc is the function used to open a URL in the default browser.
+// Tests replace it with a no-op to avoid launching a real browser.
+var openBrowserFunc = openBrowser
 
 func openBrowser(u string) {
 	var cmd *exec.Cmd

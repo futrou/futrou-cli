@@ -23,11 +23,11 @@ func decryptToken(stored string) (string, error) {
 // ApiKey is keyed by normalized API URL so credentials for different
 // Futrou environments (e.g. production vs. self-hosted) don't collide.
 type Config struct {
-	ApiUrl string            `json:"apiUrl,omitempty"`
-	Tokens map[string]string `json:"tokens,omitempty"`
+	ApiUrl    string            `json:"apiUrl,omitempty"`
+	ApiTokens map[string]string `json:"apiTokens,omitempty"`
 
 	// ApiKey is deprecated: kept only to migrate older config files that
-	// stored a single global token. New writes always use Tokens.
+	// stored a single global token. New writes always use ApiTokens.
 	ApiKey string `json:"apiKey,omitempty"`
 }
 
@@ -43,10 +43,10 @@ func normalizeUrlKey(apiUrl string) string {
 // Tokens encrypted on a different device cannot be decrypted here and
 // are treated as absent, prompting the user to log in again.
 func (cfg *Config) TokenFor(apiUrl string) string {
-	if cfg.Tokens == nil {
+	if cfg.ApiTokens == nil {
 		return ""
 	}
-	stored := cfg.Tokens[normalizeUrlKey(apiUrl)]
+	stored := cfg.ApiTokens[normalizeUrlKey(apiUrl)]
 	token, err := decryptToken(stored)
 	if err != nil {
 		return ""
@@ -57,10 +57,10 @@ func (cfg *Config) TokenFor(apiUrl string) string {
 // SetToken stores the API key for the given API URL, encrypted with a
 // key derived from this device's machine ID where available.
 func (cfg *Config) SetToken(apiUrl, token string) {
-	if cfg.Tokens == nil {
-		cfg.Tokens = map[string]string{}
+	if cfg.ApiTokens == nil {
+		cfg.ApiTokens = map[string]string{}
 	}
-	cfg.Tokens[normalizeUrlKey(apiUrl)] = encryptToken(token)
+	cfg.ApiTokens[normalizeUrlKey(apiUrl)] = encryptToken(token)
 }
 
 func configPath() (string, error) {
@@ -100,7 +100,17 @@ func Load() (*Config, error) {
 		cfg.ApiUrl = constants.DefaultApiUrl
 	}
 
-	// Migrate legacy single-token config into the per-URL map.
+	// Migrate old "tokens" field (renamed to "apiTokens") written by earlier CLI versions.
+	if cfg.ApiTokens == nil {
+		var legacy struct {
+			Tokens map[string]string `json:"tokens"`
+		}
+		if json.Unmarshal(data, &legacy) == nil && len(legacy.Tokens) > 0 {
+			cfg.ApiTokens = legacy.Tokens
+		}
+	}
+
+	// Migrate legacy single flat apiKey into the per-URL map.
 	if cfg.ApiKey != "" && cfg.TokenFor(cfg.ApiUrl) == "" {
 		cfg.SetToken(cfg.ApiUrl, cfg.ApiKey)
 	}

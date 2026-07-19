@@ -3,11 +3,12 @@
   "productName": "Futrou CLI",
   "version": "1.0.0",
   "description": "Futrou CLI - Deploy and manage Futrou Cloud from your terminal.",
+  "main": "./index.cjs",
+  "types": "./index.d.ts",
   "bin": {
     "futrou": "./index.cjs",
     "futrou-cli": "./index.cjs"
   },
-  "types": "./index.d.ts",
   "os": [
     "linux",
     "darwin",

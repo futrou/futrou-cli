@@ -124,6 +124,51 @@ func TestDNSDelete_apiError(t *testing.T) {
 	assertError(t, err)
 }
 
+func TestDNSLogs(t *testing.T) {
+	ts := newTestServer(t)
+	ts.on("GET", "/v2/dns/dns-789/logs", respond(200, []interface{}{map[string]string{"message": "query received"}}))
+
+	out, err := runArgs(t, ts, "dns", "logs", "dns-789")
+	assertNoError(t, err)
+	assertContains(t, out, "query received")
+}
+
+func TestDNSLogs_missingID(t *testing.T) {
+	ts := newTestServer(t)
+	_, err := runArgs(t, ts, "dns", "logs")
+	assertError(t, err)
+}
+
+func TestDNSLogs_withFlags(t *testing.T) {
+	ts := newTestServer(t)
+	var gotQuery string
+	ts.on("GET", "/v2/dns/dns-789/logs", func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.RawQuery
+		respond(200, []interface{}{})(w, r)
+	})
+
+	_, err := runArgs(t, ts, "dns", "logs", "--offset", "10", "--limit", "50", "--search", "error", "dns-789")
+	assertNoError(t, err)
+	assertContains(t, gotQuery, "offset=10")
+	assertContains(t, gotQuery, "limit=50")
+	assertContains(t, gotQuery, "search=error")
+}
+
+func TestDNSLogsTail(t *testing.T) {
+	ts := newTestServer(t)
+	ts.on("GET", "/v2/dns/dns-789/logs/tail", respond(200, []interface{}{map[string]string{"message": "recent entry"}}))
+
+	out, err := runArgs(t, ts, "dns", "logs", "tail", "dns-789")
+	assertNoError(t, err)
+	assertContains(t, out, "recent entry")
+}
+
+func TestDNSLogsTail_missingID(t *testing.T) {
+	ts := newTestServer(t)
+	_, err := runArgs(t, ts, "dns", "logs", "tail")
+	assertError(t, err)
+}
+
 // --- DNS Records ---
 
 func TestDNSRecordsList(t *testing.T) {

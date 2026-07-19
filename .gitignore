@@ -29,3 +29,5 @@ node_modules/
 .superpowers/
 .agent/
 .skills/
+.docs
+docs/

@@ -180,19 +180,19 @@ var serverletsCommand = &cli.Command{
 			Name:      "start",
 			Usage:     "Start a serverlet",
 			ArgsUsage: "<id>",
-			Action: serverletAction("start"),
+			Action:    serverletAction("start"),
 		},
 		{
 			Name:      "stop",
 			Usage:     "Stop a serverlet",
 			ArgsUsage: "<id>",
-			Action: serverletAction("stop"),
+			Action:    serverletAction("stop"),
 		},
 		{
 			Name:      "restart",
 			Usage:     "Restart a serverlet",
 			ArgsUsage: "<id>",
-			Action: serverletAction("restart"),
+			Action:    serverletAction("restart"),
 		},
 		{
 			Name:      "logs",

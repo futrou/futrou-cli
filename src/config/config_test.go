@@ -168,7 +168,7 @@ func TestTokenFor_missingURL(t *testing.T) {
 }
 
 func TestTokenFor_nilTokens(t *testing.T) {
-	cfg := &Config{Tokens: nil}
+	cfg := &Config{ApiTokens: nil}
 	if got := cfg.TokenFor("https://api.futrou.com"); got != "" {
 		t.Errorf("TokenFor on nil Tokens = %q, want \"\"", got)
 	}
