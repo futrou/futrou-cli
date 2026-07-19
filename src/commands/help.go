@@ -56,12 +56,42 @@ func customAppHelpTemplate() string {
 Global options:{{template "visibleFlagCategoryTemplate" .}}{{else if .VisibleFlags}}
 Global options:{{template "visibleFlagTemplate" .}}{{end}}
 {{if .VisibleCommands}}
-Commands:{{template "visibleCommandCategoryTemplate" .}}
+Commands:{{commandLines .VisibleCommands}}
 {{end}}
 Documentation:
    For more information and detailed guides, visit ` + constants.DocsUrl + `
 `
 	return tpl
+}
+
+// expandedGroups lists command names whose subcommands should be listed
+// inline in top-level help (e.g. "setup mcp", "setup skills") instead of
+// collapsing to a single "setup" line, since unlike proxies/dns/serverlets/
+// etc. their subcommands are the whole point of the command.
+var expandedGroups = map[string]bool{
+	"setup": true,
+}
+
+// commandLines renders the top-level command list, one line per command,
+// expanding the groups named in expandedGroups into one line per subcommand.
+func commandLines(commands []*cli.Command) string {
+	var b strings.Builder
+	for _, cmd := range commands {
+		if cmd.Hidden {
+			continue
+		}
+		if expandedGroups[cmd.Name] {
+			for _, sub := range cmd.Subcommands {
+				if sub.Hidden || sub.Name == "help" {
+					continue
+				}
+				fmt.Fprintf(&b, "\n   %s %s\t%s", cmd.Name, sub.Name, sub.Usage)
+			}
+			continue
+		}
+		fmt.Fprintf(&b, "\n   %s\t%s", strings.Join(cmd.Names(), ", "), cmd.Usage)
+	}
+	return b.String()
 }
 
 // commandHelpTemplate is cli.CommandHelpTemplate with the same badge header
@@ -106,6 +136,7 @@ func setHelpTemplate(app *cli.App) {
 		var buf strings.Builder
 		cli.HelpPrinterCustom(&buf, templ, data, map[string]interface{}{
 			"commandBadge": commandBadge,
+			"commandLines": commandLines,
 		})
 		io.WriteString(w, strings.ReplaceAll(buf.String(), defaultHelpUsage, helpUsage))
 	}

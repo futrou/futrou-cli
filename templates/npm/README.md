@@ -1,3 +1,5 @@
+![Futrou CLI Banner](.github/assets/banner.png)
+
 # Futrou CLI
 
 The **Futrou CLI** allows you to manage your Futrou projects and infrastructure from your terminal.

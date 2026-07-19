@@ -31,3 +31,4 @@ node_modules/
 .skills/
 .docs
 docs/
+.mcp.json

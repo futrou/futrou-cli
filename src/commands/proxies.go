@@ -8,7 +8,7 @@ import (
 
 var proxiesCommand = &cli.Command{
 	Name:  "proxies",
-	Usage: "Manage HTTP/TCP proxies",
+	Usage: "Manage HTTPs/TCP/UDP proxies",
 	Subcommands: []*cli.Command{
 		{
 			Name:  "list",

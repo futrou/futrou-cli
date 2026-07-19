@@ -16,6 +16,7 @@ const (
 
 	DocsUrl = "https://docs.futrou.com"
 	RepoUrl = "https://github.com/futrou/futrou-cli"
+	McpUrl  = "https://mcp.futrou.com"
 
 	UpgradeUnixUrl    = "https://futrou.com/install.sh"
 	UpgradeWindowsUrl = "https://futrou.com/install.ps1"

@@ -17,9 +17,9 @@ import (
 
 // ApiClient handles communication with the Futrou API.
 type ApiClient struct {
-	client *http.Client
-	apiUrl string
-	token  string
+	client   *http.Client
+	apiUrl   string
+	apiToken string
 }
 
 // NormalizeApiUrl strips a trailing slash and a trailing "/v2" so that both
@@ -45,23 +45,28 @@ func NewApiClient(apiUrl, token string) (*ApiClient, error) {
 		cfg.ApiKey = token
 	}
 	return &ApiClient{
-		apiUrl: NormalizeApiUrl(cfg.ApiUrl),
-		token:  cfg.ApiKey,
-		client: &http.Client{Timeout: 30 * time.Second},
+		apiUrl:   NormalizeApiUrl(cfg.ApiUrl),
+		apiToken: cfg.ApiKey,
+		client:   newHttpClient(30 * time.Second),
 	}, nil
 }
 
-// Token returns the API token used by this client.
-func (ac *ApiClient) Token() string {
-	return ac.token
+// ApiToken returns the API token used by this client.
+func (ac *ApiClient) ApiToken() string {
+	return ac.apiToken
+}
+
+// ApiUrl returns the normalized base API URL used by this client.
+func (ac *ApiClient) ApiUrl() string {
+	return ac.apiUrl
 }
 
 // NewApiClientWithToken creates a client with explicit url and token (no config file lookup).
-func NewApiClientWithToken(apiUrl, token string) *ApiClient {
+func NewApiClientWithToken(apiUrl, apiToken string) *ApiClient {
 	return &ApiClient{
-		apiUrl: NormalizeApiUrl(apiUrl),
-		token:  token,
-		client: &http.Client{Timeout: 30 * time.Second},
+		apiUrl:   NormalizeApiUrl(apiUrl),
+		apiToken: apiToken,
+		client:   newHttpClient(30 * time.Second),
 	}
 }
 
@@ -157,8 +162,8 @@ func (ac *ApiClient) do(ctx context.Context, method, path string, body interface
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	if ac.token != "" {
-		req.Header.Set("Authorization", "Bearer "+ac.token)
+	if ac.apiToken != "" {
+		req.Header.Set("Authorization", "Bearer "+ac.apiToken)
 	}
 
 	logger.Debug("→ %s %s", method, url)

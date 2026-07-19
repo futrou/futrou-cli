@@ -94,6 +94,8 @@ func buildApp() *cli.App {
 		Commands: []*cli.Command{
 			loginCommand,
 			logoutCommand,
+			whoamiCommand,
+			setupCommand,
 			initCommand,
 			deployCommand,
 			upgradeCommand,

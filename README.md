@@ -1,3 +1,5 @@
+![Futrou CLI Banner](.github/assets/banner.png)
+
 # Futrou CLI
 
 Futrou CLI is a command-line tool for deploying and managing resources on Futrou Cloud — serverlets, proxies, DNS zones, volumes, projects and more.

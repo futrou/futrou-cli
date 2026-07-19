@@ -18,7 +18,7 @@ func requireAuth(c *cli.Context) (*services.ApiClient, error) {
 		return nil, err
 	}
 
-	if client.Token() == "" {
+	if client.ApiToken() == "" {
 		return nil, fmt.Errorf("not logged in — run 'futrou login' or set FUTROU_API_TOKEN")
 	}
 

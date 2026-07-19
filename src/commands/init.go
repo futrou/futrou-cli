@@ -53,7 +53,7 @@ var initCommand = &cli.Command{
 		apiUrl := globalApiUrl(c)
 		apiKey := globalApiKey(c)
 		var suggestedName string
-		if client, err := services.NewApiClient(apiUrl, apiKey); err == nil && client.Token() != "" {
+		if client, err := services.NewApiClient(apiUrl, apiKey); err == nil && client.ApiToken() != "" {
 			suggestedName = checkServerletName(client, name)
 		}
 		if suggestedName != "" && suggestedName != name {
