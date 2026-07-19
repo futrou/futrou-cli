@@ -1,4 +1,4 @@
-![Futrou CLI Banner](.github/assets/banner.png)
+![Futrou CLI Banner](.github/assets/banner.jpg)
 
 # Futrou CLI
 
