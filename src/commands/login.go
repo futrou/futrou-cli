@@ -26,6 +26,11 @@ import (
 	"github.com/urfave/cli/v2"
 )
 
+// loginTimeout is how long the CLI waits for the OAuth callback before
+// giving up. A var (not const) so tests can shrink it instead of waiting
+// out the real duration.
+var loginTimeout = 5 * time.Minute
+
 var loginCommand = &cli.Command{
 	Name:  "login",
 	Usage: "Log in to Futrou Cloud on this machine",
@@ -93,7 +98,6 @@ var loginCommand = &cli.Command{
 			authURL = shortURL
 		}
 
-		const loginTimeout = 5 * time.Minute
 		expiresAt := time.Now().Add(loginTimeout)
 
 		fmt.Printf("Please visit the below link in your browser and follow the instructions:\n\n  %s\n\n", authURL)

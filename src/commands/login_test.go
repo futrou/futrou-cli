@@ -18,6 +18,10 @@ import (
 // (discovery → registration → token exchange) and verifies that the CLI saves
 // a token and prints a success message.
 func TestLogin_oauthFlow(t *testing.T) {
+	prevTimeout := loginTimeout
+	loginTimeout = time.Second
+	t.Cleanup(func() { loginTimeout = prevTimeout })
+
 	ts := newTestServer(t)
 
 	// Discovery
