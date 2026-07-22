@@ -63,21 +63,23 @@ var projectsCommand = &cli.Command{
 			Flags: []cli.Flag{
 				&cli.StringFlag{Name: "name", Required: true, Usage: "Project name (slug)"},
 				&cli.StringFlag{Name: "display-name", Usage: "Display name"},
-				&cli.StringFlag{Name: "workspace", Usage: "Workspace ID"},
+				workspaceFlag,
 			},
 			Action: func(c *cli.Context) error {
+				workspaceID, err := resolveWorkspaceID(c)
+				if err != nil {
+					return err
+				}
 				client, err := requireAuth(c)
 				if err != nil {
 					return err
 				}
 				body := map[string]interface{}{
-					"name": c.String("name"),
+					"name":        c.String("name"),
+					"workspaceId": workspaceID,
 				}
 				if v := c.String("display-name"); v != "" {
 					body["displayName"] = v
-				}
-				if v := c.String("workspace"); v != "" {
-					body["workspaceId"] = v
 				}
 				var result interface{}
 				status, err := client.RequestInto("POST", "/v2/projects", body, &result)

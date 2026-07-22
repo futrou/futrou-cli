@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"bufio"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -13,10 +14,12 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
 	"futrou-cli/src/config"
+	"futrou-cli/src/constants"
 	"futrou-cli/src/logger"
 	"futrou-cli/src/services"
 
@@ -26,6 +29,7 @@ import (
 var loginCommand = &cli.Command{
 	Name:  "login",
 	Usage: "Log in to Futrou Cloud on this machine",
+	Flags: []cli.Flag{workspaceFlag},
 	Action: func(c *cli.Context) error {
 		apiUrl := services.NormalizeApiUrl(globalApiUrl(c))
 
@@ -146,14 +150,24 @@ var loginCommand = &cli.Command{
 		}
 		cfg.ApiUrl = apiUrl
 		cfg.SetToken(apiUrl, token)
+
+		workspaceID, workspaceName, err := selectDefaultWorkspace(apiUrl, token, c.String("workspace"))
+		if err != nil {
+			return fmt.Errorf("selecting default workspace: %w", err)
+		}
+		if workspaceID != "" {
+			cfg.SetDefaultWorkspace(apiUrl, workspaceID)
+		}
+
 		if err := config.Save(cfg); err != nil {
 			return fmt.Errorf("saving config: %w", err)
 		}
 
 		if isJSON(c) {
 			return printJSON(map[string]string{
-				"email":  userEmail,
-				"status": "logged in",
+				"email":     userEmail,
+				"status":    "logged in",
+				"workspace": workspaceName,
 			})
 		}
 
@@ -161,6 +175,9 @@ var loginCommand = &cli.Command{
 			fmt.Printf("✓ Logged in as %s\n", userEmail)
 		} else {
 			fmt.Println("✓ Logged in successfully")
+		}
+		if workspaceName != "" {
+			fmt.Printf("✓ Default workspace set to %s\n", workspaceName)
 		}
 		return nil
 	},
@@ -187,7 +204,7 @@ func fetchOAuthDiscovery(apiUrl string) (*oauthDiscovery, error) {
 
 func registerClient(registrationEndpoint string) (string, error) {
 	body, _ := json.Marshal(map[string]interface{}{
-		"client_name":    "Futrou CLI",
+		"client_name":    constants.Name,
 		"redirect_uris":  []string{"http://localhost"},
 		"grant_types":    []string{"authorization_code"},
 		"response_types": []string{"code"},
@@ -263,6 +280,77 @@ func exchangeCode(tokenEndpoint, clientID, code, verifier, redirectURI string) (
 		result.Email = result.User.Email
 	}
 	return result.AccessToken, result.Email, nil
+}
+
+// selectDefaultWorkspace determines the workspace to store as the default
+// for apiUrl after a successful login. If flagValue is set, it resolves that
+// workspace (by UUID or name) directly. Otherwise, in an interactive
+// terminal, it prompts the user to choose among their workspaces. It returns
+// empty strings (no error) when there's nothing to select or store, e.g. a
+// brand-new account with no workspaces yet, or a non-interactive shell with
+// no --workspace flag.
+func selectDefaultWorkspace(apiUrl, token, flagValue string) (id, name string, err error) {
+	client := services.NewApiClientWithToken(apiUrl, token)
+
+	var workspaces []struct {
+		Id   string `json:"id"`
+		Name string `json:"name"`
+	}
+	status, err := client.RequestInto("GET", "/v2/workspaces", nil, &workspaces)
+	if err != nil {
+		return "", "", err
+	}
+	if status >= 400 {
+		return "", "", fmt.Errorf("listing workspaces failed with status %d", status)
+	}
+	if len(workspaces) == 0 {
+		return "", "", nil
+	}
+
+	if flagValue != "" {
+		if looksLikeUUID(flagValue) {
+			for _, w := range workspaces {
+				if w.Id == flagValue {
+					return w.Id, w.Name, nil
+				}
+			}
+			return flagValue, flagValue, nil
+		}
+		for _, w := range workspaces {
+			if w.Name == flagValue {
+				return w.Id, w.Name, nil
+			}
+		}
+		return "", "", fmt.Errorf("no workspace named %q found", flagValue)
+	}
+
+	if !isInteractiveTerminal() {
+		return "", "", nil
+	}
+
+	if len(workspaces) == 1 {
+		return workspaces[0].Id, workspaces[0].Name, nil
+	}
+
+	fmt.Println("\nSelect a default workspace:")
+	for i, w := range workspaces {
+		fmt.Printf("  %d) %s\n", i+1, w.Name)
+	}
+	reader := bufio.NewReader(os.Stdin)
+	for {
+		fmt.Print("Enter a number: ")
+		line, readErr := reader.ReadString('\n')
+		if readErr != nil {
+			return "", "", fmt.Errorf("reading workspace selection: %w", readErr)
+		}
+		choice, convErr := strconv.Atoi(strings.TrimSpace(line))
+		if convErr != nil || choice < 1 || choice > len(workspaces) {
+			fmt.Printf("Please enter a number between 1 and %d.\n", len(workspaces))
+			continue
+		}
+		w := workspaces[choice-1]
+		return w.Id, w.Name, nil
+	}
 }
 
 func isInteractiveTerminal() bool {

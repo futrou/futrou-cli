@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -238,15 +239,25 @@ func TestLogout(t *testing.T) {
 
 	cfgDir := filepath.Join(tmpHome, ".futrou")
 	os.MkdirAll(cfgDir, 0700)
-	os.WriteFile(filepath.Join(cfgDir, "cli.json"), []byte(`{"apiUrl":"`+ts.URL+`","apiKey":"tok"}`), 0600)
+	os.WriteFile(filepath.Join(cfgDir, "cli.json"), []byte(`{"apiUrl":"`+ts.URL+`","apiTokens":{"`+strings.ToLower(ts.URL)+`":"tok"}}`), 0600)
 
 	args := []string{"futrou", "--api-url", ts.URL, "logout"}
 	out, err := captureRun(args)
 	assertNoError(t, err)
 	assertContains(t, out, "Logged out")
 
-	if _, statErr := os.Stat(filepath.Join(cfgDir, "cli.json")); !os.IsNotExist(statErr) {
-		t.Error("config file was not removed after logout")
+	data, err := os.ReadFile(filepath.Join(cfgDir, "cli.json"))
+	if err != nil {
+		t.Fatalf("reading config after logout: %v", err)
+	}
+	var cfg struct {
+		ApiTokens map[string]string `json:"apiTokens"`
+	}
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		t.Fatalf("unmarshaling config after logout: %v", err)
+	}
+	if len(cfg.ApiTokens) != 0 {
+		t.Errorf("token was not cleared after logout: %v", cfg.ApiTokens)
 	}
 }
 
@@ -270,7 +281,7 @@ func TestLogout_json(t *testing.T) {
 
 	cfgDir := filepath.Join(tmpHome, ".futrou")
 	os.MkdirAll(cfgDir, 0700)
-	os.WriteFile(filepath.Join(cfgDir, "cli.json"), []byte(`{"apiUrl":"`+ts.URL+`","apiKey":"tok"}`), 0600)
+	os.WriteFile(filepath.Join(cfgDir, "cli.json"), []byte(`{"apiUrl":"`+ts.URL+`","apiTokens":{"`+strings.ToLower(ts.URL)+`":"tok"}}`), 0600)
 
 	args := []string{"futrou", "--api-url", ts.URL, "--log-format", "json", "logout"}
 	out, err := captureRun(args)

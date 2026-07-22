@@ -3,29 +3,51 @@ package commands
 import (
 	"fmt"
 	"net/url"
+	"regexp"
+
+	"futrou-cli/src/config"
+	"futrou-cli/src/services"
 
 	"github.com/urfave/cli/v2"
 )
 
 // workspaceFlag and projectFlag are shared by every command that needs to
 // resolve a workspace (and, where relevant, a project within it).
-var workspaceFlag = &cli.StringFlag{Name: "workspace", Usage: "Workspace name (defaults to the first workspace)"}
-var projectFlag = &cli.StringFlag{Name: "project", Usage: "Project name within the workspace"}
+var workspaceFlag = &cli.StringFlag{Name: "workspace", Usage: "Workspace name or ID (defaults to the workspace selected at login)"}
+var projectFlag = &cli.StringFlag{Name: "project", Usage: "Project name or ID within the workspace (defaults to \"default\")"}
 
-// resolveWorkspaceID resolves --workspace to a workspace ID. If the flag is
-// empty, it lists all workspaces and picks the first one.
+var uuidRe = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+
+// looksLikeUUID reports whether s is formatted like a UUID, so callers can
+// skip a name-lookup round trip and use it directly as a resource ID.
+func looksLikeUUID(s string) bool {
+	return uuidRe.MatchString(s)
+}
+
+// resolveWorkspaceID resolves --workspace to a workspace ID. A UUID is used
+// directly; a name is looked up. If the flag is empty, it falls back to the
+// default workspace stored at login for the current API URL.
 func resolveWorkspaceID(c *cli.Context) (string, error) {
+	name := c.String("workspace")
+	if name == "" {
+		apiUrl := services.NormalizeApiUrl(globalApiUrl(c))
+		if cfg, err := config.Load(); err == nil {
+			name = cfg.DefaultWorkspaceFor(apiUrl)
+		}
+		if name == "" {
+			return "", fmt.Errorf("no workspace specified — pass --workspace or run 'futrou login' to select a default")
+		}
+	}
+	if looksLikeUUID(name) {
+		return name, nil
+	}
+
 	client, err := requireAuth(c)
 	if err != nil {
 		return "", err
 	}
 
-	name := c.String("workspace")
-	path := "/v2/workspaces"
-	if name != "" {
-		path += "?" + url.Values{"name": {name}}.Encode()
-	}
-
+	path := "/v2/workspaces?" + url.Values{"name": {name}}.Encode()
 	var workspaces []map[string]interface{}
 	status, err := client.RequestInto("GET", path, nil, &workspaces)
 	if err != nil {
@@ -35,10 +57,7 @@ func resolveWorkspaceID(c *cli.Context) (string, error) {
 		return "", fmt.Errorf("listing workspaces failed with status %d", status)
 	}
 	if len(workspaces) == 0 {
-		if name != "" {
-			return "", fmt.Errorf("no workspace named %q found", name)
-		}
-		return "", fmt.Errorf("no workspaces found")
+		return "", fmt.Errorf("no workspace named %q found", name)
 	}
 
 	id, _ := workspaces[0]["id"].(string)
@@ -49,11 +68,15 @@ func resolveWorkspaceID(c *cli.Context) (string, error) {
 }
 
 // resolveProjectID resolves --project (within the given workspace) to a
-// project ID via an exact name match.
+// project ID. A UUID is used directly; a name is looked up via an exact
+// match. If the flag is empty, it falls back to a project named "default".
 func resolveProjectID(c *cli.Context, workspaceID string) (string, error) {
 	name := c.String("project")
 	if name == "" {
-		return "", fmt.Errorf("--project is required")
+		name = "default"
+	}
+	if looksLikeUUID(name) {
+		return name, nil
 	}
 
 	client, err := requireAuth(c)

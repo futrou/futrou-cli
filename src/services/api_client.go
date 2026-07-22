@@ -39,14 +39,14 @@ func NewApiClient(apiUrl, token string) (*ApiClient, error) {
 	}
 	if apiUrl != "" {
 		cfg.ApiUrl = apiUrl
-		cfg.ApiKey = cfg.TokenFor(apiUrl)
 	}
+	resolvedToken := cfg.TokenFor(cfg.ApiUrl)
 	if token != "" {
-		cfg.ApiKey = token
+		resolvedToken = token
 	}
 	return &ApiClient{
 		apiUrl:   NormalizeApiUrl(cfg.ApiUrl),
-		apiToken: cfg.ApiKey,
+		apiToken: resolvedToken,
 		client:   newHttpClient(30 * time.Second),
 	}, nil
 }

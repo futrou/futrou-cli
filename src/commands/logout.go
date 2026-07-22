@@ -15,9 +15,13 @@ var logoutCommand = &cli.Command{
 	Action: func(c *cli.Context) error {
 		apiUrl := services.NormalizeApiUrl(globalApiUrl(c))
 		cfg, err := config.Load()
-		loggedIn := err == nil && cfg.TokenFor(apiUrl) != ""
+		if err != nil {
+			return fmt.Errorf("logout failed: %w", err)
+		}
+		loggedIn := cfg.TokenFor(apiUrl) != ""
 
-		if err := config.Delete(); err != nil {
+		cfg.RemoveApiUrl(apiUrl)
+		if err := config.Save(cfg); err != nil {
 			return fmt.Errorf("logout failed: %w", err)
 		}
 

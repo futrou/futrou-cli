@@ -1,7 +1,6 @@
 package config
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -206,21 +205,8 @@ func TestLoad_corruptJSON(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load with corrupt JSON should not error: %v", err)
 	}
-	if cfg.ApiKey != "" {
-		t.Errorf("corrupt file should yield no token, got %q", cfg.ApiKey)
-	}
-}
-
-func TestLoad_legacyApiKeyMigration(t *testing.T) {
-	home := tempHome(t)
-	writeRaw(t, home, `{"apiUrl":"https://api.futrou.com","apiKey":"legacy-token"}`)
-
-	cfg, err := Load()
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	if cfg.ApiKey != "legacy-token" {
-		t.Errorf("migrated ApiKey = %q, want %q", cfg.ApiKey, "legacy-token")
+	if got := cfg.TokenFor(cfg.ApiUrl); got != "" {
+		t.Errorf("corrupt file should yield no token, got %q", got)
 	}
 }
 
@@ -247,8 +233,8 @@ func TestLoad_envApiTokenOverride(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if cfg.ApiKey != "env-token" {
-		t.Errorf("ApiKey from env = %q, want %q", cfg.ApiKey, "env-token")
+	if got := cfg.TokenFor(cfg.ApiUrl); got != "env-token" {
+		t.Errorf("token from env = %q, want %q", got, "env-token")
 	}
 }
 
@@ -267,25 +253,8 @@ func TestSaveLoad_roundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if cfg2.ApiKey != "round-trip-token" {
-		t.Errorf("after save/load ApiKey = %q, want %q", cfg2.ApiKey, "round-trip-token")
-	}
-}
-
-func TestSave_doesNotWriteLegacyApiKey(t *testing.T) {
-	home := tempHome(t)
-
-	cfg := &Config{ApiUrl: "https://api.futrou.com", ApiKey: "should-not-persist"}
-	cfg.SetToken("https://api.futrou.com", "real-token")
-	if err := Save(cfg); err != nil {
-		t.Fatalf("Save: %v", err)
-	}
-
-	data, _ := os.ReadFile(cfgPath(home))
-	var raw map[string]any
-	json.Unmarshal(data, &raw)
-	if _, ok := raw["apiKey"]; ok {
-		t.Error("Save wrote legacy apiKey field to disk; it should be omitted")
+	if got := cfg2.TokenFor(cfg2.ApiUrl); got != "round-trip-token" {
+		t.Errorf("after save/load token = %q, want %q", got, "round-trip-token")
 	}
 }
 

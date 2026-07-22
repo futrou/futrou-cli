@@ -113,6 +113,7 @@ func buildApp() *cli.App {
 			proxiesCommand,
 			dnsCommand,
 			projectsCommand,
+			workspacesCommand,
 			volumesCommand,
 			licenseCommand,
 			versionCommand,

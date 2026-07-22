@@ -53,7 +53,7 @@ func TestProjectsCreate(t *testing.T) {
 		respond(201, fixtureProject())(w, r)
 	})
 
-	out, err := runArgs(t, ts, "projects", "create", "--name", "my-project")
+	out, err := runArgs(t, ts, "projects", "create", "--name", "my-project", "--workspace", "123e4567-e89b-12d3-a456-426614174000")
 	assertNoError(t, err)
 	assertContains(t, out, "created")
 	if received["name"] != "my-project" {
@@ -72,15 +72,37 @@ func TestProjectsCreate_withDisplayNameAndWorkspace(t *testing.T) {
 	_, err := runArgs(t, ts, "projects", "create",
 		"--name", "my-project",
 		"--display-name", "My Project",
-		"--workspace", "ws-xyz",
+		"--workspace", "123e4567-e89b-12d3-a456-426614174000",
 	)
 	assertNoError(t, err)
 	if received["displayName"] != "My Project" {
 		t.Errorf("expected displayName=My Project, got %v", received["displayName"])
 	}
-	if received["workspaceId"] != "ws-xyz" {
-		t.Errorf("expected workspaceId=ws-xyz, got %v", received["workspaceId"])
+	if received["workspaceId"] != "123e4567-e89b-12d3-a456-426614174000" {
+		t.Errorf("expected workspaceId=123e4567-e89b-12d3-a456-426614174000, got %v", received["workspaceId"])
 	}
+}
+
+func TestProjectsCreate_workspaceByName(t *testing.T) {
+	ts := newTestServer(t)
+	ts.on("GET", "/v2/workspaces", respond(200, []interface{}{fixtureWorkspace()}))
+	var received map[string]interface{}
+	ts.on("POST", "/v2/projects", func(w http.ResponseWriter, r *http.Request) {
+		decodeBody(r, &received)
+		respond(201, fixtureProject())(w, r)
+	})
+
+	_, err := runArgs(t, ts, "projects", "create", "--name", "my-project", "--workspace", "my-workspace")
+	assertNoError(t, err)
+	if received["workspaceId"] != "ws-abc" {
+		t.Errorf("expected workspaceId=ws-abc, got %v", received["workspaceId"])
+	}
+}
+
+func TestProjectsCreate_noWorkspaceSpecified(t *testing.T) {
+	ts := newTestServer(t)
+	_, err := runArgs(t, ts, "projects", "create", "--name", "my-project")
+	assertError(t, err)
 }
 
 func TestProjectsCreate_requiresAuth(t *testing.T) {

@@ -175,6 +175,15 @@ func fixtureProject() map[string]any {
 	}
 }
 
+func fixtureWorkspace() map[string]any {
+	return map[string]any{
+		"id":          "ws-abc",
+		"name":        "my-workspace",
+		"displayName": "My Workspace",
+		"createdAt":   "2026-01-01T00:00:00Z",
+	}
+}
+
 func fixtureVolume() map[string]any {
 	return map[string]any{
 		"id":        "vol-def",

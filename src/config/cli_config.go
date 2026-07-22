@@ -20,15 +20,12 @@ func decryptToken(stored string) (string, error) {
 }
 
 // Config holds the persisted CLI configuration.
-// ApiKey is keyed by normalized API URL so credentials for different
+// ApiTokens is keyed by normalized API URL so credentials for different
 // Futrou environments (e.g. production vs. self-hosted) don't collide.
 type Config struct {
-	ApiUrl    string            `json:"apiUrl,omitempty"`
-	ApiTokens map[string]string `json:"apiTokens,omitempty"`
-
-	// ApiKey is deprecated: kept only to migrate older config files that
-	// stored a single global token. New writes always use ApiTokens.
-	ApiKey string `json:"apiKey,omitempty"`
+	ApiUrl            string            `json:"apiUrl,omitempty"`
+	ApiTokens         map[string]string `json:"apiTokens,omitempty"`
+	DefaultWorkspaces map[string]string `json:"defaultWorkspaces,omitempty"`
 }
 
 // normalizeUrlKey lower-cases and trims the URL so it can be used as a
@@ -61,6 +58,31 @@ func (cfg *Config) SetToken(apiUrl, token string) {
 		cfg.ApiTokens = map[string]string{}
 	}
 	cfg.ApiTokens[normalizeUrlKey(apiUrl)] = encryptToken(token)
+}
+
+// DefaultWorkspaceFor returns the stored default workspace ID for the given
+// API URL, if any.
+func (cfg *Config) DefaultWorkspaceFor(apiUrl string) string {
+	if cfg.DefaultWorkspaces == nil {
+		return ""
+	}
+	return cfg.DefaultWorkspaces[normalizeUrlKey(apiUrl)]
+}
+
+// SetDefaultWorkspace stores the default workspace ID for the given API URL.
+func (cfg *Config) SetDefaultWorkspace(apiUrl, workspaceID string) {
+	if cfg.DefaultWorkspaces == nil {
+		cfg.DefaultWorkspaces = map[string]string{}
+	}
+	cfg.DefaultWorkspaces[normalizeUrlKey(apiUrl)] = workspaceID
+}
+
+// RemoveApiUrl clears the stored token and default workspace for the given
+// API URL, leaving data for other API URLs untouched.
+func (cfg *Config) RemoveApiUrl(apiUrl string) {
+	key := normalizeUrlKey(apiUrl)
+	delete(cfg.ApiTokens, key)
+	delete(cfg.DefaultWorkspaces, key)
 }
 
 func configPath() (string, error) {
@@ -100,29 +122,12 @@ func Load() (*Config, error) {
 		cfg.ApiUrl = constants.DefaultApiUrl
 	}
 
-	// Migrate old "tokens" field (renamed to "apiTokens") written by earlier CLI versions.
-	if cfg.ApiTokens == nil {
-		var legacy struct {
-			Tokens map[string]string `json:"tokens"`
-		}
-		if json.Unmarshal(data, &legacy) == nil && len(legacy.Tokens) > 0 {
-			cfg.ApiTokens = legacy.Tokens
-		}
-	}
-
-	// Migrate legacy single flat apiKey into the per-URL map.
-	if cfg.ApiKey != "" && cfg.TokenFor(cfg.ApiUrl) == "" {
-		cfg.SetToken(cfg.ApiUrl, cfg.ApiKey)
-	}
-
 	if u := os.Getenv(constants.EnvApiUrl); u != "" {
 		cfg.ApiUrl = u
 	}
 	if t := os.Getenv(constants.EnvApiToken); t != "" {
 		cfg.SetToken(cfg.ApiUrl, t)
 	}
-
-	cfg.ApiKey = cfg.TokenFor(cfg.ApiUrl)
 
 	return cfg, nil
 }
@@ -137,9 +142,6 @@ func Save(cfg *Config) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return fmt.Errorf("creating config dir: %w", err)
 	}
-
-	// Drop the legacy field on write — Tokens is the source of truth going forward.
-	cfg.ApiKey = ""
 
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
