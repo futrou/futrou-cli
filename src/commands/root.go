@@ -90,6 +90,16 @@ func buildApp() *cli.App {
 				EnvVars: []string{constants.EnvApiToken},
 				Hidden:  true,
 			},
+			&cli.BoolFlag{
+				Name:   "version",
+				Hidden: true,
+			},
+		},
+		Action: func(c *cli.Context) error {
+			if c.Bool("version") {
+				return versionCommand.Action(c)
+			}
+			return cli.ShowAppHelp(c)
 		},
 		Commands: []*cli.Command{
 			loginCommand,
