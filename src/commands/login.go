@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"bufio"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -23,6 +22,7 @@ import (
 	"futrou-cli/src/logger"
 	"futrou-cli/src/services"
 
+	"github.com/manifoldco/promptui"
 	"github.com/urfave/cli/v2"
 )
 
@@ -88,7 +88,7 @@ var loginCommand = &cli.Command{
 		defer srv.Shutdown(context.Background())
 
 		authURL := buildAuthURL(discovery.AuthorizationEndpoint, clientID, redirectURI, challenge)
-		shortURL := buildShortAuthURL(apiUrl, challenge, redirectURI)
+		shortURL := buildShortAuthURL(apiUrl, challenge, port)
 		if verifyShortAuthURL(shortURL, clientID, redirectURI, challenge) {
 			authURL = shortURL
 		}
@@ -102,43 +102,27 @@ var loginCommand = &cli.Command{
 		// Tick a countdown in interactive terminals; non-interactive gets no counter.
 		interactive := isInteractiveTerminal()
 		stopCountdown := make(chan struct{})
+		var countdownDone <-chan struct{}
 		if interactive {
-			go func() {
-				ticker := time.NewTicker(time.Second)
-				defer ticker.Stop()
-				for {
-					remaining := time.Until(expiresAt)
-					if remaining < 0 {
-						remaining = 0
-					}
-					logger.UpdateLoader(fmt.Sprintf("Waiting for authentication (%s remaining)...", formatDuration(remaining)))
-					select {
-					case <-stopCountdown:
-						return
-					case <-ticker.C:
-					}
-				}
-			}()
+			countdownDone = startCountdown(stopCountdown, expiresAt, time.Second)
+		}
+		stopCountdownAndLoader := func() {
+			close(stopCountdown)
+			if interactive {
+				<-countdownDone
+				logger.StopLoader()
+			}
 		}
 
 		var code string
 		select {
 		case code = <-codeCh:
-			close(stopCountdown)
-			if interactive {
-				logger.StopLoader()
-			}
+			stopCountdownAndLoader()
 		case err = <-errCh:
-			close(stopCountdown)
-			if interactive {
-				logger.StopLoader()
-			}
+			stopCountdownAndLoader()
 			return err
 		case <-time.After(loginTimeout):
-			close(stopCountdown)
-			if interactive {
-				logger.StopLoader()
-			}
+			stopCountdownAndLoader()
 			fmt.Println("Login link expired. Run 'futrou login' to try again.")
 			return fmt.Errorf("login timed out")
 		}
@@ -185,6 +169,40 @@ var loginCommand = &cli.Command{
 		}
 		return nil
 	},
+}
+
+// startCountdown starts a goroutine that updates the loader with the time
+// remaining until expiresAt, once per interval, until stopCountdown is
+// closed. It returns a channel that is closed once the goroutine has fully
+// exited and will make no further calls into logger. Callers must wait on
+// this channel before calling logger.StopLoader, otherwise a call to
+// UpdateLoader (which can restart the spinner via StartLoader) can race the
+// spinner's WaitGroup with the Wait inside StopLoader and panic.
+func startCountdown(stopCountdown <-chan struct{}, expiresAt time.Time, interval time.Duration) <-chan struct{} {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stopCountdown:
+				return
+			default:
+			}
+			remaining := time.Until(expiresAt)
+			if remaining < 0 {
+				remaining = 0
+			}
+			logger.UpdateLoader(fmt.Sprintf("Waiting for authentication (%s remaining)...", formatDuration(remaining)))
+			select {
+			case <-stopCountdown:
+				return
+			case <-ticker.C:
+			}
+		}
+	}()
+	return done
 }
 
 type oauthDiscovery struct {
@@ -255,10 +273,11 @@ func buildAuthURL(authEndpoint, clientID, redirectURI, challenge string) string 
 
 // buildShortAuthURL builds the compact path-based login link the default
 // Futrou API accepts in place of the full authorize URL: the server looks
-// up its own client_id/response_type/code_challenge_method defaults and
-// resolves this to the real authorize request.
-func buildShortAuthURL(apiUrl, challenge, redirectURI string) string {
-	return apiUrl + "/v2/auth/cli/" + url.QueryEscape(challenge) + "/" + url.QueryEscape(redirectURI)
+// up its own client_id/response_type/code_challenge_method defaults, assumes
+// a redirect_uri of http://localhost:<port>/, and resolves this to the real
+// authorize request.
+func buildShortAuthURL(apiUrl, challenge string, port int) string {
+	return apiUrl + "/v2/auth/cli/" + url.QueryEscape(challenge) + "/" + strconv.Itoa(port)
 }
 
 // verifyShortAuthURL confirms shortURL redirects (without following it) to
@@ -377,25 +396,20 @@ func selectDefaultWorkspace(apiUrl, token, flagValue string) (id, name string, e
 		return workspaces[0].Id, workspaces[0].Name, nil
 	}
 
-	fmt.Println("\nSelect a default workspace:")
+	names := make([]string, len(workspaces))
 	for i, w := range workspaces {
-		fmt.Printf("  %d) %s\n", i+1, w.Name)
+		names[i] = w.Name
 	}
-	reader := bufio.NewReader(os.Stdin)
-	for {
-		fmt.Print("Enter a number: ")
-		line, readErr := reader.ReadString('\n')
-		if readErr != nil {
-			return "", "", fmt.Errorf("reading workspace selection: %w", readErr)
-		}
-		choice, convErr := strconv.Atoi(strings.TrimSpace(line))
-		if convErr != nil || choice < 1 || choice > len(workspaces) {
-			fmt.Printf("Please enter a number between 1 and %d.\n", len(workspaces))
-			continue
-		}
-		w := workspaces[choice-1]
-		return w.Id, w.Name, nil
+	prompt := promptui.Select{
+		Label: "Select a default workspace",
+		Items: names,
 	}
+	choice, _, err := prompt.Run()
+	if err != nil {
+		return "", "", fmt.Errorf("selecting workspace: %w", err)
+	}
+	w := workspaces[choice]
+	return w.Id, w.Name, nil
 }
 
 func isInteractiveTerminal() bool {

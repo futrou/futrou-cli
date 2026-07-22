@@ -2,12 +2,16 @@ package commands
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"futrou-cli/src/logger"
 )
 
 // TestLogin_oauthFlow wires up stub endpoints for the full OAuth2 PKCE flow
@@ -145,28 +149,37 @@ func TestBuildAuthURL(t *testing.T) {
 	}
 }
 
-func TestBuildShortAuthURL(t *testing.T) {
-	u := buildShortAuthURL("https://api.futrou.com", "challenge/abc", "http://localhost:12345/")
-	want := "https://api.futrou.com/v2/auth/cli/" + url.QueryEscape("challenge/abc") + "/" + url.QueryEscape("http://localhost:12345/")
-	if u != want {
-		t.Errorf("buildShortAuthURL = %q, want %q", u, want)
+// TestStartCountdown_doneMeansNoMoreLoaderCalls guards against a panic
+// ("sync: WaitGroup is reused before previous Wait has returned") that
+// occurred when the login command closed stopCountdown and immediately
+// called logger.StopLoader without waiting for the countdown goroutine to
+// exit. The countdown goroutine calls logger.UpdateLoader in a loop, which
+// can call StartLoader (spinnerWG.Add) if the spinner isn't running; if that
+// races with the spinnerWG.Wait inside StopLoader, it panics. Once the
+// channel returned by startCountdown is closed, no further logger calls may
+// happen, so calling logger.StopLoader right after must always be safe.
+// Run with -race to catch a regression.
+func TestStartCountdown_doneMeansNoMoreLoaderCalls(t *testing.T) {
+	logger.SetOutput(io.Discard, io.Discard)
+	t.Cleanup(func() { logger.SetOutput(os.Stdout, os.Stderr) })
+
+	for i := 0; i < 200; i++ {
+		stop := make(chan struct{})
+		done := startCountdown(stop, time.Now().Add(time.Hour), time.Microsecond)
+		// Give the goroutine a chance to tick and call UpdateLoader/StartLoader
+		// a few times before we stop it.
+		time.Sleep(50 * time.Microsecond)
+		close(stop)
+		<-done
+		logger.StopLoader()
 	}
 }
 
-// TestBuildShortAuthURL_encodesColons guards against a regression to
-// url.PathEscape, which leaves ':' unescaped in a path segment. The server
-// splits the short URL on '/' and decodes each segment, so an unescaped
-// ':' inside redirectURI (e.g. "http://localhost:12345/") wouldn't itself
-// break parsing, but the '/' separators inside it must be escaped, and we
-// want every reserved character in the segment percent-encoded for safety.
-func TestBuildShortAuthURL_encodesColons(t *testing.T) {
-	u := buildShortAuthURL("https://api.futrou.com", "challenge-abc", "http://localhost:12345/")
-	want := "https://api.futrou.com/v2/auth/cli/challenge-abc/http%3A%2F%2Flocalhost%3A12345%2F"
+func TestBuildShortAuthURL(t *testing.T) {
+	u := buildShortAuthURL("https://api.futrou.com", "challenge/abc", 12345)
+	want := "https://api.futrou.com/v2/auth/cli/" + url.QueryEscape("challenge/abc") + "/12345"
 	if u != want {
 		t.Errorf("buildShortAuthURL = %q, want %q", u, want)
-	}
-	if strings.Contains(u[len("https://api.futrou.com/v2/auth/cli/challenge-abc/"):], ":") {
-		t.Errorf("expected redirectURI segment to have ':' escaped, got %q", u)
 	}
 }
 
