@@ -121,21 +121,42 @@ func TestPKCE(t *testing.T) {
 	}
 }
 
-func TestBuildAuthURL(t *testing.T) {
-	u := buildAuthURL("https://api.futrou.com/v2/auth/oauth2/authorize", "client-1", "http://localhost:12345/callback", "challenge-abc")
+func TestBuildAuthURL_defaultApiUrl(t *testing.T) {
+	u := buildAuthURL("https://api.futrou.com/v2/auth/oauth2/authorize", "https://api.futrou.com", "client-1", "http://localhost:12345/callback", "challenge-abc")
 	parsed, err := url.Parse(u)
 	if err != nil {
 		t.Fatalf("invalid URL: %v", err)
 	}
 	q := parsed.Query()
-	if q.Get("response_type") != "code" {
-		t.Errorf("response_type = %q, want %q", q.Get("response_type"), "code")
+	if q.Get("code_challenge") != "challenge-abc" {
+		t.Errorf("code_challenge = %q, want %q", q.Get("code_challenge"), "challenge-abc")
 	}
+	if q.Get("client_id") != "" {
+		t.Errorf("client_id should be omitted for the default API URL, got %q", q.Get("client_id"))
+	}
+	if q.Get("response_type") != "" {
+		t.Errorf("response_type should be omitted for the default API URL, got %q", q.Get("response_type"))
+	}
+	if q.Get("code_challenge_method") != "" {
+		t.Errorf("code_challenge_method should be omitted for the default API URL, got %q", q.Get("code_challenge_method"))
+	}
+}
+
+func TestBuildAuthURL_customApiUrl(t *testing.T) {
+	u := buildAuthURL("https://selfhosted.example.com/v2/auth/oauth2/authorize", "https://selfhosted.example.com", "client-1", "http://localhost:12345/callback", "challenge-abc")
+	parsed, err := url.Parse(u)
+	if err != nil {
+		t.Fatalf("invalid URL: %v", err)
+	}
+	q := parsed.Query()
 	if q.Get("client_id") != "client-1" {
 		t.Errorf("client_id = %q, want %q", q.Get("client_id"), "client-1")
 	}
 	if q.Get("code_challenge") != "challenge-abc" {
 		t.Errorf("code_challenge = %q, want %q", q.Get("code_challenge"), "challenge-abc")
+	}
+	if q.Get("response_type") != "code" {
+		t.Errorf("response_type = %q, want %q", q.Get("response_type"), "code")
 	}
 	if q.Get("code_challenge_method") != "S256" {
 		t.Errorf("code_challenge_method = %q, want %q", q.Get("code_challenge_method"), "S256")

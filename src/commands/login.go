@@ -87,7 +87,7 @@ var loginCommand = &cli.Command{
 		go srv.Serve(listener)
 		defer srv.Shutdown(context.Background())
 
-		authURL := buildAuthURL(discovery.AuthorizationEndpoint, clientID, redirectURI, challenge)
+		authURL := buildAuthURL(discovery.AuthorizationEndpoint, apiUrl, clientID, redirectURI, challenge)
 
 		const loginTimeout = 5 * time.Minute
 		expiresAt := time.Now().Add(loginTimeout)
@@ -237,13 +237,20 @@ func pkce() (verifier, challenge string, err error) {
 	return
 }
 
-func buildAuthURL(authEndpoint, clientID, redirectURI, challenge string) string {
+// buildAuthURL constructs the OAuth authorize URL. Against the default
+// Futrou API, client_id, response_type, and code_challenge_method are
+// omitted — the server assumes their standard defaults (the first-party CLI
+// client, "code", and "S256") to keep the link the user has to visit short.
+// Self-hosted/custom API URLs can't assume that, so they're spelled out.
+func buildAuthURL(authEndpoint, apiUrl, clientID, redirectURI, challenge string) string {
 	params := url.Values{
-		"response_type":         {"code"},
-		"client_id":             {clientID},
-		"redirect_uri":          {redirectURI},
-		"code_challenge":        {challenge},
-		"code_challenge_method": {"S256"},
+		"redirect_uri":   {redirectURI},
+		"code_challenge": {challenge},
+	}
+	if services.NormalizeApiUrl(apiUrl) != services.NormalizeApiUrl(constants.DefaultApiUrl) {
+		params.Set("client_id", clientID)
+		params.Set("response_type", "code")
+		params.Set("code_challenge_method", "S256")
 	}
 	return authEndpoint + "?" + params.Encode()
 }
