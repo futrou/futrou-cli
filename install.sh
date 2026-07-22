@@ -107,7 +107,7 @@ tildify() {
 # ---------------------------------------------------------------------------
 current_version=""
 if [[ -x "$exe" ]]; then
-  current_version=$("$exe" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)
+  current_version=$("$exe" version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)
 fi
 
 # ---------------------------------------------------------------------------
@@ -164,7 +164,7 @@ if [[ -n "$spinner_pid" ]]; then
 fi
 
 # Read new version from downloaded binary
-new_version=$("$tmp_exe" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)
+new_version=$("$tmp_exe" version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)
 
 # Already up to date?
 if [[ -n "$current_version" && "$new_version" == "$current_version" ]]; then
@@ -200,7 +200,7 @@ mv -f "$tmp_exe" "$exe"
 # ---------------------------------------------------------------------------
 # Verify
 # ---------------------------------------------------------------------------
-installed_version=$("$exe" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)
+installed_version=$("$exe" version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)
 [[ -z $installed_version ]] && error "Downloaded binary failed to run"
 
 case $action in
