@@ -63,13 +63,13 @@ var loginCommand = &cli.Command{
 			return fmt.Errorf("starting local server: %w", err)
 		}
 		port := listener.Addr().(*net.TCPAddr).Port
-		redirectURI := fmt.Sprintf("http://localhost:%d/callback", port)
+		redirectURI := fmt.Sprintf("http://localhost:%d/", port)
 
 		codeCh := make(chan string, 1)
 		errCh := make(chan error, 1)
 
 		srv := &http.Server{}
-		http.HandleFunc("/callback", func(w http.ResponseWriter, r *http.Request) {
+		http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 			code := r.URL.Query().Get("code")
 			if errParam := r.URL.Query().Get("error"); errParam != "" {
 				errCh <- fmt.Errorf("authorization denied: %s", errParam)
