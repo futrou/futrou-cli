@@ -19,7 +19,7 @@ import (
 // a token and prints a success message.
 func TestLogin_oauthFlow(t *testing.T) {
 	prevTimeout := loginTimeout
-	loginTimeout = time.Second
+	loginTimeout = 500 * time.Millisecond
 	t.Cleanup(func() { loginTimeout = prevTimeout })
 
 	ts := newTestServer(t)
