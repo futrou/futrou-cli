@@ -32,6 +32,16 @@ func newTestServer(t *testing.T) *testServer {
 			h(w, r)
 			return
 		}
+		// The CLI optimistically probes /v2/auth/cli/<challenge>/<redirect_uri>
+		// during login to see if the server supports the short-link login flow;
+		// unless a test explicitly mocks it, treat it as unsupported (404) rather
+		// than a hard test failure, matching how a real server without that route
+		// behaves.
+		if r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/v2/auth/cli/") {
+			w.WriteHeader(http.StatusNotFound)
+			writeJSON(w, map[string]string{"message": "not found"})
+			return
+		}
 		t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
 		w.WriteHeader(http.StatusNotFound)
 		writeJSON(w, map[string]string{"message": "not found"})

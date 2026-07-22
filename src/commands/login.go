@@ -87,7 +87,11 @@ var loginCommand = &cli.Command{
 		go srv.Serve(listener)
 		defer srv.Shutdown(context.Background())
 
-		authURL := buildAuthURL(discovery.AuthorizationEndpoint, apiUrl, clientID, redirectURI, challenge)
+		authURL := buildAuthURL(discovery.AuthorizationEndpoint, clientID, redirectURI, challenge)
+		shortURL := buildShortAuthURL(apiUrl, challenge, redirectURI)
+		if verifyShortAuthURL(shortURL, clientID, redirectURI, challenge) {
+			authURL = shortURL
+		}
 
 		const loginTimeout = 5 * time.Minute
 		expiresAt := time.Now().Add(loginTimeout)
@@ -237,22 +241,56 @@ func pkce() (verifier, challenge string, err error) {
 	return
 }
 
-// buildAuthURL constructs the OAuth authorize URL. Against the default
-// Futrou API, client_id, response_type, and code_challenge_method are
-// omitted — the server assumes their standard defaults (the first-party CLI
-// client, "code", and "S256") to keep the link the user has to visit short.
-// Self-hosted/custom API URLs can't assume that, so they're spelled out.
-func buildAuthURL(authEndpoint, apiUrl, clientID, redirectURI, challenge string) string {
+// buildAuthURL constructs the full, explicit OAuth authorize URL.
+func buildAuthURL(authEndpoint, clientID, redirectURI, challenge string) string {
 	params := url.Values{
-		"redirect_uri":   {redirectURI},
-		"code_challenge": {challenge},
-	}
-	if services.NormalizeApiUrl(apiUrl) != services.NormalizeApiUrl(constants.DefaultApiUrl) {
-		params.Set("client_id", clientID)
-		params.Set("response_type", "code")
-		params.Set("code_challenge_method", "S256")
+		"client_id":             {clientID},
+		"redirect_uri":          {redirectURI},
+		"code_challenge":        {challenge},
+		"response_type":         {"code"},
+		"code_challenge_method": {"S256"},
 	}
 	return authEndpoint + "?" + params.Encode()
+}
+
+// buildShortAuthURL builds the compact path-based login link the default
+// Futrou API accepts in place of the full authorize URL: the server looks
+// up its own client_id/response_type/code_challenge_method defaults and
+// resolves this to the real authorize request.
+func buildShortAuthURL(apiUrl, challenge, redirectURI string) string {
+	return apiUrl + "/v2/auth/cli/" + url.PathEscape(challenge) + "/" + url.PathEscape(redirectURI)
+}
+
+// verifyShortAuthURL confirms shortURL redirects (without following it) to
+// an authorize request whose client_id, redirect_uri, and code_challenge
+// exactly match what this login expects. This guards against the short
+// link being unavailable, misconfigured, or resolving to something
+// unexpected on a server that merely shares the default API's hostname —
+// callers should fall back to the full explicit authorize URL when this
+// returns false.
+func verifyShortAuthURL(shortURL, clientID, redirectURI, challenge string) bool {
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	resp, err := client.Get(shortURL)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 300 || resp.StatusCode >= 400 {
+		return false
+	}
+	location, err := url.Parse(resp.Header.Get("Location"))
+	if err != nil {
+		return false
+	}
+	q := location.Query()
+	return q.Get("client_id") == clientID &&
+		q.Get("redirect_uri") == redirectURI &&
+		q.Get("code_challenge") == challenge
 }
 
 func exchangeCode(tokenEndpoint, clientID, code, verifier, redirectURI string) (token, email string, err error) {

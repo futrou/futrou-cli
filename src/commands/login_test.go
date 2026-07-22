@@ -121,29 +121,8 @@ func TestPKCE(t *testing.T) {
 	}
 }
 
-func TestBuildAuthURL_defaultApiUrl(t *testing.T) {
-	u := buildAuthURL("https://api.futrou.com/v2/auth/oauth2/authorize", "https://api.futrou.com", "client-1", "http://localhost:12345/callback", "challenge-abc")
-	parsed, err := url.Parse(u)
-	if err != nil {
-		t.Fatalf("invalid URL: %v", err)
-	}
-	q := parsed.Query()
-	if q.Get("code_challenge") != "challenge-abc" {
-		t.Errorf("code_challenge = %q, want %q", q.Get("code_challenge"), "challenge-abc")
-	}
-	if q.Get("client_id") != "" {
-		t.Errorf("client_id should be omitted for the default API URL, got %q", q.Get("client_id"))
-	}
-	if q.Get("response_type") != "" {
-		t.Errorf("response_type should be omitted for the default API URL, got %q", q.Get("response_type"))
-	}
-	if q.Get("code_challenge_method") != "" {
-		t.Errorf("code_challenge_method should be omitted for the default API URL, got %q", q.Get("code_challenge_method"))
-	}
-}
-
-func TestBuildAuthURL_customApiUrl(t *testing.T) {
-	u := buildAuthURL("https://selfhosted.example.com/v2/auth/oauth2/authorize", "https://selfhosted.example.com", "client-1", "http://localhost:12345/callback", "challenge-abc")
+func TestBuildAuthURL(t *testing.T) {
+	u := buildAuthURL("https://selfhosted.example.com/v2/auth/oauth2/authorize", "client-1", "http://localhost:12345/", "challenge-abc")
 	parsed, err := url.Parse(u)
 	if err != nil {
 		t.Fatalf("invalid URL: %v", err)
@@ -151,6 +130,9 @@ func TestBuildAuthURL_customApiUrl(t *testing.T) {
 	q := parsed.Query()
 	if q.Get("client_id") != "client-1" {
 		t.Errorf("client_id = %q, want %q", q.Get("client_id"), "client-1")
+	}
+	if q.Get("redirect_uri") != "http://localhost:12345/" {
+		t.Errorf("redirect_uri = %q, want %q", q.Get("redirect_uri"), "http://localhost:12345/")
 	}
 	if q.Get("code_challenge") != "challenge-abc" {
 		t.Errorf("code_challenge = %q, want %q", q.Get("code_challenge"), "challenge-abc")
@@ -160,6 +142,59 @@ func TestBuildAuthURL_customApiUrl(t *testing.T) {
 	}
 	if q.Get("code_challenge_method") != "S256" {
 		t.Errorf("code_challenge_method = %q, want %q", q.Get("code_challenge_method"), "S256")
+	}
+}
+
+func TestBuildShortAuthURL(t *testing.T) {
+	u := buildShortAuthURL("https://api.futrou.com", "challenge/abc", "http://localhost:12345/")
+	want := "https://api.futrou.com/v2/auth/cli/" + url.PathEscape("challenge/abc") + "/" + url.PathEscape("http://localhost:12345/")
+	if u != want {
+		t.Errorf("buildShortAuthURL = %q, want %q", u, want)
+	}
+}
+
+func TestVerifyShortAuthURL_matches(t *testing.T) {
+	ts := newTestServer(t)
+	ts.on("GET", "/v2/auth/cli/challenge-abc/redirect", func(w http.ResponseWriter, r *http.Request) {
+		loc := "https://api.futrou.com/v2/auth/oauth2/authorize?" + url.Values{
+			"client_id":      {"client-1"},
+			"redirect_uri":   {"http://localhost:12345/"},
+			"code_challenge": {"challenge-abc"},
+			"response_type":  {"code"},
+		}.Encode()
+		http.Redirect(w, r, loc, http.StatusFound)
+	})
+
+	ok := verifyShortAuthURL(ts.URL+"/v2/auth/cli/challenge-abc/redirect", "client-1", "http://localhost:12345/", "challenge-abc")
+	if !ok {
+		t.Error("expected verifyShortAuthURL to match, got false")
+	}
+}
+
+func TestVerifyShortAuthURL_clientIDMismatch(t *testing.T) {
+	ts := newTestServer(t)
+	ts.on("GET", "/v2/auth/cli/challenge-abc/redirect", func(w http.ResponseWriter, r *http.Request) {
+		loc := "https://api.futrou.com/v2/auth/oauth2/authorize?" + url.Values{
+			"client_id":      {"unexpected-client"},
+			"redirect_uri":   {"http://localhost:12345/"},
+			"code_challenge": {"challenge-abc"},
+		}.Encode()
+		http.Redirect(w, r, loc, http.StatusFound)
+	})
+
+	ok := verifyShortAuthURL(ts.URL+"/v2/auth/cli/challenge-abc/redirect", "client-1", "http://localhost:12345/", "challenge-abc")
+	if ok {
+		t.Error("expected verifyShortAuthURL to reject a client_id mismatch")
+	}
+}
+
+func TestVerifyShortAuthURL_notFound(t *testing.T) {
+	ts := newTestServer(t)
+	ts.on("GET", "/v2/auth/cli/challenge-abc/redirect", respond(404, map[string]string{"message": "not found"}))
+
+	ok := verifyShortAuthURL(ts.URL+"/v2/auth/cli/challenge-abc/redirect", "client-1", "http://localhost:12345/", "challenge-abc")
+	if ok {
+		t.Error("expected verifyShortAuthURL to fail on a non-redirect response")
 	}
 }
 
