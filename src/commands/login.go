@@ -258,7 +258,7 @@ func buildAuthURL(authEndpoint, clientID, redirectURI, challenge string) string 
 // up its own client_id/response_type/code_challenge_method defaults and
 // resolves this to the real authorize request.
 func buildShortAuthURL(apiUrl, challenge, redirectURI string) string {
-	return apiUrl + "/v2/auth/cli/" + url.PathEscape(challenge) + "/" + url.PathEscape(redirectURI)
+	return apiUrl + "/v2/auth/cli/" + url.QueryEscape(challenge) + "/" + url.QueryEscape(redirectURI)
 }
 
 // verifyShortAuthURL confirms shortURL redirects (without following it) to

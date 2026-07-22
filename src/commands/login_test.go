@@ -147,9 +147,26 @@ func TestBuildAuthURL(t *testing.T) {
 
 func TestBuildShortAuthURL(t *testing.T) {
 	u := buildShortAuthURL("https://api.futrou.com", "challenge/abc", "http://localhost:12345/")
-	want := "https://api.futrou.com/v2/auth/cli/" + url.PathEscape("challenge/abc") + "/" + url.PathEscape("http://localhost:12345/")
+	want := "https://api.futrou.com/v2/auth/cli/" + url.QueryEscape("challenge/abc") + "/" + url.QueryEscape("http://localhost:12345/")
 	if u != want {
 		t.Errorf("buildShortAuthURL = %q, want %q", u, want)
+	}
+}
+
+// TestBuildShortAuthURL_encodesColons guards against a regression to
+// url.PathEscape, which leaves ':' unescaped in a path segment. The server
+// splits the short URL on '/' and decodes each segment, so an unescaped
+// ':' inside redirectURI (e.g. "http://localhost:12345/") wouldn't itself
+// break parsing, but the '/' separators inside it must be escaped, and we
+// want every reserved character in the segment percent-encoded for safety.
+func TestBuildShortAuthURL_encodesColons(t *testing.T) {
+	u := buildShortAuthURL("https://api.futrou.com", "challenge-abc", "http://localhost:12345/")
+	want := "https://api.futrou.com/v2/auth/cli/challenge-abc/http%3A%2F%2Flocalhost%3A12345%2F"
+	if u != want {
+		t.Errorf("buildShortAuthURL = %q, want %q", u, want)
+	}
+	if strings.Contains(u[len("https://api.futrou.com/v2/auth/cli/challenge-abc/"):], ":") {
+		t.Errorf("expected redirectURI segment to have ':' escaped, got %q", u)
 	}
 }
 
