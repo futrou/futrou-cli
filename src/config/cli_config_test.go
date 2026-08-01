@@ -116,7 +116,7 @@ func TestDecrypt_tooShortPayload(t *testing.T) {
 
 func TestSetToken_getToken_roundTrip(t *testing.T) {
 	tempHome(t)
-	cfg := &Config{}
+	cfg := &CliConfig{}
 	cfg.SetToken("https://api.futrou.com", "tok-123")
 
 	got := cfg.TokenFor("https://api.futrou.com")
@@ -127,7 +127,7 @@ func TestSetToken_getToken_roundTrip(t *testing.T) {
 
 func TestTokenFor_urlNormalization(t *testing.T) {
 	tempHome(t)
-	cfg := &Config{}
+	cfg := &CliConfig{}
 	cfg.SetToken("https://api.futrou.com", "tok-abc")
 
 	// Trailing slash, /v2 suffix, and mixed case should all resolve to the same token.
@@ -146,7 +146,7 @@ func TestTokenFor_urlNormalization(t *testing.T) {
 
 func TestSetToken_perURLIsolation(t *testing.T) {
 	tempHome(t)
-	cfg := &Config{}
+	cfg := &CliConfig{}
 	cfg.SetToken("https://api.futrou.com", "prod-tok")
 	cfg.SetToken("https://staging.futrou.com", "staging-tok")
 
@@ -160,14 +160,14 @@ func TestSetToken_perURLIsolation(t *testing.T) {
 
 func TestTokenFor_missingURL(t *testing.T) {
 	tempHome(t)
-	cfg := &Config{}
+	cfg := &CliConfig{}
 	if got := cfg.TokenFor("https://api.futrou.com"); got != "" {
 		t.Errorf("TokenFor unknown url = %q, want \"\"", got)
 	}
 }
 
 func TestTokenFor_nilTokens(t *testing.T) {
-	cfg := &Config{ApiTokens: nil}
+	cfg := &CliConfig{ApiTokens: nil}
 	if got := cfg.TokenFor("https://api.futrou.com"); got != "" {
 		t.Errorf("TokenFor on nil Tokens = %q, want \"\"", got)
 	}
@@ -175,7 +175,7 @@ func TestTokenFor_nilTokens(t *testing.T) {
 
 func TestSetToken_overwrite(t *testing.T) {
 	tempHome(t)
-	cfg := &Config{}
+	cfg := &CliConfig{}
 	cfg.SetToken("https://api.futrou.com", "first")
 	cfg.SetToken("https://api.futrou.com", "second")
 
@@ -243,7 +243,7 @@ func TestLoad_envApiTokenOverride(t *testing.T) {
 func TestSaveLoad_roundTrip(t *testing.T) {
 	tempHome(t)
 
-	cfg := &Config{ApiUrl: "https://api.futrou.com"}
+	cfg := &CliConfig{ApiUrl: "https://api.futrou.com"}
 	cfg.SetToken("https://api.futrou.com", "round-trip-token")
 	if err := Save(cfg); err != nil {
 		t.Fatalf("Save: %v", err)
@@ -261,7 +261,7 @@ func TestSaveLoad_roundTrip(t *testing.T) {
 func TestSaveLoad_multipleURLs(t *testing.T) {
 	tempHome(t)
 
-	cfg := &Config{ApiUrl: "https://api.futrou.com"}
+	cfg := &CliConfig{ApiUrl: "https://api.futrou.com"}
 	cfg.SetToken("https://api.futrou.com", "prod-token")
 	cfg.SetToken("https://staging.futrou.com", "staging-token")
 	if err := Save(cfg); err != nil {
@@ -283,7 +283,7 @@ func TestSaveLoad_multipleURLs(t *testing.T) {
 func TestSaveLoad_encryptedOnDisk(t *testing.T) {
 	home := tempHome(t)
 
-	cfg := &Config{ApiUrl: "https://api.futrou.com"}
+	cfg := &CliConfig{ApiUrl: "https://api.futrou.com"}
 	cfg.SetToken("https://api.futrou.com", "secret")
 	Save(cfg)
 

@@ -6,6 +6,10 @@ var (
 	Mode    = "development"
 
 	Description = "Deploy and manage Futrou Cloud from your terminal."
+
+	// ProjectConfigFiles is the project config discovery order. JSON is checked
+	// first so it takes precedence over executable configuration.
+	ProjectConfigFiles = []string{"futrou.json", "futrou.js", "futrou.cjs", "futrou.mjs", "futrou.ts"}
 )
 
 const (
@@ -22,6 +26,8 @@ const (
 	UpgradeWindowsUrl = "https://futrou.com/install.ps1"
 
 	DefaultApiUrl = "https://api.futrou.com"
+
+	ProjectConfigSchemaURL = "https://futrou.com/futrou.schema.json"
 
 	DefaultLogLevel  = "info"
 	DefaultLogFormat = "plain"

@@ -102,6 +102,7 @@ func buildApp() *cli.App {
 			return cli.ShowAppHelp(c)
 		},
 		Commands: []*cli.Command{
+			configCommand,
 			loginCommand,
 			logoutCommand,
 			whoamiCommand,

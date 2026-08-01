@@ -28,7 +28,12 @@ node_modules/
 .antigravity/
 .superpowers/
 .agent/
+.agents
 .skills/
 .docs
 docs/
 .mcp.json
+
+# Futrou CLI
+.futrou
+futrou.json

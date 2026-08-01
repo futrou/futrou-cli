@@ -1,0 +1,463 @@
+{
+  "$id": "https://futrou.com/futrou.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Declarative Futrou project configuration.",
+  "properties": {
+    "$schema": {
+      "description": "URL of the Futrou JSON Schema used by editors for validation and completion.",
+      "format": "uri",
+      "type": "string"
+    },
+    "crons": {
+      "description": "Scheduled HTTP or code jobs for the project.",
+      "items": {
+        "additionalProperties": true,
+        "description": "Common Futrou API resource fields.",
+        "properties": {
+          "body": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "cronPlan": {},
+          "cronPlanId": {
+            "type": "string"
+          },
+          "displayName": {
+            "description": "Human-readable resource name.",
+            "maxLength": 255,
+            "minLength": 1,
+            "type": "string"
+          },
+          "domain": {
+            "description": "Domain name assigned to the resource.",
+            "maxLength": 255,
+            "minLength": 1,
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "headers": {},
+          "id": {
+            "description": "Futrou resource identifier.",
+            "maxLength": 255,
+            "minLength": 1,
+            "type": "string"
+          },
+          "method": {
+            "type": "string"
+          },
+          "name": {
+            "description": "Resource name.",
+            "maxLength": 255,
+            "minLength": 1,
+            "type": "string"
+          },
+          "project": {},
+          "projectId": {
+            "type": "string"
+          },
+          "region": {},
+          "regionId": {
+            "type": "string"
+          },
+          "schedule": {
+            "type": "string"
+          },
+          "startedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "type": {},
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "url": {
+            "format": "uri",
+            "type": "string"
+          },
+          "workspace": {},
+          "workspaceId": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "dns": {
+      "description": "DNS zones and records managed by this project.",
+      "items": {
+        "additionalProperties": true,
+        "description": "Common Futrou API resource fields.",
+        "properties": {
+          "displayName": {
+            "description": "Human-readable resource name.",
+            "maxLength": 255,
+            "minLength": 1,
+            "type": "string"
+          },
+          "domain": {
+            "description": "Domain name assigned to the resource.",
+            "maxLength": 255,
+            "minLength": 1,
+            "type": "string"
+          },
+          "id": {
+            "description": "Futrou resource identifier.",
+            "maxLength": 255,
+            "minLength": 1,
+            "type": "string"
+          },
+          "name": {
+            "description": "Resource name.",
+            "maxLength": 255,
+            "minLength": 1,
+            "type": "string"
+          },
+          "priority": {
+            "description": "DNS record priority.",
+            "maximum": 65535,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "projectId": {
+            "maxLength": 255,
+            "minLength": 1,
+            "type": "string"
+          },
+          "records": {
+            "items": {
+              "additionalProperties": true,
+              "description": "Common Futrou API resource fields.",
+              "properties": {
+                "displayName": {
+                  "description": "Human-readable resource name.",
+                  "maxLength": 255,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "domain": {
+                  "description": "Domain name assigned to the resource.",
+                  "maxLength": 255,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "id": {
+                  "description": "Futrou resource identifier.",
+                  "maxLength": 255,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "name": {
+                  "description": "Resource name.",
+                  "maxLength": 255,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "priority": {
+                  "maximum": 65535,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "ttl": {
+                  "maximum": 2147483647,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "type": {
+                  "type": "string"
+                },
+                "value": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "ttl": {
+            "description": "DNS time-to-live in seconds.",
+            "maximum": 2147483647,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "workspaceId": {
+            "maxLength": 255,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "project": {
+      "description": "Project name or ID used as the deployment target.",
+      "maxLength": 255,
+      "minLength": 1,
+      "type": "string"
+    },
+    "proxies": {
+      "description": "HTTP, TCP, or UDP proxies managed by this project.",
+      "items": {
+        "additionalProperties": true,
+        "description": "Common Futrou API resource fields.",
+        "properties": {
+          "compress": {
+            "type": "boolean"
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "displayName": {
+            "description": "Human-readable resource name.",
+            "maxLength": 255,
+            "minLength": 1,
+            "type": "string"
+          },
+          "domain": {
+            "description": "Domain name assigned to the resource.",
+            "maxLength": 255,
+            "minLength": 1,
+            "type": "string"
+          },
+          "enforceHttps": {
+            "type": "boolean"
+          },
+          "followRedirects": {
+            "type": "boolean"
+          },
+          "id": {
+            "description": "Futrou resource identifier.",
+            "maxLength": 255,
+            "minLength": 1,
+            "type": "string"
+          },
+          "name": {
+            "description": "Resource name.",
+            "maxLength": 255,
+            "minLength": 1,
+            "type": "string"
+          },
+          "port": {
+            "description": "Public proxy port (1–65535).",
+            "maximum": 65535,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "preserveHeaders": {
+            "type": "boolean"
+          },
+          "preserveHost": {
+            "type": "boolean"
+          },
+          "preservePath": {
+            "type": "boolean"
+          },
+          "preserveQuery": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string"
+          },
+          "strategy": {
+            "type": "string"
+          },
+          "target": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": {
+            "enum": [
+              "http",
+              "tcp",
+              "udp"
+            ],
+            "type": "string"
+          },
+          "updatedAt": {
+            "type": "string"
+          },
+          "verifyTls": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "serverlets": {
+      "description": "Serverlets to create or update in this project.",
+      "items": {
+        "additionalProperties": true,
+        "description": "Common Futrou API resource fields.",
+        "properties": {
+          "cpu": {
+            "description": "CPU allocation in millicores.",
+            "maximum": 32000,
+            "minimum": 10,
+            "type": "integer"
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "displayName": {
+            "description": "Human-readable resource name.",
+            "maxLength": 255,
+            "minLength": 1,
+            "type": "string"
+          },
+          "domain": {
+            "description": "Domain name assigned to the resource.",
+            "maxLength": 255,
+            "minLength": 1,
+            "type": "string"
+          },
+          "env": {},
+          "id": {
+            "description": "Futrou resource identifier.",
+            "maxLength": 255,
+            "minLength": 1,
+            "type": "string"
+          },
+          "image": {
+            "description": "Container image to run.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "instances": {
+            "description": "Current number of serverlet instances.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "maxInstances": {
+            "description": "Maximum number of running instances.",
+            "maximum": 1000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "minInstances": {
+            "description": "Minimum number of running instances.",
+            "maximum": 1000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "name": {
+            "description": "Resource name.",
+            "maxLength": 255,
+            "minLength": 1,
+            "type": "string"
+          },
+          "networkId": {
+            "maxLength": 255,
+            "minLength": 1,
+            "type": "string"
+          },
+          "ports": {},
+          "projectId": {
+            "maxLength": 255,
+            "minLength": 1,
+            "type": "string"
+          },
+          "ram": {
+            "description": "Memory allocation in MiB.",
+            "maximum": 262144,
+            "minimum": 32,
+            "type": "integer"
+          },
+          "runtime": {
+            "maxLength": 255,
+            "minLength": 1,
+            "type": "string"
+          },
+          "scaling": {},
+          "serverletPlanId": {
+            "maxLength": 255,
+            "minLength": 1,
+            "type": "string"
+          },
+          "state": {
+            "maxLength": 255,
+            "minLength": 1,
+            "type": "string"
+          },
+          "updatedAt": {
+            "type": "string"
+          },
+          "volumes": {},
+          "workspaceId": {
+            "maxLength": 255,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "volumes": {
+      "description": "Persistent volumes available to the project.",
+      "items": {
+        "additionalProperties": true,
+        "description": "Common Futrou API resource fields.",
+        "properties": {
+          "createdAt": {
+            "type": "string"
+          },
+          "displayName": {
+            "description": "Human-readable resource name.",
+            "maxLength": 255,
+            "minLength": 1,
+            "type": "string"
+          },
+          "domain": {
+            "description": "Domain name assigned to the resource.",
+            "maxLength": 255,
+            "minLength": 1,
+            "type": "string"
+          },
+          "id": {
+            "description": "Futrou resource identifier.",
+            "maxLength": 255,
+            "minLength": 1,
+            "type": "string"
+          },
+          "name": {
+            "description": "Resource name.",
+            "maxLength": 255,
+            "minLength": 1,
+            "type": "string"
+          },
+          "sizeGb": {
+            "minimum": 0,
+            "type": "number"
+          },
+          "type": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "workspace": {
+      "description": "Workspace name or ID that owns this project.",
+      "maxLength": 255,
+      "minLength": 1,
+      "type": "string"
+    }
+  },
+  "type": "object"
+}

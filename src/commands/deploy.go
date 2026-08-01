@@ -5,10 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 
 	"futrou-cli/src/api"
+	projectconfig "futrou-cli/src/config"
 	"futrou-cli/src/services"
 
 	"github.com/urfave/cli/v2"
@@ -68,51 +68,26 @@ var deployCommand = &cli.Command{
 	},
 }
 
-// loadDeployConfig finds and reads the config file in priority order.
+// loadDeployConfig reads the shared project configuration and selects its
+// single serverlet for this command. Deploying a whole project will be added
+// separately; requiring one resource prevents an accidental partial deploy.
 func loadDeployConfig(override string) (*DeployConfig, string, error) {
-	candidates := []string{
-		"futrou.json",
-		"futrou.js",
-		"futrou.config.json",
-		"futrou.config.js",
+	cfg, path, err := projectconfig.LoadConfig(".", override)
+	if err != nil {
+		return nil, "", err
 	}
-	if override != "" {
-		candidates = []string{override}
+	if len(cfg.Serverlets) != 1 {
+		return nil, "", fmt.Errorf("%s must contain exactly one serverlet for `futrou deploy` (found %d)", path, len(cfg.Serverlets))
 	}
-
-	for _, name := range candidates {
-		data, err := readConfigFile(name)
-		if err != nil {
-			continue
-		}
-		var cfg DeployConfig
-		if err := json.Unmarshal(data, &cfg); err != nil {
-			return nil, "", fmt.Errorf("parsing %s: %w", name, err)
-		}
-		return &cfg, name, nil
+	data, err := json.Marshal(cfg.Serverlets[0])
+	if err != nil {
+		return nil, "", fmt.Errorf("encoding serverlet from %s: %w", path, err)
 	}
-	return nil, "", fmt.Errorf("no config file found (looked for: %s)", strings.Join(candidates, ", "))
-}
-
-// readConfigFile reads a file; for .js files it uses node to evaluate and return JSON.
-func readConfigFile(name string) ([]byte, error) {
-	if _, err := os.Stat(name); err != nil {
-		return nil, err
+	var deployCfg DeployConfig
+	if err := json.Unmarshal(data, &deployCfg); err != nil {
+		return nil, "", fmt.Errorf("parsing serverlet from %s: %w", path, err)
 	}
-	if strings.HasSuffix(name, ".js") {
-		node, err := exec.LookPath("node")
-		if err != nil {
-			return nil, fmt.Errorf("%s requires node (not found in PATH)", name)
-		}
-		out, err := exec.Command(node, "-e",
-			fmt.Sprintf("process.stdout.write(JSON.stringify(require('./%s')))", name),
-		).Output()
-		if err != nil {
-			return nil, fmt.Errorf("evaluating %s: %w", name, err)
-		}
-		return out, nil
-	}
-	return os.ReadFile(name)
+	return &deployCfg, path, nil
 }
 
 func runDeploy(c *cli.Context, client *services.ApiClient, cfg *DeployConfig) error {

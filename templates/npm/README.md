@@ -21,6 +21,22 @@ yarn global add futrou
 
 Once installed, you can access the CLI using the `npx futrou` command.
 
+## Infrastructure as code
+
+The npm package also exports a small JavaScript API for building `futrou.json`:
+
+```js
+const { Config } = require('futrou');
+
+const config = new Config({ workspace: 'acme', project: 'website' })
+  .serverlet({ name: 'web', image: 'nginx:latest', ram: 128, cpu: 100 });
+
+require('fs').writeFileSync('futrou.json', config.toJson() + '\n');
+```
+
+`toJs()` returns an ESM default-export module and `toJsonSchema()` returns the
+generated Futrou JSON Schema bundled with the package.
+
 ## Documentation
 
 For more detailed guides on how to use the CLI, please visit [docs.futrou.com](https://docs.futrou.com).

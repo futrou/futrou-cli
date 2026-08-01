@@ -30,7 +30,9 @@ done
 
 # Copy all template files
 cp -r templates/npm/. "$NPM_DIR/"
+cp futrou.schema.json "$NPM_DIR/futrou.schema.json"
 cp install.sh install.ps1 "$NPM_DIR/"
+cp futrou.schema.json "$NPM_DIR/"
 
 # Copy license
 cp LICENSE "$NPM_DIR/LICENSE"

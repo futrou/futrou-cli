@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"futrou-cli/src/constants"
 	"futrou-cli/src/services"
 
 	"github.com/urfave/cli/v2"
@@ -35,9 +36,10 @@ var initCommand = &cli.Command{
 
 		reader := bufio.NewReader(os.Stdin)
 
-		// default name from current directory
+		// Default serverlet and project name from current directory.
 		cwd, _ := os.Getwd()
 		defaultName := filepath.Base(cwd)
+		projectName := defaultName
 
 		name := c.String("name")
 		if name == "" {
@@ -76,8 +78,14 @@ var initCommand = &cli.Command{
 		}
 
 		cfg := map[string]interface{}{
-			"name":  name,
-			"image": image,
+			"$schema": constants.ProjectConfigSchemaURL,
+			"project": projectName,
+			"serverlets": []map[string]interface{}{
+				{
+					"name":  name,
+					"image": image,
+				},
+			},
 		}
 
 		data, err := json.MarshalIndent(cfg, "", "  ")
