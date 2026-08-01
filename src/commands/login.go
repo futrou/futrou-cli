@@ -17,7 +17,7 @@ import (
 	"strings"
 	"time"
 
-	"futrou-cli/src/config"
+	"futrou-cli/src/cliconfig"
 	"futrou-cli/src/constants"
 	"futrou-cli/src/logger"
 	"futrou-cli/src/services"
@@ -39,7 +39,7 @@ var loginCommand = &cli.Command{
 		apiUrl := services.NormalizeApiUrl(globalApiUrl(c))
 
 		// If a token is already stored for this API URL, don't start a new flow.
-		if cfg, err := config.Load(); err == nil && cfg.TokenFor(apiUrl) != "" {
+		if cfg, err := cliconfig.Load(); err == nil && cfg.TokenFor(apiUrl) != "" {
 			if isJSON(c) {
 				return printJSON(map[string]string{"status": "already logged in"})
 			}
@@ -136,7 +136,7 @@ var loginCommand = &cli.Command{
 			return fmt.Errorf("exchanging code for token: %w", err)
 		}
 
-		cfg, err := config.Load()
+		cfg, err := cliconfig.Load()
 		if err != nil {
 			return fmt.Errorf("loading config: %w", err)
 		}
@@ -151,7 +151,7 @@ var loginCommand = &cli.Command{
 			cfg.SetDefaultWorkspace(apiUrl, workspaceID)
 		}
 
-		if err := config.Save(cfg); err != nil {
+		if err := cliconfig.Save(cfg); err != nil {
 			return fmt.Errorf("saving config: %w", err)
 		}
 

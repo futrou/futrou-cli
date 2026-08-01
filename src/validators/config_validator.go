@@ -20,6 +20,7 @@ func initConfigValidator() *Validator {
 	v.Field("proxies").Description("HTTP, TCP, or UDP proxies managed by this project.").Optional().Array(initProxyValidator())
 	v.Field("volumes").Description("Persistent volumes available to the project.").Optional().Array(initVolumeValidator())
 	v.Field("crons").Description("Scheduled HTTP or code jobs for the project.").Optional().Array(initCronValidator())
+	v.Field("locks").Description("Internal stable resource identifiers maintained by the CLI.").Optional()
 	return v
 }
 

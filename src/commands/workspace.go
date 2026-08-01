@@ -5,7 +5,7 @@ import (
 	"net/url"
 	"regexp"
 
-	"futrou-cli/src/config"
+	"futrou-cli/src/cliconfig"
 	"futrou-cli/src/services"
 
 	"github.com/urfave/cli/v2"
@@ -31,7 +31,7 @@ func resolveWorkspaceID(c *cli.Context) (string, error) {
 	name := c.String("workspace")
 	if name == "" {
 		apiUrl := services.NormalizeApiUrl(globalApiUrl(c))
-		if cfg, err := config.Load(); err == nil {
+		if cfg, err := cliconfig.Load(); err == nil {
 			name = cfg.DefaultWorkspaceFor(apiUrl)
 		}
 		if name == "" {

@@ -11,16 +11,20 @@ import (
 	"time"
 
 	"futrou-cli/src/api"
-	"futrou-cli/src/config"
+	"futrou-cli/src/cliconfig"
 	"futrou-cli/src/logger"
 )
 
 // ApiClient handles communication with the Futrou API.
 type ApiClient struct {
-	client   *http.Client
-	apiUrl   string
-	apiToken string
+	client        *http.Client
+	apiUrl        string
+	apiToken      string
+	afterMutation func() error
 }
+
+// SetAfterMutation installs a callback run after a successful write request.
+func (ac *ApiClient) SetAfterMutation(callback func() error) { ac.afterMutation = callback }
 
 // NormalizeApiUrl strips a trailing slash and a trailing "/v2" so that both
 // "https://api.futrou.com" and "https://api.futrou.com/v2" resolve the same.
@@ -33,7 +37,7 @@ func NormalizeApiUrl(apiUrl string) string {
 // NewApiClient creates a client loaded from config/env.
 // apiUrl and token override config/env values when non-empty.
 func NewApiClient(apiUrl, token string) (*ApiClient, error) {
-	cfg, err := config.Load()
+	cfg, err := cliconfig.Load()
 	if err != nil {
 		return nil, err
 	}
@@ -128,17 +132,31 @@ func (ac *ApiClient) RequestInto(method, path string, body interface{}, v interf
 		if jsonErr := json.Unmarshal(respBody, &apiErr); jsonErr == nil && apiErr.Message != "" {
 			return resp.StatusCode, &apiErr
 		}
+		if message := strings.TrimSpace(string(respBody)); message != "" {
+			return resp.StatusCode, &api.APIError{Message: message}
+		}
 		return resp.StatusCode, &api.APIError{Message: fmt.Sprintf("request failed: %d", resp.StatusCode)}
 	}
 
 	if len(respBody) == 0 || resp.StatusCode == http.StatusNoContent {
-		return resp.StatusCode, nil
+		return resp.StatusCode, ac.runAfterMutation(method)
 	}
 
 	if err := json.Unmarshal(respBody, v); err != nil {
 		return resp.StatusCode, fmt.Errorf("parsing response: %w", err)
 	}
-	return resp.StatusCode, nil
+	return resp.StatusCode, ac.runAfterMutation(method)
+}
+
+func (ac *ApiClient) runAfterMutation(method string) error {
+	if isMutation(method) && ac.afterMutation != nil {
+		return ac.afterMutation()
+	}
+	return nil
+}
+
+func isMutation(method string) bool {
+	return method == http.MethodPost || method == http.MethodPatch || method == http.MethodPut || method == http.MethodDelete
 }
 
 func (ac *ApiClient) do(ctx context.Context, method, path string, body interface{}) (*http.Response, error) {
@@ -159,7 +177,7 @@ func (ac *ApiClient) do(ctx context.Context, method, path string, body interface
 	}
 
 	req.Header.Set("Accept", "application/json")
-	if body != nil {
+	if body != nil || method == http.MethodPost || method == http.MethodPut || method == http.MethodPatch || method == http.MethodDelete {
 		req.Header.Set("Content-Type", "application/json")
 	}
 	if ac.apiToken != "" {

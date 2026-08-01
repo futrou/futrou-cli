@@ -200,6 +200,13 @@
       },
       "type": "array"
     },
+    "locks": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "description": "CLI-maintained opaque resource lock fingerprints.",
+      "type": "object"
+    },
     "project": {
       "description": "Project name or ID used as the deployment target.",
       "maxLength": 255,

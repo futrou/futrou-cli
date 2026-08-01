@@ -2,33 +2,18 @@ package commands
 
 import (
 	"bufio"
-	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 
-	"futrou-cli/src/api"
 	projectconfig "futrou-cli/src/config"
+	"futrou-cli/src/deployer"
+	"futrou-cli/src/logger"
 	"futrou-cli/src/services"
 
 	"github.com/urfave/cli/v2"
 )
-
-// DeployConfig is the schema for futrou.json / futrou.config.json etc.
-type DeployConfig struct {
-	// Serverlet identification — one of id or name is required
-	Id   string `json:"id"`
-	Name string `json:"name"`
-
-	// Serverlet fields
-	Image           string            `json:"image"`
-	ServerletPlanId string            `json:"serverletPlanId"`
-	WorkspaceId     string            `json:"workspaceId"`
-	ProjectId       string            `json:"projectId"`
-	MinInstances    *int              `json:"minInstances"`
-	MaxInstances    *int              `json:"maxInstances"`
-	Env             map[string]string `json:"env"`
-}
 
 var deployCommand = &cli.Command{
 	Name:  "deploy",
@@ -46,11 +31,11 @@ var deployCommand = &cli.Command{
 		},
 		&cli.BoolFlag{
 			Name:  "destroy",
-			Usage: "Destroy the resource instead of creating/updating",
+			Usage: "Destroy the resources declared in the project configuration",
 		},
 	},
 	Action: func(c *cli.Context) error {
-		cfg, cfgFile, err := loadDeployConfig(c.String("file"))
+		cfg, cfgFile, err := projectconfig.LoadConfig(".", c.String("file"))
 		if err != nil {
 			return err
 		}
@@ -60,201 +45,151 @@ var deployCommand = &cli.Command{
 		if err != nil {
 			return fmt.Errorf("loading credentials: %w", err)
 		}
-
-		if c.Bool("destroy") {
-			return runDestroy(c, client, cfg)
+		if cfg.Project != "" {
+			if err := ensureConfigWorkspace(c, client, cfg); err != nil {
+				return err
+			}
 		}
-		return runDeploy(c, client, cfg)
+
+		plan, err := deployer.BuildPlan(client, cfg, c.Bool("destroy"))
+		if err != nil {
+			return err
+		}
+		if len(plan.Actions) == 0 {
+			refreshDeploymentConfig(client, cfg, cfgFile)
+			fmt.Printf("%s✓ No changes. Infrastructure is up to date.%s\n", colorGreen, colorReset)
+			return nil
+		}
+		printDeployPlan(plan)
+		if !c.Bool("yes") && !promptConfirm("Apply these changes?") {
+			fmt.Println("Cancelled.")
+			return nil
+		}
+		if err := deployer.Apply(client, plan); err != nil {
+			return err
+		}
+		// Refresh successful deployments so the file records the API IDs needed
+		// to recognize future resource renames as updates.
+		refreshDeploymentConfig(client, cfg, cfgFile)
+		if isJSON(c) {
+			return printJSON(plan)
+		}
+		fmt.Printf("%s✓ Applied %d change(s).%s\n", colorGreen, len(plan.Actions), colorReset)
+		return nil
 	},
 }
 
-// loadDeployConfig reads the shared project configuration and selects its
-// single serverlet for this command. Deploying a whole project will be added
-// separately; requiring one resource prevents an accidental partial deploy.
-func loadDeployConfig(override string) (*DeployConfig, string, error) {
-	cfg, path, err := projectconfig.LoadConfig(".", override)
-	if err != nil {
-		return nil, "", err
+func refreshDeploymentConfig(client *services.ApiClient, cfg *projectconfig.Config, path string) {
+	if cfg.Project == "" || !strings.HasSuffix(path, ".json") {
+		return
 	}
-	if len(cfg.Serverlets) != 1 {
-		return nil, "", fmt.Errorf("%s must contain exactly one serverlet for `futrou deploy` (found %d)", path, len(cfg.Serverlets))
+	if err := cfg.Pull(client, ""); err != nil {
+		logger.Warn("deployment succeeded but config locks were not refreshed: %v", err)
+		return
 	}
-	data, err := json.Marshal(cfg.Serverlets[0])
-	if err != nil {
-		return nil, "", fmt.Errorf("encoding serverlet from %s: %w", path, err)
+	if _, err := cfg.Save(".", path); err != nil {
+		logger.Warn("deployment succeeded but config locks were not refreshed: %v", err)
 	}
-	var deployCfg DeployConfig
-	if err := json.Unmarshal(data, &deployCfg); err != nil {
-		return nil, "", fmt.Errorf("parsing serverlet from %s: %w", path, err)
-	}
-	return &deployCfg, path, nil
 }
 
-func runDeploy(c *cli.Context, client *services.ApiClient, cfg *DeployConfig) error {
-	autoApprove := c.Bool("yes")
-
-	// Fetch current remote state if serverlet id/name is known
-	var remote *api.Serverlet
-	if cfg.Id != "" {
-		var s api.Serverlet
-		if _, err := client.RequestInto("GET", "/v2/serverlets/"+cfg.Id, nil, &s); err == nil {
-			remote = &s
-		}
-	} else if cfg.Name != "" {
-		// Search by name
-		var list []api.Serverlet
-		if _, err := client.RequestInto("GET", "/v2/serverlets?limit=100", nil, &list); err == nil {
-			for i, s := range list {
-				if strings.EqualFold(s.Name, cfg.Name) {
-					remote = &list[i]
-					break
-				}
-			}
-		}
-	}
-
-	if remote == nil {
-		return runCreate(c, client, cfg, autoApprove)
-	}
-	return runUpdate(c, client, cfg, remote, autoApprove)
+func printDeployPlan(plan *deployer.Plan) {
+	fmt.Println("\nChanges:")
+	actions := deployer.SortedActions(plan)
+	printPlanSection("Create", colorGreen, actions, deployer.Create)
+	printPlanSection("Update", colorYellow, actions, deployer.Update)
+	printPlanSection("Delete", colorRed, actions, deployer.Delete)
+	fmt.Println()
 }
 
-func runCreate(c *cli.Context, client *services.ApiClient, cfg *DeployConfig, autoApprove bool) error {
-	fmt.Println("\nPlan: create serverlet")
-	fmt.Println()
-	printAdded("name", cfg.Name)
-	printAdded("image", cfg.Image)
-	if cfg.ServerletPlanId != "" {
-		printAdded("serverletPlanId", cfg.ServerletPlanId)
+func printPlanSection(title, color string, actions []deployer.Action, kind deployer.ActionType) {
+	count := 0
+	for _, action := range actions {
+		if action.Type == kind {
+			count++
+		}
 	}
-	if cfg.WorkspaceId != "" {
-		printAdded("workspaceId", cfg.WorkspaceId)
+	if count == 0 {
+		return
 	}
-	if cfg.ProjectId != "" {
-		printAdded("projectId", cfg.ProjectId)
+	fmt.Printf("\n%s%s (%d)%s\n", color, title, count, colorReset)
+	printedZones := map[string]bool{}
+	for _, action := range actions {
+		if action.Type != kind {
+			continue
+		}
+		if action.Resource == "dns record" {
+			printDNSRecordAction(action, printedZones)
+			continue
+		}
+		switch kind {
+		case deployer.Create:
+			printAdded(action.Resource, action.Name)
+			printActionPayload(action)
+		case deployer.Delete:
+			printRemoved(action.Resource, action.Name)
+		case deployer.Update:
+			printUpdatedResource(action.Resource, action.Name)
+			printActionFieldChanges(action)
+		}
 	}
-	fmt.Println()
-
-	if !autoApprove && !promptConfirm("Create serverlet?") {
-		fmt.Println("Cancelled.")
-		return nil
-	}
-
-	payload := map[string]interface{}{
-		"name":  cfg.Name,
-		"image": cfg.Image,
-	}
-	if cfg.ServerletPlanId != "" {
-		payload["serverletPlanId"] = cfg.ServerletPlanId
-	}
-	if cfg.WorkspaceId != "" {
-		payload["workspaceId"] = cfg.WorkspaceId
-	}
-	if cfg.ProjectId != "" {
-		payload["projectId"] = cfg.ProjectId
-	}
-
-	var created api.Serverlet
-	if _, err := client.RequestInto("POST", "/v2/serverlets", payload, &created); err != nil {
-		return fmt.Errorf("create failed: %w", err)
-	}
-
-	if isJSON(c) {
-		return printJSON(created)
-	}
-	fmt.Printf("✓ Created serverlet %s (%s)\n", created.Name, created.Id)
-	return nil
 }
 
-func runUpdate(c *cli.Context, client *services.ApiClient, cfg *DeployConfig, remote *api.Serverlet, autoApprove bool) error {
-	changes := map[string]interface{}{}
-	hasDiff := false
-
-	fmt.Printf("\nPlan: update serverlet %s (%s)\n\n", remote.Name, remote.Id)
-
-	if cfg.Image != "" && cfg.Image != remote.Image {
-		printChanged("image", remote.Image, cfg.Image)
-		changes["image"] = cfg.Image
-		hasDiff = true
+func printDNSRecordAction(action deployer.Action, printedZones map[string]bool) {
+	parts := strings.SplitN(action.Name, " / ", 2)
+	zone, record := action.Name, action.Name
+	if len(parts) == 2 {
+		zone, record = parts[0], parts[1]
 	}
-	if cfg.Name != "" && cfg.Name != remote.Name {
-		printChanged("name", remote.Name, cfg.Name)
-		changes["name"] = cfg.Name
-		hasDiff = true
+	if !printedZones[zone] {
+		switch action.Type {
+		case deployer.Create:
+			printAdded("dns zone", zone)
+		case deployer.Delete:
+			printRemoved("dns zone", zone)
+		default:
+			printUpdatedResource("dns zone", zone)
+		}
+		printedZones[zone] = true
 	}
-	if cfg.ServerletPlanId != "" {
-		printAdded("serverletPlanId", cfg.ServerletPlanId)
-		changes["serverletPlanId"] = cfg.ServerletPlanId
-		hasDiff = true
+	label := "  dns record"
+	switch action.Type {
+	case deployer.Create:
+		printAdded(label, record)
+		printActionPayload(action)
+	case deployer.Update:
+		printUpdatedResource(label, record)
+		printActionFieldChanges(action)
+	case deployer.Delete:
+		printRemoved(label, record)
 	}
-
-	fmt.Println()
-
-	if !hasDiff {
-		fmt.Println("✓ No changes. Serverlet is up to date.")
-		return nil
-	}
-
-	if !autoApprove && !promptConfirm("Apply changes?") {
-		fmt.Println("Cancelled.")
-		return nil
-	}
-
-	var updated api.Serverlet
-	if _, err := client.RequestInto("PATCH", "/v2/serverlets/"+remote.Id, changes, &updated); err != nil {
-		return fmt.Errorf("update failed: %w", err)
-	}
-
-	if isJSON(c) {
-		return printJSON(updated)
-	}
-	fmt.Printf("✓ Updated serverlet %s (%s)\n", updated.Name, updated.Id)
-	return nil
 }
 
-func runDestroy(c *cli.Context, client *services.ApiClient, cfg *DeployConfig) error {
-	id := cfg.Id
-	name := cfg.Name
-
-	// Resolve name to id if needed
-	if id == "" && name != "" {
-		var list []api.Serverlet
-		if _, err := client.RequestInto("GET", "/v2/serverlets?limit=100", nil, &list); err != nil {
-			return fmt.Errorf("fetching serverlets: %w", err)
-		}
-		for _, s := range list {
-			if strings.EqualFold(s.Name, name) {
-				id = s.Id
-				break
-			}
-		}
-		if id == "" {
-			return fmt.Errorf("serverlet %q not found", name)
+func printActionPayload(action deployer.Action) {
+	keys := make([]string, 0, len(action.Payload))
+	for key := range action.Payload {
+		if key != "name" && key != "domain" {
+			keys = append(keys, key)
 		}
 	}
-	if id == "" {
-		return fmt.Errorf("serverlet id or name required in config")
+	sort.Strings(keys)
+	for _, key := range keys {
+		printAdded("  "+key, fmt.Sprint(action.Payload[key]))
 	}
+}
 
-	fmt.Printf("\nPlan: destroy serverlet %s\n\n", id)
-	printRemoved("id", id)
-	fmt.Println()
+func printUpdatedResource(resource, name string) {
+	fmt.Printf("  %s~ %s: %q%s\n", colorYellow, resource, name, colorReset)
+}
 
-	autoApprove := c.Bool("yes")
-	if !autoApprove && !promptConfirm("Destroy serverlet?") {
-		fmt.Println("Cancelled.")
-		return nil
+func printActionFieldChanges(action deployer.Action) {
+	keys := make([]string, 0, len(action.Changes))
+	for key := range action.Changes {
+		keys = append(keys, key)
 	}
-
-	if _, err := client.RequestInto("DELETE", "/v2/serverlets/"+id, nil, nil); err != nil {
-		return fmt.Errorf("destroy failed: %w", err)
+	sort.Strings(keys)
+	for _, key := range keys {
+		printChanged("  "+key, fmt.Sprint(action.Previous[key]), fmt.Sprint(action.Changes[key]))
 	}
-
-	if isJSON(c) {
-		return printJSON(map[string]string{"status": "destroyed", "id": id})
-	}
-	fmt.Printf("✓ Destroyed serverlet %s\n", id)
-	return nil
 }
 
 // promptConfirm asks the user yes/no and returns true for yes.
@@ -269,7 +204,7 @@ func promptConfirm(prompt string) bool {
 const (
 	colorGreen  = "\033[32m"
 	colorRed    = "\033[31m"
-	colorYellow = "\033[33m"
+	colorYellow = "\033[34m"
 	colorReset  = "\033[0m"
 )
 
