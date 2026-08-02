@@ -15,6 +15,8 @@ if [ -z "$DIST_NAME" ]; then
     DIST_NAME="futrou"
 fi
 
+"$(dirname "$0")/build-types.sh"
+
 rm -rf $DIST_DIR
 mkdir -p $DIST_DIR
 

@@ -1,6 +1,6 @@
 SCRIPTS_DIR := ./scripts
 
-.PHONY: default install dev build build-schema generate test version start
+.PHONY: default install dev build build-schema build-types generate test version start
 
 default: install dev
 
@@ -16,8 +16,11 @@ build:
 build-schema:
 	@$(SCRIPTS_DIR)/build-schema.sh
 	
-generate:
-	@$(SCRIPTS_DIR)/generate.sh
+build-types:
+	@$(SCRIPTS_DIR)/build-types.sh
+
+# Backwards-compatible alias for build-types.
+generate: build-types
 
 test:
 	@go test ./src/...

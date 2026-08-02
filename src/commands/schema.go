@@ -3,11 +3,10 @@ package commands
 import (
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
-	"time"
+	"os"
 
 	"futrou-cli/src/services"
+	"futrou-cli/src/utils"
 
 	"github.com/urfave/cli/v2"
 )
@@ -15,33 +14,47 @@ import (
 var schemaCommand = &cli.Command{
 	Name:  "schema",
 	Usage: "Display the Futrou API v2 OpenAPI schema",
+	Flags: []cli.Flag{
+		&cli.StringFlag{
+			Name:  "format",
+			Usage: "Output format: json or go",
+			Value: "json",
+		},
+	},
 	Action: func(c *cli.Context) error {
-		apiUrl := services.NormalizeApiUrl(globalApiUrl(c))
-		url := apiUrl + "/v2/openapi.json"
+		client := services.NewApiClientWithToken(globalApiUrl(c), globalApiKey(c))
+		switch c.String("format") {
+		case "go":
+			schema, err := client.ToJSONSchema()
+			if err != nil {
+				return err
+			}
+			types, err := utils.JSONSchemaToGo(schema, client.ApiUrl()+"/v2/openapi.json")
+			if err != nil {
+				return err
+			}
+			_, err = os.Stdout.Write(types)
+			return err
+		case "json":
+			data, err := client.ToJSONSchema()
+			if err != nil {
+				return err
+			}
 
-		client := &http.Client{Timeout: 30 * time.Second}
-		resp, err := client.Get(url)
-		if err != nil {
-			return fmt.Errorf("fetching schema: %w", err)
-		}
-		defer resp.Body.Close()
+			if isJSON(c) {
+				// Already JSON — print raw.
+				fmt.Println(string(data))
+				return nil
+			}
 
-		data, err := io.ReadAll(resp.Body)
-		if err != nil {
-			return fmt.Errorf("reading schema: %w", err)
+			// Pretty-print JSON schema for terminals.
+			var pretty interface{}
+			if err := json.Unmarshal(data, &pretty); err != nil {
+				return fmt.Errorf("parsing schema: %w", err)
+			}
+			return printJSON(pretty)
+		default:
+			return fmt.Errorf("unsupported schema format %q (supported: json, go)", c.String("format"))
 		}
-
-		if isJSON(c) {
-			// Already JSON — print raw
-			fmt.Println(string(data))
-			return nil
-		}
-
-		// Pretty-print
-		var pretty interface{}
-		if err := json.Unmarshal(data, &pretty); err != nil {
-			return fmt.Errorf("parsing schema: %w", err)
-		}
-		return printJSON(pretty)
 	},
 }

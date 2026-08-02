@@ -3,17 +3,28 @@ package services
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
 	"futrou-cli/src/api"
 	"futrou-cli/src/cliconfig"
 	"futrou-cli/src/logger"
+
+	"github.com/quic-go/quic-go/http3"
 )
+
+func init() {
+	// Suppress quic-go's informational warning about the OS UDP receive buffer.
+	if os.Getenv("QUIC_GO_DISABLE_RECEIVE_BUFFER_WARNING") == "" {
+		os.Setenv("QUIC_GO_DISABLE_RECEIVE_BUFFER_WARNING", "true")
+	}
+}
 
 // ApiClient handles communication with the Futrou API.
 type ApiClient struct {
@@ -63,6 +74,24 @@ func (ac *ApiClient) ApiToken() string {
 // ApiUrl returns the normalized base API URL used by this client.
 func (ac *ApiClient) ApiUrl() string {
 	return ac.apiUrl
+}
+
+// ToJSONSchema returns the OpenAPI schema served by the configured API.
+func (ac *ApiClient) ToJSONSchema() ([]byte, error) {
+	resp, err := ac.do(context.Background(), http.MethodGet, "/v2/openapi.json", nil)
+	if err != nil {
+		return nil, fmt.Errorf("fetching schema: %w", err)
+	}
+	defer resp.Body.Close()
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("reading schema: %w", err)
+	}
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return nil, fmt.Errorf("fetching schema: API returned %s", resp.Status)
+	}
+	return data, nil
 }
 
 // NewApiClientWithToken creates a client with explicit url and token (no config file lookup).
@@ -186,4 +215,40 @@ func (ac *ApiClient) do(ctx context.Context, method, path string, body interface
 
 	logger.Debug("→ %s %s", method, url)
 	return ac.client.Do(req)
+}
+
+// newHttpClient builds an http.Client restricted to TLS 1.2/1.3, with
+// HTTP/2 support over TLS and an opportunistic HTTP/3 upgrade.
+func newHttpClient(timeout time.Duration) *http.Client {
+	tlsConfig := &tls.Config{
+		MinVersion: tls.VersionTLS12,
+		MaxVersion: tls.VersionTLS13,
+	}
+
+	h3Transport := &http3.Transport{TLSClientConfig: tlsConfig}
+	h1h2Transport := &http.Transport{
+		TLSClientConfig:   tlsConfig,
+		ForceAttemptHTTP2: true,
+	}
+
+	return &http.Client{
+		Timeout:   timeout,
+		Transport: &fallbackTransport{primary: h3Transport, fallback: h1h2Transport},
+	}
+}
+
+// fallbackTransport tries HTTP/3 first for HTTPS and transparently falls back
+// to HTTP/1.1 or HTTP/2 when QUIC is unavailable.
+type fallbackTransport struct {
+	primary  http.RoundTripper
+	fallback http.RoundTripper
+}
+
+func (t *fallbackTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req.URL.Scheme == "https" {
+		if resp, err := t.primary.RoundTrip(req.Clone(req.Context())); err == nil {
+			return resp, nil
+		}
+	}
+	return t.fallback.RoundTrip(req)
 }

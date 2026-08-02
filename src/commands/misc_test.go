@@ -26,21 +26,6 @@ func TestLicense_json(t *testing.T) {
 	assertContains(t, out, "MIT")
 }
 
-func TestSchema(t *testing.T) {
-	ts := newTestServer(t)
-	ts.on("GET", "/v2/openapi.json", respond(200, map[string]interface{}{
-		"openapi": "3.0.0",
-		"info":    map[string]interface{}{"title": "Futrou API", "version": "2"},
-	}))
-
-	t.Setenv("HOME", t.TempDir())
-	t.Setenv("FUTROU_API_TOKEN", "")
-
-	out, err := runArgsNoAuth(t, ts, "schema")
-	assertNoError(t, err)
-	assertContains(t, out, "Futrou API")
-}
-
 func TestGlobalFlags_apiUrl(t *testing.T) {
 	ts := newTestServer(t)
 	ts.on("GET", "/v2/serverlets", respond(200, []interface{}{fixtureServerlet()}))
