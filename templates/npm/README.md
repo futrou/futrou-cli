@@ -39,7 +39,7 @@ generated Futrou JSON Schema bundled with the package.
 
 ## Documentation
 
-For more detailed guides on how to use the CLI, please visit [docs.futrou.com](https://docs.futrou.com).
+For more detailed guides on how to use the CLI, please visit [futrou.com](https://futrou.com/docs).
 
 ## License
 [MIT License](LICENSE)

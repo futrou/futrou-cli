@@ -18,7 +18,7 @@ const (
 	EnvLogLevel  = "LOG_LEVEL"
 	EnvLogFormat = "LOG_FORMAT"
 
-	DocsUrl = "https://docs.futrou.com"
+	DocsUrl = "https://futrou.com/docs"
 	RepoUrl = "https://github.com/futrou/futrou-cli"
 	McpUrl  = "https://mcp.futrou.com"
 
