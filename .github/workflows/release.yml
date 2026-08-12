@@ -125,22 +125,15 @@ jobs:
             exit 0
           fi
 
-          # Use existing untagged draft (release-drafter creates these), or create fresh draft
-          DRAFT_ID=$(gh api repos/$GITHUB_REPOSITORY/releases --jq '.[] | select(.draft and .tag_name == "") | .id' | head -1)
-          if [ -n "$DRAFT_ID" ]; then
-            echo "Untagged draft found (id=$DRAFT_ID) — updating to $TITLE"
-            gh api repos/$GITHUB_REPOSITORY/releases/$DRAFT_ID \
-              --method PATCH \
-              --field tag_name="$TAG" \
-              --field name="$TITLE" \
-              --field draft=true
-          else
-            echo "Creating draft release $TITLE"
-            gh release create "$TAG" \
-              --title "$TITLE" \
-              --generate-notes \
-              --draft
-          fi
+          # GitHub's native --generate-notes lists every commit (not just
+          # merged PRs) between this tag and the previous published release,
+          # so it works out of the box even for commits pushed directly to
+          # main rather than merged via PR.
+          echo "Creating draft release $TITLE"
+          gh release create "$TAG" \
+            --title "$TITLE" \
+            --generate-notes \
+            --draft
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
