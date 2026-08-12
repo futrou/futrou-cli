@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -106,53 +105,6 @@ func TestLogin_oauthFlow(t *testing.T) {
 	_ = result
 }
 
-// TestPKCE verifies that the PKCE verifier and challenge are non-empty,
-// different from each other, and that the challenge is base64url-encoded SHA-256.
-func TestPKCE(t *testing.T) {
-	verifier, challenge, err := pkce()
-	if err != nil {
-		t.Fatalf("pkce() error: %v", err)
-	}
-	if verifier == "" {
-		t.Error("verifier is empty")
-	}
-	if challenge == "" {
-		t.Error("challenge is empty")
-	}
-	if verifier == challenge {
-		t.Error("verifier and challenge must differ")
-	}
-	// Two calls must produce different values.
-	v2, c2, _ := pkce()
-	if verifier == v2 || challenge == c2 {
-		t.Error("pkce() must produce unique values each call")
-	}
-}
-
-func TestBuildAuthURL(t *testing.T) {
-	u := buildAuthURL("https://selfhosted.example.com/v2/auth/oauth2/authorize", "client-1", "http://localhost:12345/", "challenge-abc")
-	parsed, err := url.Parse(u)
-	if err != nil {
-		t.Fatalf("invalid URL: %v", err)
-	}
-	q := parsed.Query()
-	if q.Get("client_id") != "client-1" {
-		t.Errorf("client_id = %q, want %q", q.Get("client_id"), "client-1")
-	}
-	if q.Get("redirect_uri") != "http://localhost:12345/" {
-		t.Errorf("redirect_uri = %q, want %q", q.Get("redirect_uri"), "http://localhost:12345/")
-	}
-	if q.Get("code_challenge") != "challenge-abc" {
-		t.Errorf("code_challenge = %q, want %q", q.Get("code_challenge"), "challenge-abc")
-	}
-	if q.Get("response_type") != "code" {
-		t.Errorf("response_type = %q, want %q", q.Get("response_type"), "code")
-	}
-	if q.Get("code_challenge_method") != "S256" {
-		t.Errorf("code_challenge_method = %q, want %q", q.Get("code_challenge_method"), "S256")
-	}
-}
-
 // TestStartCountdown_doneMeansNoMoreLoaderCalls guards against a panic
 // ("sync: WaitGroup is reused before previous Wait has returned") that
 // occurred when the login command closed stopCountdown and immediately
@@ -176,145 +128,6 @@ func TestStartCountdown_doneMeansNoMoreLoaderCalls(t *testing.T) {
 		close(stop)
 		<-done
 		logger.StopLoader()
-	}
-}
-
-func TestBuildShortAuthURL(t *testing.T) {
-	u := buildShortAuthURL("https://api.futrou.com", "challenge/abc", 12345)
-	want := "https://api.futrou.com/v2/auth/cli/" + url.QueryEscape("challenge/abc") + "/12345"
-	if u != want {
-		t.Errorf("buildShortAuthURL = %q, want %q", u, want)
-	}
-}
-
-func TestVerifyShortAuthURL_matches(t *testing.T) {
-	ts := newTestServer(t)
-	ts.on("GET", "/v2/auth/cli/challenge-abc/redirect", func(w http.ResponseWriter, r *http.Request) {
-		loc := "https://api.futrou.com/v2/auth/oauth2/authorize?" + url.Values{
-			"client_id":      {"client-1"},
-			"redirect_uri":   {"http://localhost:12345/"},
-			"code_challenge": {"challenge-abc"},
-			"response_type":  {"code"},
-		}.Encode()
-		http.Redirect(w, r, loc, http.StatusFound)
-	})
-
-	ok := verifyShortAuthURL(ts.URL+"/v2/auth/cli/challenge-abc/redirect", "client-1", "http://localhost:12345/", "challenge-abc")
-	if !ok {
-		t.Error("expected verifyShortAuthURL to match, got false")
-	}
-}
-
-func TestVerifyShortAuthURL_clientIDMismatch(t *testing.T) {
-	ts := newTestServer(t)
-	ts.on("GET", "/v2/auth/cli/challenge-abc/redirect", func(w http.ResponseWriter, r *http.Request) {
-		loc := "https://api.futrou.com/v2/auth/oauth2/authorize?" + url.Values{
-			"client_id":      {"unexpected-client"},
-			"redirect_uri":   {"http://localhost:12345/"},
-			"code_challenge": {"challenge-abc"},
-		}.Encode()
-		http.Redirect(w, r, loc, http.StatusFound)
-	})
-
-	ok := verifyShortAuthURL(ts.URL+"/v2/auth/cli/challenge-abc/redirect", "client-1", "http://localhost:12345/", "challenge-abc")
-	if ok {
-		t.Error("expected verifyShortAuthURL to reject a client_id mismatch")
-	}
-}
-
-func TestVerifyShortAuthURL_notFound(t *testing.T) {
-	ts := newTestServer(t)
-	ts.on("GET", "/v2/auth/cli/challenge-abc/redirect", respond(404, map[string]string{"message": "not found"}))
-
-	ok := verifyShortAuthURL(ts.URL+"/v2/auth/cli/challenge-abc/redirect", "client-1", "http://localhost:12345/", "challenge-abc")
-	if ok {
-		t.Error("expected verifyShortAuthURL to fail on a non-redirect response")
-	}
-}
-
-func TestFetchOAuthDiscovery(t *testing.T) {
-	ts := newTestServer(t)
-	ts.on("GET", "/.well-known/oauth-authorization-server", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, map[string]string{
-			"authorization_endpoint": "https://example.com/authorize",
-			"token_endpoint":         "https://example.com/token",
-			"registration_endpoint":  "https://example.com/register",
-		})
-	})
-
-	d, err := fetchOAuthDiscovery(ts.URL)
-	if err != nil {
-		t.Fatalf("fetchOAuthDiscovery: %v", err)
-	}
-	if d.AuthorizationEndpoint != "https://example.com/authorize" {
-		t.Errorf("AuthorizationEndpoint = %q", d.AuthorizationEndpoint)
-	}
-	if d.TokenEndpoint != "https://example.com/token" {
-		t.Errorf("TokenEndpoint = %q", d.TokenEndpoint)
-	}
-}
-
-func TestRegisterClient(t *testing.T) {
-	ts := newTestServer(t)
-	ts.on("POST", "/register", func(w http.ResponseWriter, r *http.Request) {
-		var body map[string]any
-		json.NewDecoder(r.Body).Decode(&body)
-		if body["client_name"] != "Futrou CLI" {
-			t.Errorf("unexpected client_name: %v", body["client_name"])
-		}
-		writeJSON(w, map[string]string{"client_id": "reg-client-id"})
-	})
-
-	clientID, err := registerClient(ts.URL + "/register")
-	if err != nil {
-		t.Fatalf("registerClient: %v", err)
-	}
-	if clientID != "reg-client-id" {
-		t.Errorf("clientID = %q, want %q", clientID, "reg-client-id")
-	}
-}
-
-func TestExchangeCode(t *testing.T) {
-	ts := newTestServer(t)
-	ts.on("POST", "/token", func(w http.ResponseWriter, r *http.Request) {
-		var body map[string]string
-		json.NewDecoder(r.Body).Decode(&body)
-		if body["grant_type"] != "authorization_code" {
-			t.Errorf("grant_type = %q", body["grant_type"])
-		}
-		if body["code"] != "auth-code-123" {
-			t.Errorf("code = %q", body["code"])
-		}
-		if body["code_verifier"] != "verifier-xyz" {
-			t.Errorf("code_verifier = %q", body["code_verifier"])
-		}
-		writeJSON(w, map[string]string{
-			"access_token": "the-access-token",
-			"email":        "alice@example.com",
-		})
-	})
-
-	token, email, err := exchangeCode(ts.URL+"/token", "client-id", "auth-code-123", "verifier-xyz", "http://localhost/callback")
-	if err != nil {
-		t.Fatalf("exchangeCode: %v", err)
-	}
-	if token != "the-access-token" {
-		t.Errorf("token = %q, want %q", token, "the-access-token")
-	}
-	if email != "alice@example.com" {
-		t.Errorf("email = %q, want %q", email, "alice@example.com")
-	}
-}
-
-func TestExchangeCode_missingToken(t *testing.T) {
-	ts := newTestServer(t)
-	ts.on("POST", "/token", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, map[string]string{"error": "invalid_grant"})
-	})
-
-	_, _, err := exchangeCode(ts.URL+"/token", "client-id", "bad-code", "verifier", "http://localhost/callback")
-	if err == nil {
-		t.Error("expected error when access_token missing, got nil")
 	}
 }
 

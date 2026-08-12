@@ -87,10 +87,14 @@ func runArgs(t *testing.T, ts *testServer, args ...string) (string, error) {
 	return captureRun(fullArgs)
 }
 
-// runArgsNoAuth runs without injecting credentials (tests "not logged in" path).
+// runArgsNoAuth runs without injecting credentials (tests "not logged in"
+// path). CI=true is set so requireAuth's auto-login short-circuits to
+// projectconfig.ErrCIRequiresToken instead of attempting a real interactive
+// OAuth flow against the test server.
 func runArgsNoAuth(t *testing.T, ts *testServer, args ...string) (string, error) {
 	t.Helper()
 	t.Setenv("FUTROU_API_TOKEN", "")
+	t.Setenv("CI", "true")
 	if os.Getenv("HOME") == "" || strings.HasPrefix(os.Getenv("HOME"), "/home") {
 		t.Setenv("HOME", t.TempDir())
 	}

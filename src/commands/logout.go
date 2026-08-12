@@ -18,14 +18,13 @@ var logoutCommand = &cli.Command{
 		if err != nil {
 			return fmt.Errorf("logout failed: %w", err)
 		}
-		loggedIn := cfg.TokenFor(apiUrl) != ""
 
-		cfg.RemoveApiUrl(apiUrl)
-		if err := cliconfig.Save(cfg); err != nil {
+		wasLoggedIn, err := cfg.Logout(apiUrl)
+		if err != nil {
 			return fmt.Errorf("logout failed: %w", err)
 		}
 
-		if !loggedIn {
+		if !wasLoggedIn {
 			if isJSON(c) {
 				return printJSON(map[string]string{"status": "not logged in"})
 			}
