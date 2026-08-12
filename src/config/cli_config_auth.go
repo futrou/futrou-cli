@@ -15,19 +15,13 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
 	"futrou-cli/src/constants"
 )
-
-// WhoamiUser is the identity returned by CliConfig.Whoami.
-type WhoamiUser struct {
-	ID       string
-	Fullname string
-	Email    string
-}
 
 // ErrCIRequiresToken is returned by EnsureLoggedIn (and Login, when no
 // token is available under CI) instead of attempting an interactive
@@ -327,14 +321,33 @@ func (cfg *CliConfig) Login(
 	return userEmail, false, nil
 }
 
+// uuidRe matches UUID-shaped strings. Duplicated from
+// commands.looksLikeUUID (src/commands/workspace.go): config cannot import
+// commands (and shouldn't — config is a lower-level package), so this small
+// regex is kept in sync manually here, mirroring how NormalizeApiUrl is
+// duplicated across config and services for the same reason.
+var uuidRe = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+
+// looksLikeUUID reports whether s is formatted like a UUID.
+func looksLikeUUID(s string) bool {
+	return uuidRe.MatchString(s)
+}
+
 // resolveOrPromptWorkspace resolves workspaceFlag (by UUID or name)
-// directly if non-empty; otherwise delegates to selectWorkspace.
+// directly if non-empty; otherwise delegates to selectWorkspace. A
+// UUID-shaped workspaceFlag that isn't found in workspaces is passed
+// through as-is (both id and name), since the /v2/workspaces listing may
+// be paginated or incomplete — the caller may still know a valid workspace
+// ID that just isn't present in this particular listing.
 func resolveOrPromptWorkspace(workspaces []Workspace, workspaceFlag string, selectWorkspace SelectWorkspaceFunc) (id, name string, err error) {
 	if workspaceFlag != "" {
 		for _, w := range workspaces {
 			if w.ID == workspaceFlag || w.Name == workspaceFlag {
 				return w.ID, w.Name, nil
 			}
+		}
+		if looksLikeUUID(workspaceFlag) {
+			return workspaceFlag, workspaceFlag, nil
 		}
 		return "", "", fmt.Errorf("no workspace named %q found", workspaceFlag)
 	}
@@ -408,52 +421,14 @@ func (cfg *CliConfig) EnsureLoggedIn(
 		return "", ErrCIRequiresToken
 	}
 
+	// workspaceFlag is intentionally empty here: EnsureLoggedIn is the
+	// auto-login path invoked from arbitrary commands via requireAuth, most
+	// of which have no --workspace flag of their own to thread through. If
+	// a workspace default needs setting, the user runs `futrou login
+	// --workspace <x>` explicitly instead.
 	_, _, err = cfg.Login(apiUrl, "", selectWorkspace, openBrowser, onAuthURL, loginTimeout)
 	if err != nil {
 		return "", err
 	}
 	return cfg.TokenFor(apiUrl), nil
-}
-
-// Whoami fetches the authenticated user's identity from apiUrl's
-// /v2/auth/context endpoint. tokenOverride, if non-empty, is used instead
-// of cfg's stored token.
-func (cfg *CliConfig) Whoami(apiUrl, tokenOverride string) (WhoamiUser, error) {
-	apiUrl = NormalizeApiUrl(apiUrl)
-
-	token := tokenOverride
-	if token == "" {
-		token = cfg.TokenFor(apiUrl)
-	}
-	if token == "" {
-		return WhoamiUser{}, fmt.Errorf("not logged in — run 'futrou login' or set FUTROU_API_TOKEN")
-	}
-
-	req, err := http.NewRequest("GET", apiUrl+"/v2/auth/context", nil)
-	if err != nil {
-		return WhoamiUser{}, err
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := (&http.Client{Timeout: 30 * time.Second}).Do(req)
-	if err != nil {
-		return WhoamiUser{}, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
-		return WhoamiUser{}, fmt.Errorf("request failed with status %d", resp.StatusCode)
-	}
-
-	var result struct {
-		User struct {
-			ID       string `json:"id"`
-			Fullname string `json:"fullname"`
-			Email    string `json:"email"`
-		} `json:"user"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return WhoamiUser{}, err
-	}
-	return WhoamiUser{ID: result.User.ID, Fullname: result.User.Fullname, Email: result.User.Email}, nil
 }

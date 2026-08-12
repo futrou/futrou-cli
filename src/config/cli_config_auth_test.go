@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 )
@@ -367,42 +368,72 @@ func TestEnsureLoggedIn_ciNoTokenReturnsErrCIRequiresToken(t *testing.T) {
 	}
 }
 
-func TestWhoami_noTokenReturnsError(t *testing.T) {
-	tempHome(t)
-	cfg, err := Load()
-	if err != nil {
-		t.Fatalf("Load() error: %v", err)
+func TestResolveOrPromptWorkspace_uuidMatchesExistingByID(t *testing.T) {
+	workspaces := []Workspace{
+		{ID: "11111111-1111-1111-1111-111111111111", Name: "prod"},
+		{ID: "22222222-2222-2222-2222-222222222222", Name: "staging"},
 	}
-	_, err = cfg.Whoami("https://api.example.com", "")
+	id, name, err := resolveOrPromptWorkspace(workspaces, "11111111-1111-1111-1111-111111111111", nil)
+	if err != nil {
+		t.Fatalf("resolveOrPromptWorkspace() error: %v", err)
+	}
+	if id != "11111111-1111-1111-1111-111111111111" || name != "prod" {
+		t.Fatalf("got id=%q name=%q, want id=%q name=%q", id, name, "11111111-1111-1111-1111-111111111111", "prod")
+	}
+}
+
+func TestResolveOrPromptWorkspace_uuidNoMatchPassesThrough(t *testing.T) {
+	workspaces := []Workspace{
+		{ID: "11111111-1111-1111-1111-111111111111", Name: "prod"},
+	}
+	unlisted := "99999999-9999-9999-9999-999999999999"
+	id, name, err := resolveOrPromptWorkspace(workspaces, unlisted, nil)
+	if err != nil {
+		t.Fatalf("resolveOrPromptWorkspace() error: %v", err)
+	}
+	if id != unlisted || name != unlisted {
+		t.Fatalf("got id=%q name=%q, want passthrough id=%q name=%q", id, name, unlisted, unlisted)
+	}
+}
+
+func TestResolveOrPromptWorkspace_nameMatchesExisting(t *testing.T) {
+	workspaces := []Workspace{
+		{ID: "11111111-1111-1111-1111-111111111111", Name: "prod"},
+		{ID: "22222222-2222-2222-2222-222222222222", Name: "staging"},
+	}
+	id, name, err := resolveOrPromptWorkspace(workspaces, "staging", nil)
+	if err != nil {
+		t.Fatalf("resolveOrPromptWorkspace() error: %v", err)
+	}
+	if id != "22222222-2222-2222-2222-222222222222" || name != "staging" {
+		t.Fatalf("got id=%q name=%q, want id=%q name=%q", id, name, "22222222-2222-2222-2222-222222222222", "staging")
+	}
+}
+
+func TestResolveOrPromptWorkspace_nameNoMatchReturnsError(t *testing.T) {
+	workspaces := []Workspace{
+		{ID: "11111111-1111-1111-1111-111111111111", Name: "prod"},
+	}
+	_, _, err := resolveOrPromptWorkspace(workspaces, "nonexistent", nil)
 	if err == nil {
-		t.Fatal("expected error when no token is available")
+		t.Fatal("expected error for unmatched non-UUID workspace flag")
+	}
+	if !strings.Contains(err.Error(), "nonexistent") {
+		t.Fatalf("error %q should mention the unmatched value", err.Error())
 	}
 }
 
-func TestWhoami_returnsUserFromApi(t *testing.T) {
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v2/auth/context" {
-			t.Errorf("unexpected path: %s", r.URL.Path)
-		}
-		if r.Header.Get("Authorization") != "Bearer tok-abc" {
-			t.Errorf("unexpected Authorization header: %s", r.Header.Get("Authorization"))
-		}
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"user": map[string]string{"id": "u1", "fullname": "Ada Lovelace", "email": "ada@example.com"},
-		})
-	}))
-	defer ts.Close()
-
-	tempHome(t)
-	cfg, err := Load()
-	if err != nil {
-		t.Fatalf("Load() error: %v", err)
+func TestLooksLikeUUID(t *testing.T) {
+	cases := map[string]bool{
+		"11111111-1111-1111-1111-111111111111": true,
+		"prod":                                 false,
+		"":                                     false,
+		"11111111-1111-1111-1111-11111111111":  false, // one char short
 	}
-	user, err := cfg.Whoami(ts.URL, "tok-abc")
-	if err != nil {
-		t.Fatalf("Whoami() error: %v", err)
-	}
-	if user.Email != "ada@example.com" || user.Fullname != "Ada Lovelace" || user.ID != "u1" {
-		t.Fatalf("unexpected user: %#v", user)
+	for in, want := range cases {
+		if got := looksLikeUUID(in); got != want {
+			t.Errorf("looksLikeUUID(%q) = %v, want %v", in, got, want)
+		}
 	}
 }
+
