@@ -15,17 +15,19 @@ var (
 const (
 	EnvApiUrl    = "FUTROU_API_URL"
 	EnvApiToken  = "FUTROU_API_TOKEN"
-	EnvLogLevel  = "LOG_LEVEL"
-	EnvLogFormat = "LOG_FORMAT"
+	EnvLogLevel  = "FUTROU_LOG_LEVEL"
+	EnvLogFormat = "FUTROU_LOG_FORMAT"
 
 	DocsUrl = "https://futrou.com/docs"
 	RepoUrl = "https://github.com/futrou/futrou-cli"
 	McpUrl  = "https://mcp.futrou.com"
 
+	ApiUrl      = "https://api.futrou.com"
+	DevApiUrl   = "https://api.dev.futrou.com"
+	LocalApiUrl = "http://localhost:4000"
+
 	UpgradeUnixUrl    = "https://futrou.com/install.sh"
 	UpgradeWindowsUrl = "https://futrou.com/install.ps1"
-
-	DefaultApiUrl = "https://api.futrou.com"
 
 	ProjectConfigSchemaURL = "https://futrou.com/futrou.schema.json"
 

@@ -96,7 +96,7 @@ func configPath() (string, error) {
 // Load reads config from ~/.futrou/cli.json.
 // Env vars FUTROU_API_TOKEN and FUTROU_API_URL take precedence over stored values.
 func Load() (*CliConfig, error) {
-	cfg := &CliConfig{ApiUrl: constants.DefaultApiUrl}
+	cfg := &CliConfig{ApiUrl: constants.ApiUrl}
 
 	path, err := configPath()
 	if err != nil {
@@ -115,11 +115,11 @@ func Load() (*CliConfig, error) {
 	// CLI falls back to defaults instead of surfacing a low-level JSON error,
 	// so callers see "not logged in" rather than a parse failure.
 	if err := json.Unmarshal(data, cfg); err != nil {
-		return &CliConfig{ApiUrl: constants.DefaultApiUrl}, nil
+		return &CliConfig{ApiUrl: constants.ApiUrl}, nil
 	}
 
 	if cfg.ApiUrl == "" {
-		cfg.ApiUrl = constants.DefaultApiUrl
+		cfg.ApiUrl = constants.ApiUrl
 	}
 
 	if u := os.Getenv(constants.EnvApiUrl); u != "" {
