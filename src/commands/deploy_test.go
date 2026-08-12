@@ -93,6 +93,35 @@ func TestDeployDestroyDeletesMatchingDeclaredResources(t *testing.T) {
 	}
 }
 
+func TestDeploy_ciWithoutTokenFailsFast(t *testing.T) {
+	dir := t.TempDir()
+	withWorkingDirectory(t, dir)
+	if err := os.WriteFile(filepath.Join(dir, "futrou.json"), []byte(`{"serverlets":[]}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("CI", "true")
+	t.Setenv("FUTROU_API_TOKEN", "")
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	browserOpened := false
+	prevOpen := openBrowserFunc
+	openBrowserFunc = func(string) { browserOpened = true }
+	t.Cleanup(func() { openBrowserFunc = prevOpen })
+
+	_, err := captureRun([]string{"futrou", "--api-url", "https://unused.example.com", "deploy", "--yes"})
+	if err == nil {
+		t.Fatal("expected error when CI=true and no token is available")
+	}
+	if !strings.Contains(err.Error(), "CI environment requires") {
+		t.Fatalf("error = %v, want mention of CI requiring a token", err)
+	}
+	if browserOpened {
+		t.Fatal("deploy must not attempt an interactive login under CI")
+	}
+}
+
 func withWorkingDirectory(t *testing.T, dir string) {
 	t.Helper()
 	original, err := os.Getwd()

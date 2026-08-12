@@ -41,9 +41,9 @@ var deployCommand = &cli.Command{
 		}
 		fmt.Printf("Using config: %s\n", cfgFile)
 
-		client, err := services.NewApiClient(globalApiUrl(c), globalApiKey(c))
+		client, err := requireAuth(c)
 		if err != nil {
-			return fmt.Errorf("loading credentials: %w", err)
+			return err
 		}
 		if cfg.Project != "" {
 			if err := ensureConfigWorkspace(c, client, cfg); err != nil {
