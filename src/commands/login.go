@@ -234,6 +234,7 @@ func registerClient(registrationEndpoint string) (string, error) {
 		"redirect_uris":  []string{"http://localhost"},
 		"grant_types":    []string{"authorization_code"},
 		"response_types": []string{"code"},
+		"logo_uri":       constants.LogoUrl,
 	})
 	resp, err := http.Post(registrationEndpoint, "application/json", strings.NewReader(string(body)))
 	if err != nil {

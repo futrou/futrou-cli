@@ -21,6 +21,7 @@ const (
 	DocsUrl = "https://futrou.com/docs"
 	RepoUrl = "https://github.com/futrou/futrou-cli"
 	McpUrl  = "https://mcp.futrou.com"
+	LogoUrl = "https://raw.githubusercontent.com/futrou/futrou-cli/main/.github/assets/favicon.png"
 
 	ApiUrl      = "https://api.futrou.com"
 	DevApiUrl   = "https://api.dev.futrou.com"
