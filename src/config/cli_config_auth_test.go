@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 func TestErrCIRequiresToken_message(t *testing.T) {
@@ -85,5 +86,172 @@ func TestRegisterClient_sendsLogoUri(t *testing.T) {
 	}
 	if capturedBody["logo_uri"] == "" || capturedBody["logo_uri"] == nil {
 		t.Fatal("expected logo_uri in registration payload")
+	}
+}
+
+func TestLogin_alreadyLoggedIn(t *testing.T) {
+	tempHome(t)
+	cfg := &CliConfig{}
+	cfg.SetToken("https://api.example.com", "existing-token")
+	if err := Save(cfg); err != nil {
+		t.Fatalf("Save() error: %v", err)
+	}
+
+	cfg2, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	email, already, err := cfg2.Login("https://api.example.com", "", nil, func(string) {}, func(string) {}, time.Second)
+	if err != nil {
+		t.Fatalf("Login() error: %v", err)
+	}
+	if !already {
+		t.Fatal("expected alreadyLoggedIn=true")
+	}
+	if email != "" {
+		t.Fatalf("expected empty email for already-logged-in, got %q", email)
+	}
+}
+
+func TestLogin_ciReturnsErrCIRequiresToken(t *testing.T) {
+	tempHome(t)
+	t.Setenv("CI", "true")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	browserOpened := false
+	_, _, err = cfg.Login("https://api.example.com", "", nil, func(string) { browserOpened = true }, func(string) {}, time.Second)
+	if !errors.Is(err, ErrCIRequiresToken) {
+		t.Fatalf("Login() error = %v, want ErrCIRequiresToken", err)
+	}
+	if browserOpened {
+		t.Fatal("Login() must not open a browser under CI")
+	}
+}
+
+func TestLogout_removesTokenAndReportsPriorState(t *testing.T) {
+	tempHome(t)
+	cfg := &CliConfig{}
+	cfg.SetToken("https://api.example.com", "tok")
+	cfg.SetDefaultWorkspace("https://api.example.com", "ws-1")
+	if err := Save(cfg); err != nil {
+		t.Fatalf("Save() error: %v", err)
+	}
+
+	cfg2, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	wasLoggedIn, err := cfg2.Logout("https://api.example.com")
+	if err != nil {
+		t.Fatalf("Logout() error: %v", err)
+	}
+	if !wasLoggedIn {
+		t.Fatal("expected wasLoggedIn=true")
+	}
+	if cfg2.TokenFor("https://api.example.com") != "" {
+		t.Fatal("expected token removed after Logout()")
+	}
+
+	cfg3, _ := Load()
+	wasLoggedIn2, err := cfg3.Logout("https://api.example.com")
+	if err != nil {
+		t.Fatalf("Logout() second call error: %v", err)
+	}
+	if wasLoggedIn2 {
+		t.Fatal("expected wasLoggedIn=false on second logout")
+	}
+}
+
+func TestEnsureLoggedIn_usesTokenOverrideWithoutPrompting(t *testing.T) {
+	tempHome(t)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	browserOpened := false
+	token, err := cfg.EnsureLoggedIn("https://api.example.com", "override-token", nil, func(string) { browserOpened = true }, func(string) {}, time.Second)
+	if err != nil {
+		t.Fatalf("EnsureLoggedIn() error: %v", err)
+	}
+	if token != "override-token" {
+		t.Fatalf("token = %q, want %q", token, "override-token")
+	}
+	if browserOpened {
+		t.Fatal("EnsureLoggedIn() must not start a login flow when a token override is given")
+	}
+}
+
+func TestEnsureLoggedIn_usesStoredTokenWithoutPrompting(t *testing.T) {
+	tempHome(t)
+	cfg := &CliConfig{}
+	cfg.SetToken("https://api.example.com", "stored-token")
+	Save(cfg)
+
+	cfg2, _ := Load()
+	browserOpened := false
+	token, err := cfg2.EnsureLoggedIn("https://api.example.com", "", nil, func(string) { browserOpened = true }, func(string) {}, time.Second)
+	if err != nil {
+		t.Fatalf("EnsureLoggedIn() error: %v", err)
+	}
+	if token != "stored-token" {
+		t.Fatalf("token = %q, want %q", token, "stored-token")
+	}
+	if browserOpened {
+		t.Fatal("EnsureLoggedIn() must not start a login flow when a token is already stored")
+	}
+}
+
+func TestEnsureLoggedIn_ciNoTokenReturnsErrCIRequiresToken(t *testing.T) {
+	tempHome(t)
+	t.Setenv("CI", "true")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	_, err = cfg.EnsureLoggedIn("https://api.example.com", "", nil, func(string) {}, func(string) {}, time.Second)
+	if !errors.Is(err, ErrCIRequiresToken) {
+		t.Fatalf("EnsureLoggedIn() error = %v, want ErrCIRequiresToken", err)
+	}
+}
+
+func TestWhoami_noTokenReturnsError(t *testing.T) {
+	tempHome(t)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	_, err = cfg.Whoami("https://api.example.com", "")
+	if err == nil {
+		t.Fatal("expected error when no token is available")
+	}
+}
+
+func TestWhoami_returnsUserFromApi(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v2/auth/context" {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+		if r.Header.Get("Authorization") != "Bearer tok-abc" {
+			t.Errorf("unexpected Authorization header: %s", r.Header.Get("Authorization"))
+		}
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"user": map[string]string{"id": "u1", "fullname": "Ada Lovelace", "email": "ada@example.com"},
+		})
+	}))
+	defer ts.Close()
+
+	tempHome(t)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	user, err := cfg.Whoami(ts.URL, "tok-abc")
+	if err != nil {
+		t.Fatalf("Whoami() error: %v", err)
+	}
+	if user.Email != "ada@example.com" || user.Fullname != "Ada Lovelace" || user.ID != "u1" {
+		t.Fatalf("unexpected user: %#v", user)
 	}
 }
