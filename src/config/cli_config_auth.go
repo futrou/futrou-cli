@@ -84,13 +84,16 @@ func pkce() (verifier, challenge string, err error) {
 }
 
 // buildAuthURL constructs the full, explicit OAuth authorize URL.
-func buildAuthURL(authEndpoint, clientID, redirectURI, challenge string) string {
+func buildAuthURL(authEndpoint, clientID, redirectURI, challenge string, deviceName *string) string {
 	params := url.Values{
 		"client_id":             {clientID},
 		"redirect_uri":          {redirectURI},
 		"code_challenge":        {challenge},
 		"response_type":         {"code"},
 		"code_challenge_method": {"S256"},
+	}
+	if deviceName != nil {
+		params.Set("device_name", *deviceName)
 	}
 	return authEndpoint + "?" + params.Encode()
 }
@@ -100,8 +103,12 @@ func buildAuthURL(authEndpoint, clientID, redirectURI, challenge string) string 
 // up its own client_id/response_type/code_challenge_method defaults, assumes
 // a redirect_uri of http://localhost:<port>/, and resolves this to the real
 // authorize request.
-func buildShortAuthURL(apiUrl, challenge string, port int) string {
-	return apiUrl + "/v2/auth/cli/" + url.QueryEscape(challenge) + "/" + strconv.Itoa(port)
+func buildShortAuthURL(apiUrl, challenge string, port int, deviceName *string) string {
+	path := apiUrl + "/v2/auth/cli/" + url.QueryEscape(challenge) + "/" + strconv.Itoa(port)
+	if deviceName != nil {
+		path += "?device_name=" + url.QueryEscape(*deviceName)
+	}
+	return path
 }
 
 // verifyShortAuthURL confirms shortURL redirects (without following it) to
@@ -111,7 +118,7 @@ func buildShortAuthURL(apiUrl, challenge string, port int) string {
 // unexpected on a server that merely shares the default API's hostname —
 // callers should fall back to the full explicit authorize URL when this
 // returns false.
-func verifyShortAuthURL(shortURL, clientID, redirectURI, challenge string) bool {
+func verifyShortAuthURL(shortURL, clientID, redirectURI, challenge string, deviceName *string) bool {
 	client := &http.Client{
 		Timeout: 10 * time.Second,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
@@ -131,9 +138,15 @@ func verifyShortAuthURL(shortURL, clientID, redirectURI, challenge string) bool 
 		return false
 	}
 	q := location.Query()
-	return q.Get("client_id") == clientID &&
-		q.Get("redirect_uri") == redirectURI &&
-		q.Get("code_challenge") == challenge
+	if q.Get("client_id") != clientID ||
+		q.Get("redirect_uri") != redirectURI ||
+		q.Get("code_challenge") != challenge {
+		return false
+	}
+	if deviceName != nil {
+		return q.Get("device_name") == *deviceName
+	}
+	return q.Get("device_name") == ""
 }
 
 func exchangeCode(tokenEndpoint, clientID, code, verifier, redirectURI string) (token, email string, err error) {
@@ -238,6 +251,8 @@ func (cfg *CliConfig) Login(
 		return "", false, fmt.Errorf("generating PKCE: %w", err)
 	}
 
+	deviceName := getDeviceName()
+
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return "", false, fmt.Errorf("starting local server: %w", err)
@@ -268,9 +283,9 @@ func (cfg *CliConfig) Login(
 	go srv.Serve(listener)
 	defer srv.Shutdown(context.Background())
 
-	authURL := buildAuthURL(discovery.AuthorizationEndpoint, clientID, redirectURI, challenge)
-	shortURL := buildShortAuthURL(apiUrl, challenge, port)
-	if verifyShortAuthURL(shortURL, clientID, redirectURI, challenge) {
+	authURL := buildAuthURL(discovery.AuthorizationEndpoint, clientID, redirectURI, challenge, deviceName)
+	shortURL := buildShortAuthURL(apiUrl, challenge, port, deviceName)
+	if verifyShortAuthURL(shortURL, clientID, redirectURI, challenge, deviceName) {
 		authURL = shortURL
 	}
 
@@ -431,4 +446,13 @@ func (cfg *CliConfig) EnsureLoggedIn(
 		return "", err
 	}
 	return cfg.TokenFor(apiUrl), nil
+}
+
+// getDeviceName attempts to detect the system hostname, returning nil if not available.
+func getDeviceName() *string {
+	hostname, err := os.Hostname()
+	if err != nil || hostname == "" {
+		return nil
+	}
+	return &hostname
 }

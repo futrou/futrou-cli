@@ -40,7 +40,7 @@ func TestPKCE_challengeMatchesVerifier(t *testing.T) {
 }
 
 func TestBuildShortAuthURL(t *testing.T) {
-	got := buildShortAuthURL("https://api.futrou.com", "chal lenge", 12345)
+	got := buildShortAuthURL("https://api.futrou.com", "chal lenge", 12345, nil)
 	// buildShortAuthURL uses url.QueryEscape (exact port from
 	// src/commands/login.go), which encodes spaces as "+", not "%20".
 	want := "https://api.futrou.com/v2/auth/cli/chal+lenge/12345"
@@ -49,8 +49,16 @@ func TestBuildShortAuthURL(t *testing.T) {
 	}
 }
 
+func TestBuildShortAuthURL_withDeviceName(t *testing.T) {
+	deviceName := "my-laptop"
+	got := buildShortAuthURL("https://api.futrou.com", "challenge", 12345, &deviceName)
+	if !strings.Contains(got, "device_name=my-laptop") {
+		t.Fatalf("buildShortAuthURL() = %q, expected to contain device_name parameter", got)
+	}
+}
+
 func TestBuildAuthURL(t *testing.T) {
-	got := buildAuthURL("https://selfhosted.example.com/v2/auth/oauth2/authorize", "client-1", "http://localhost:12345/", "challenge-abc")
+	got := buildAuthURL("https://selfhosted.example.com/v2/auth/oauth2/authorize", "client-1", "http://localhost:12345/", "challenge-abc", nil)
 	parsed, err := url.Parse(got)
 	if err != nil {
 		t.Fatalf("buildAuthURL() produced invalid URL: %v", err)
@@ -73,6 +81,19 @@ func TestBuildAuthURL(t *testing.T) {
 	}
 }
 
+func TestBuildAuthURL_withDeviceName(t *testing.T) {
+	deviceName := "my-laptop"
+	got := buildAuthURL("https://selfhosted.example.com/v2/auth/oauth2/authorize", "client-1", "http://localhost:12345/", "challenge-abc", &deviceName)
+	parsed, err := url.Parse(got)
+	if err != nil {
+		t.Fatalf("buildAuthURL() produced invalid URL: %v", err)
+	}
+	q := parsed.Query()
+	if q.Get("device_name") != "my-laptop" {
+		t.Errorf("device_name = %q, want %q", q.Get("device_name"), "my-laptop")
+	}
+}
+
 func TestVerifyShortAuthURL_matches(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		loc := "https://api.futrou.com/v2/auth/oauth2/authorize?" + url.Values{
@@ -85,9 +106,49 @@ func TestVerifyShortAuthURL_matches(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	ok := verifyShortAuthURL(ts.URL, "client-1", "http://localhost:12345/", "challenge-abc")
+	ok := verifyShortAuthURL(ts.URL, "client-1", "http://localhost:12345/", "challenge-abc", nil)
 	if !ok {
 		t.Error("expected verifyShortAuthURL to match, got false")
+	}
+}
+
+func TestVerifyShortAuthURL_withDeviceNameMatches(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		loc := "https://api.futrou.com/v2/auth/oauth2/authorize?" + url.Values{
+			"client_id":      {"client-1"},
+			"redirect_uri":   {"http://localhost:12345/"},
+			"code_challenge": {"challenge-abc"},
+			"response_type":  {"code"},
+			"device_name":    {"my-laptop"},
+		}.Encode()
+		http.Redirect(w, r, loc, http.StatusFound)
+	}))
+	defer ts.Close()
+
+	deviceName := "my-laptop"
+	ok := verifyShortAuthURL(ts.URL, "client-1", "http://localhost:12345/", "challenge-abc", &deviceName)
+	if !ok {
+		t.Error("expected verifyShortAuthURL to match with device_name, got false")
+	}
+}
+
+func TestVerifyShortAuthURL_withDeviceNameMismatch(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		loc := "https://api.futrou.com/v2/auth/oauth2/authorize?" + url.Values{
+			"client_id":      {"client-1"},
+			"redirect_uri":   {"http://localhost:12345/"},
+			"code_challenge": {"challenge-abc"},
+			"response_type":  {"code"},
+			"device_name":    {"different-device"},
+		}.Encode()
+		http.Redirect(w, r, loc, http.StatusFound)
+	}))
+	defer ts.Close()
+
+	deviceName := "my-laptop"
+	ok := verifyShortAuthURL(ts.URL, "client-1", "http://localhost:12345/", "challenge-abc", &deviceName)
+	if ok {
+		t.Error("expected verifyShortAuthURL to reject device_name mismatch")
 	}
 }
 
@@ -102,7 +163,7 @@ func TestVerifyShortAuthURL_clientIDMismatch(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	ok := verifyShortAuthURL(ts.URL, "client-1", "http://localhost:12345/", "challenge-abc")
+	ok := verifyShortAuthURL(ts.URL, "client-1", "http://localhost:12345/", "challenge-abc", nil)
 	if ok {
 		t.Error("expected verifyShortAuthURL to reject a client_id mismatch")
 	}
@@ -119,7 +180,7 @@ func TestVerifyShortAuthURL_redirectURIMismatch(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	ok := verifyShortAuthURL(ts.URL, "client-1", "http://localhost:12345/", "challenge-abc")
+	ok := verifyShortAuthURL(ts.URL, "client-1", "http://localhost:12345/", "challenge-abc", nil)
 	if ok {
 		t.Error("expected verifyShortAuthURL to reject a redirect_uri mismatch")
 	}
@@ -136,7 +197,7 @@ func TestVerifyShortAuthURL_codeChallengeMismatch(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	ok := verifyShortAuthURL(ts.URL, "client-1", "http://localhost:12345/", "challenge-abc")
+	ok := verifyShortAuthURL(ts.URL, "client-1", "http://localhost:12345/", "challenge-abc", nil)
 	if ok {
 		t.Error("expected verifyShortAuthURL to reject a code_challenge mismatch")
 	}
@@ -149,7 +210,7 @@ func TestVerifyShortAuthURL_notFound(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	ok := verifyShortAuthURL(ts.URL, "client-1", "http://localhost:12345/", "challenge-abc")
+	ok := verifyShortAuthURL(ts.URL, "client-1", "http://localhost:12345/", "challenge-abc", nil)
 	if ok {
 		t.Error("expected verifyShortAuthURL to fail on a non-redirect response")
 	}
@@ -434,6 +495,16 @@ func TestLooksLikeUUID(t *testing.T) {
 		if got := looksLikeUUID(in); got != want {
 			t.Errorf("looksLikeUUID(%q) = %v, want %v", in, got, want)
 		}
+	}
+}
+
+func TestGetDeviceName_returnsHostname(t *testing.T) {
+	hostname := getDeviceName()
+	if hostname == nil {
+		t.Skip("getDeviceName() returned nil, likely not available on this platform")
+	}
+	if *hostname == "" {
+		t.Fatal("getDeviceName() returned empty hostname")
 	}
 }
 
