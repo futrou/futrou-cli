@@ -219,9 +219,6 @@
         "additionalProperties": true,
         "description": "Common Futrou API resource fields.",
         "properties": {
-          "compress": {
-            "type": "boolean"
-          },
           "createdAt": {
             "type": "string"
           },
@@ -249,6 +246,9 @@
             "minLength": 1,
             "type": "string"
           },
+          "isVerified": {
+            "type": "boolean"
+          },
           "name": {
             "description": "Resource name.",
             "maxLength": 255,
@@ -273,10 +273,30 @@
           "preserveQuery": {
             "type": "boolean"
           },
+          "projectId": {
+            "maxLength": 255,
+            "minLength": 1,
+            "type": "string"
+          },
+          "proxyPlanId": {
+            "maxLength": 255,
+            "minLength": 1,
+            "type": "string"
+          },
+          "regionId": {
+            "maxLength": 255,
+            "minLength": 1,
+            "type": "string"
+          },
+          "rules": {},
           "status": {
             "type": "string"
           },
           "strategy": {
+            "enum": [
+              "round-robin",
+              "primary-failover"
+            ],
             "type": "string"
           },
           "target": {
@@ -296,6 +316,11 @@
           },
           "verifyTls": {
             "type": "boolean"
+          },
+          "workspaceId": {
+            "maxLength": 255,
+            "minLength": 1,
+            "type": "string"
           }
         },
         "type": "object"
@@ -308,12 +333,7 @@
         "additionalProperties": true,
         "description": "Common Futrou API resource fields.",
         "properties": {
-          "cpu": {
-            "description": "CPU allocation in millicores.",
-            "maximum": 32000,
-            "minimum": 10,
-            "type": "integer"
-          },
+          "arch": {},
           "createdAt": {
             "type": "string"
           },
@@ -341,30 +361,11 @@
             "minLength": 1,
             "type": "string"
           },
-          "instances": {
-            "description": "Current number of serverlet instances.",
-            "minimum": 0,
-            "type": "integer"
-          },
-          "maxInstances": {
-            "description": "Maximum number of running instances.",
-            "maximum": 1000,
-            "minimum": 0,
-            "type": "integer"
-          },
-          "minInstances": {
-            "description": "Minimum number of running instances.",
-            "maximum": 1000,
-            "minimum": 0,
-            "type": "integer"
+          "mounts": {
+            "description": "Storage mounts, keyed by mount path to storage ID."
           },
           "name": {
             "description": "Resource name.",
-            "maxLength": 255,
-            "minLength": 1,
-            "type": "string"
-          },
-          "networkId": {
             "maxLength": 255,
             "minLength": 1,
             "type": "string"
@@ -375,32 +376,24 @@
             "minLength": 1,
             "type": "string"
           },
-          "ram": {
-            "description": "Memory allocation in MiB.",
-            "maximum": 262144,
-            "minimum": 32,
-            "type": "integer"
-          },
-          "runtime": {
+          "regionId": {
             "maxLength": 255,
             "minLength": 1,
             "type": "string"
           },
           "scaling": {},
           "serverletPlanId": {
+            "description": "Plan ID that determines serverlet sizing.",
             "maxLength": 255,
             "minLength": 1,
             "type": "string"
           },
-          "state": {
-            "maxLength": 255,
-            "minLength": 1,
+          "status": {
             "type": "string"
           },
           "updatedAt": {
             "type": "string"
           },
-          "volumes": {},
           "workspaceId": {
             "maxLength": 255,
             "minLength": 1,
@@ -411,8 +404,8 @@
       },
       "type": "array"
     },
-    "volumes": {
-      "description": "Persistent volumes available to the project.",
+    "storages": {
+      "description": "Persistent storage volumes available to the project.",
       "items": {
         "additionalProperties": true,
         "description": "Common Futrou API resource fields.",
@@ -444,14 +437,31 @@
             "minLength": 1,
             "type": "string"
           },
-          "sizeGb": {
-            "minimum": 0,
-            "type": "number"
+          "projectId": {
+            "maxLength": 255,
+            "minLength": 1,
+            "type": "string"
           },
-          "type": {
+          "public": {
+            "type": "boolean"
+          },
+          "regionId": {
+            "maxLength": 255,
+            "minLength": 1,
+            "type": "string"
+          },
+          "storagePlanId": {
+            "description": "Plan ID that determines storage sizing.",
+            "maxLength": 255,
+            "minLength": 1,
             "type": "string"
           },
           "updatedAt": {
+            "type": "string"
+          },
+          "workspaceId": {
+            "maxLength": 255,
+            "minLength": 1,
             "type": "string"
           }
         },

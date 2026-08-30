@@ -48,7 +48,7 @@ var resources = []resourceSpec{
 	{"serverlet", "/v2/serverlets", "name", func(c *config.Config) interface{} { return c.Serverlets }},
 	{"dns zone", "/v2/dns", "domain", func(c *config.Config) interface{} { return c.DNS }},
 	{"proxy", "/v2/proxies", "domain", func(c *config.Config) interface{} { return c.Proxies }},
-	{"volume", "/v2/volumes", "name", func(c *config.Config) interface{} { return c.Volumes }},
+	{"storage", "/v2/storages", "name", func(c *config.Config) interface{} { return c.Storages }},
 	{"cron", "/v2/crons", "name", func(c *config.Config) interface{} { return c.Crons }},
 }
 
@@ -170,8 +170,8 @@ func lockGroup(resource string) string {
 		return "dns"
 	case "proxy":
 		return "proxies"
-	case "volume":
-		return "volumes"
+	case "storage":
+		return "storages"
 	case "cron":
 		return "crons"
 	}

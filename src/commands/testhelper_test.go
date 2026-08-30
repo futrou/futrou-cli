@@ -134,15 +134,13 @@ func captureRun(args []string) (string, error) {
 
 func fixtureServerlet() map[string]any {
 	return map[string]any{
-		"id":           "sl-123",
-		"name":         "my-app",
-		"image":        "nginx:latest",
-		"state":        "running",
-		"instances":    1,
-		"minInstances": 1,
-		"maxInstances": 3,
-		"createdAt":    "2026-01-01T00:00:00Z",
-		"updatedAt":    "2026-01-01T00:00:00Z",
+		"id":              "sl-123",
+		"name":            "my-app",
+		"image":           "nginx:latest",
+		"status":          "ready",
+		"serverletPlanId": "plan-1",
+		"createdAt":       "2026-01-01T00:00:00Z",
+		"updatedAt":       "2026-01-01T00:00:00Z",
 	}
 }
 
@@ -198,13 +196,12 @@ func fixtureWorkspace() map[string]any {
 	}
 }
 
-func fixtureVolume() map[string]any {
+func fixtureStorage() map[string]any {
 	return map[string]any{
-		"id":        "vol-def",
-		"name":      "my-vol",
-		"type":      "ssd",
-		"sizeGb":    10,
-		"createdAt": "2026-01-01T00:00:00Z",
+		"id":            "storage-def",
+		"name":          "my-storage",
+		"storagePlanId": "storage-plan-1",
+		"createdAt":     "2026-01-01T00:00:00Z",
 	}
 }
 

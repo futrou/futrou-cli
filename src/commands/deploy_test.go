@@ -12,8 +12,8 @@ func TestDeployCreatesEveryDeclaredResourceWithYes(t *testing.T) {
 	dir := t.TempDir()
 	withWorkingDirectory(t, dir)
 	if err := os.WriteFile(filepath.Join(dir, "futrou.json"), []byte(`{
-  "serverlets": [{"name":"web","image":"nginx:latest","ram":128,"cpu":100,"minInstances":1,"maxInstances":1}],
-  "volumes": [{"name":"data","sizeGb":10,"type":"ssd"}]
+  "serverlets": [{"name":"web","image":"nginx:latest","serverletPlanId":"plan-1"}],
+  "storages": [{"name":"data","storagePlanId":"storage-plan-1"}]
 }`), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -21,7 +21,7 @@ func TestDeployCreatesEveryDeclaredResourceWithYes(t *testing.T) {
 	ts := newTestServer(t)
 	var created []string
 	ts.on("GET", "/v2/serverlets", respond(http.StatusOK, []any{}))
-	ts.on("GET", "/v2/volumes", respond(http.StatusOK, []any{}))
+	ts.on("GET", "/v2/storages", respond(http.StatusOK, []any{}))
 	ts.on("POST", "/v2/serverlets", func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any
 		decodeBody(r, &body)
@@ -31,21 +31,21 @@ func TestDeployCreatesEveryDeclaredResourceWithYes(t *testing.T) {
 		created = append(created, "serverlet")
 		writeJSON(w, map[string]any{"id": "sl-1"})
 	})
-	ts.on("POST", "/v2/volumes", func(w http.ResponseWriter, r *http.Request) {
+	ts.on("POST", "/v2/storages", func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any
 		decodeBody(r, &body)
-		if body["name"] != "data" || body["sizeGb"] != float64(10) {
-			t.Errorf("unexpected volume payload: %#v", body)
+		if body["name"] != "data" || body["storagePlanId"] != "storage-plan-1" {
+			t.Errorf("unexpected storage payload: %#v", body)
 		}
-		created = append(created, "volume")
-		writeJSON(w, map[string]any{"id": "vol-1"})
+		created = append(created, "storage")
+		writeJSON(w, map[string]any{"id": "storage-1"})
 	})
 
 	out, err := runArgs(t, ts, "deploy", "--yes")
 	assertNoError(t, err)
 	assertContains(t, out, "Changes:")
 	assertContains(t, out, "Applied 2 change(s).")
-	if strings.Join(created, ",") != "serverlet,volume" {
+	if strings.Join(created, ",") != "serverlet,storage" {
 		t.Fatalf("expected both creates, got %#v", created)
 	}
 }
@@ -53,13 +53,13 @@ func TestDeployCreatesEveryDeclaredResourceWithYes(t *testing.T) {
 func TestDeployReportsUpToDateWithoutPrompt(t *testing.T) {
 	dir := t.TempDir()
 	withWorkingDirectory(t, dir)
-	if err := os.WriteFile(filepath.Join(dir, "futrou.json"), []byte(`{"serverlets":[{"name":"web","image":"nginx:latest","ram":128,"cpu":100,"minInstances":1,"maxInstances":1}]}`), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "futrou.json"), []byte(`{"serverlets":[{"name":"web","image":"nginx:latest","serverletPlanId":"plan-1"}]}`), 0644); err != nil {
 		t.Fatal(err)
 	}
 
 	ts := newTestServer(t)
 	ts.on("GET", "/v2/serverlets", respond(http.StatusOK, []any{
-		map[string]any{"id": "sl-1", "name": "web", "image": "nginx:latest", "ram": 128, "cpu": 100, "minInstances": 1, "maxInstances": 1},
+		map[string]any{"id": "sl-1", "name": "web", "image": "nginx:latest", "serverletPlanId": "plan-1"},
 	}))
 
 	out, err := runArgs(t, ts, "deploy")

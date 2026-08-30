@@ -124,12 +124,12 @@ func TestConfigPullWritesCloudProjectResources(t *testing.T) {
 		if r.URL.Query().Get("projectId") != "proj-1" {
 			t.Errorf("expected project scope, got %s", r.URL.RawQuery)
 		}
-		writeJSON(w, []any{map[string]any{"id": "sl-1", "name": "web", "image": "nginx:latest", "ram": 128, "cpu": 100, "minInstances": 1, "maxInstances": 1, "state": "running"}})
+		writeJSON(w, []any{map[string]any{"id": "sl-1", "name": "web", "image": "nginx:latest", "serverletPlanId": "plan-1", "status": "running"}})
 	})
 	ts.on("GET", "/v2/dns", respond(http.StatusOK, []any{map[string]any{"id": "dns-1", "name": "example.com"}}))
 	ts.on("GET", "/v2/dns/dns-1/records", respond(http.StatusOK, []any{map[string]any{"id": "record-1", "name": "www", "type": "A", "value": "203.0.113.10", "ttl": 300}}))
 	ts.on("GET", "/v2/proxies", respond(http.StatusOK, []any{map[string]any{"id": "proxy-1", "domain": "app.example.com", "type": "http", "target": "web"}}))
-	ts.on("GET", "/v2/volumes", respond(http.StatusOK, []any{map[string]any{"id": "vol-1", "name": "data", "sizeGb": 10, "type": "ssd"}}))
+	ts.on("GET", "/v2/storages", respond(http.StatusOK, []any{map[string]any{"id": "storage-1", "name": "data", "storagePlanId": "storage-plan-1"}}))
 	ts.on("GET", "/v2/crons", respond(http.StatusOK, []any{map[string]any{"id": "cron-1", "name": "hourly", "schedule": "0 * * * *", "url": "https://example.com/job"}}))
 
 	out, err := runArgs(t, ts, "config", "pull", "--project", "demo")
@@ -170,7 +170,7 @@ func TestConfigPullUsesLocalProjectWithoutProjectFlag(t *testing.T) {
 	ts.on("GET", "/v2/serverlets", respond(http.StatusOK, []any{}))
 	ts.on("GET", "/v2/dns", respond(http.StatusOK, []any{}))
 	ts.on("GET", "/v2/proxies", respond(http.StatusOK, []any{}))
-	ts.on("GET", "/v2/volumes", respond(http.StatusOK, []any{}))
+	ts.on("GET", "/v2/storages", respond(http.StatusOK, []any{}))
 	ts.on("GET", "/v2/crons", respond(http.StatusOK, []any{}))
 	_, err := runArgs(t, ts, "config", "pull")
 	assertNoError(t, err)

@@ -42,7 +42,7 @@ var serverletsCommand = &cli.Command{
 				if isJSON(c) {
 					return printJSON(result)
 				}
-				printTable(result, []string{"id", "name", "image", "state", "instances", "minInstances", "maxInstances", "createdAt"})
+				printTable(result, []string{"id", "name", "image", "status", "serverletPlanId", "createdAt"})
 				return nil
 			},
 		},
@@ -72,27 +72,33 @@ var serverletsCommand = &cli.Command{
 		},
 		{
 			Name:  "create",
-			Usage: "Create a new serverlet",
+			Usage: "Create a new serverlet (defaults to futrou.json, then the login workspace's \"default\" project)",
 			Flags: []cli.Flag{
 				&cli.StringFlag{Name: "name", Required: true, Usage: "Serverlet name"},
 				&cli.StringFlag{Name: "image", Required: true, Usage: "Container image"},
-				&cli.StringFlag{Name: "plan", Usage: "Serverlet plan ID"},
-				&cli.IntFlag{Name: "min", Value: 1, Usage: "Minimum instances"},
-				&cli.IntFlag{Name: "max", Value: 1, Usage: "Maximum instances"},
+				&cli.StringFlag{Name: "plan", Required: true, Usage: "Serverlet plan ID"},
+				workspaceFlag,
+				projectFlag,
 			},
 			Action: func(c *cli.Context) error {
+				workspaceID, err := resolveWorkspaceID(c)
+				if err != nil {
+					return err
+				}
+				projectID, err := resolveProjectID(c, workspaceID)
+				if err != nil {
+					return err
+				}
 				client, err := requireAuth(c)
 				if err != nil {
 					return err
 				}
 				body := map[string]interface{}{
-					"name":         c.String("name"),
-					"image":        c.String("image"),
-					"minInstances": c.Int("min"),
-					"maxInstances": c.Int("max"),
-				}
-				if p := c.String("plan"); p != "" {
-					body["serverletPlanId"] = p
+					"name":            c.String("name"),
+					"image":           c.String("image"),
+					"serverletPlanId": c.String("plan"),
+					"workspaceId":     workspaceID,
+					"projectId":       projectID,
 				}
 				var result interface{}
 				status, err := client.RequestInto("POST", "/v2/serverlets", body, &result)
@@ -117,8 +123,7 @@ var serverletsCommand = &cli.Command{
 			Flags: []cli.Flag{
 				&cli.StringFlag{Name: "name", Usage: "New name"},
 				&cli.StringFlag{Name: "image", Usage: "New image"},
-				&cli.IntFlag{Name: "min", Usage: "Minimum instances"},
-				&cli.IntFlag{Name: "max", Usage: "Maximum instances"},
+				&cli.StringFlag{Name: "plan", Usage: "New serverlet plan ID"},
 			},
 			Action: func(c *cli.Context) error {
 				id := c.Args().First()
@@ -136,11 +141,8 @@ var serverletsCommand = &cli.Command{
 				if v := c.String("image"); v != "" {
 					body["image"] = v
 				}
-				if c.IsSet("min") {
-					body["minInstances"] = c.Int("min")
-				}
-				if c.IsSet("max") {
-					body["maxInstances"] = c.Int("max")
+				if v := c.String("plan"); v != "" {
+					body["serverletPlanId"] = v
 				}
 				if len(body) == 0 {
 					return fmt.Errorf("no fields to update")
@@ -253,7 +255,7 @@ var serverletsCommand = &cli.Command{
 				if isJSON(c) {
 					return printJSON(result)
 				}
-				printTable(result, []string{"id", "state", "cpu", "ram", "createdAt"})
+				printTable(result, []string{"id", "status", "createdAt"})
 				return nil
 			},
 		},

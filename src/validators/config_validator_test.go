@@ -21,7 +21,7 @@ func TestConfigValidatorAcceptsEmptyAndMinimalConfigs(t *testing.T) {
 		"empty":             {},
 		"schema only":       {"$schema": "https://futrou.com/futrou.schema.json"},
 		"selectors only":    {"workspace": "workspace-1", "project": "project-1"},
-		"empty collections": {"serverlets": []interface{}{}, "dns": []interface{}{}, "proxies": []interface{}{}, "volumes": []interface{}{}, "crons": []interface{}{}},
+		"empty collections": {"serverlets": []interface{}{}, "dns": []interface{}{}, "proxies": []interface{}{}, "storages": []interface{}{}, "crons": []interface{}{}},
 	} {
 		t.Run(name, func(t *testing.T) { validateConfig(t, value) })
 	}
@@ -39,7 +39,7 @@ func TestConfigValidatorRejectsInvalidTopLevelValues(t *testing.T) {
 		"workspace too long":   {map[string]interface{}{"workspace": longName}, "workspace"},
 		"serverlets is object": {map[string]interface{}{"serverlets": map[string]interface{}{}}, "serverlets"},
 		"proxies is string":    {map[string]interface{}{"proxies": "proxy"}, "proxies"},
-		"volumes is number":    {map[string]interface{}{"volumes": float64(1)}, "volumes"},
+		"storages is number":   {map[string]interface{}{"storages": float64(1)}, "storages"},
 		"crons is boolean":     {map[string]interface{}{"crons": true}, "crons"},
 		"dns is null":          {map[string]interface{}{"dns": []interface{}{nil}}, "dns"},
 	} {
@@ -47,41 +47,26 @@ func TestConfigValidatorRejectsInvalidTopLevelValues(t *testing.T) {
 	}
 }
 
-func TestConfigValidatorServerletBoundsAndTypes(t *testing.T) {
+func TestConfigValidatorServerletValidation(t *testing.T) {
 	valid := map[string]interface{}{"serverlets": []interface{}{map[string]interface{}{
-		"id": "sl-1", "name": "api", "displayName": "API", "image": "example/api:v1", "ram": float64(32), "cpu": float64(10), "instances": float64(0), "minInstances": float64(0), "maxInstances": float64(1000), "runtime": "container", "state": "active", "networkId": "net-1", "serverletPlanId": "plan-1", "workspaceId": "ws-1", "projectId": "project-1",
+		"id": "sl-1", "name": "api", "displayName": "API", "image": "example/api:v1", "status": "ready", "serverletPlanId": "plan-1", "workspaceId": "ws-1", "projectId": "project-1", "regionId": "region-1",
 	}}}
 	validateConfig(t, valid)
 	assertConfigFieldError(t, map[string]interface{}{"serverlets": []interface{}{true}}, "serverlets")
-
-	for name, serverlet := range map[string]map[string]interface{}{
-		"ram below minimum":     {"ram": float64(31)},
-		"ram above maximum":     {"ram": float64(262145)},
-		"ram decimal":           {"ram": float64(32.5)},
-		"cpu below minimum":     {"cpu": float64(9)},
-		"cpu above maximum":     {"cpu": float64(32001)},
-		"instances decimal":     {"instances": float64(1.5)},
-		"minimum above maximum": {"minInstances": float64(2), "maxInstances": float64(1)},
-		"maximum too high":      {"maxInstances": float64(1001)},
-	} {
-		t.Run(name, func(t *testing.T) {
-			var item interface{} = serverlet
-			assertConfigFieldError(t, map[string]interface{}{"serverlets": []interface{}{item}}, "serverlets")
-		})
-	}
 }
 
 func TestConfigValidatorProxyValidation(t *testing.T) {
 	validateConfig(t, map[string]interface{}{"proxies": []interface{}{map[string]interface{}{
-		"id": "px-1", "domain": "example.com", "type": "http", "target": "api:8080", "port": float64(443), "compress": true, "enforceHttps": true, "followRedirects": false, "preserveHeaders": true, "preserveHost": true, "preservePath": false, "preserveQuery": true, "verifyTls": true, "strategy": "round_robin", "status": "active",
+		"id": "px-1", "domain": "example.com", "type": "http", "target": "api:8080", "port": float64(443), "enforceHttps": true, "followRedirects": false, "preserveHeaders": true, "preserveHost": true, "preservePath": false, "preserveQuery": true, "verifyTls": true, "strategy": "round-robin", "status": "active",
 	}}})
 
 	for name, proxy := range map[string]map[string]interface{}{
-		"invalid type":  {"type": "smtp"},
-		"zero port":     {"port": float64(0)},
-		"port too high": {"port": float64(65536)},
-		"decimal port":  {"port": float64(443.5)},
-		"bad boolean":   {"compress": float64(2)},
+		"invalid type":     {"type": "smtp"},
+		"invalid strategy": {"strategy": "round_robin"},
+		"zero port":        {"port": float64(0)},
+		"port too high":    {"port": float64(65536)},
+		"decimal port":     {"port": float64(443.5)},
+		"bad boolean":      {"enforceHttps": float64(2)},
 	} {
 		t.Run(name, func(t *testing.T) {
 			assertConfigFieldError(t, map[string]interface{}{"proxies": []interface{}{proxy}}, "proxies")
@@ -107,32 +92,31 @@ func TestConfigValidatorDNSValidation(t *testing.T) {
 	}
 }
 
-func TestConfigValidatorVolumeAndCronValidation(t *testing.T) {
+func TestConfigValidatorStorageAndCronValidation(t *testing.T) {
 	validateConfig(t, map[string]interface{}{
-		"volumes": []interface{}{map[string]interface{}{"id": "vol-1", "name": "data", "sizeGb": float64(10), "type": "ssd"}},
-		"crons":   []interface{}{map[string]interface{}{"id": "cron-1", "name": "cleanup", "enabled": true, "method": "POST", "url": "https://example.com/cleanup", "schedule": "0 * * * *", "headers": map[string]interface{}{"Authorization": "Bearer token"}, "createdAt": "2026-01-01T00:00:00Z", "startedAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z"}},
+		"storages": []interface{}{map[string]interface{}{"id": "storage-1", "name": "data", "storagePlanId": "plan-1", "workspaceId": "ws-1", "projectId": "project-1", "regionId": "region-1", "public": false}},
+		"crons":    []interface{}{map[string]interface{}{"id": "cron-1", "name": "cleanup", "enabled": true, "method": "POST", "url": "https://example.com/cleanup", "schedule": "0 * * * *", "headers": map[string]interface{}{"Authorization": "Bearer token"}, "createdAt": "2026-01-01T00:00:00Z", "startedAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z"}},
 	})
 
-	assertConfigFieldError(t, map[string]interface{}{"volumes": []interface{}{map[string]interface{}{"sizeGb": float64(-1)}}}, "volumes")
+	assertConfigFieldError(t, map[string]interface{}{"storages": []interface{}{map[string]interface{}{"public": "not-boolean"}}}, "storages")
 	assertConfigFieldError(t, map[string]interface{}{"crons": []interface{}{map[string]interface{}{"url": "not a URL"}}}, "crons")
 	assertConfigFieldError(t, map[string]interface{}{"crons": []interface{}{map[string]interface{}{"createdAt": "not a date"}}}, "crons")
 }
 
 func TestConfigValidatorServerletMetadataFieldTypes(t *testing.T) {
 	validFields := map[string]interface{}{
-		"createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-02T00:00:00Z", "networkId": "network-1", "runtime": "container", "state": "active", "serverletPlanId": "plan-1", "workspaceId": "workspace-1", "projectId": "project-1", "env": map[string]interface{}{"LOG_LEVEL": "info"}, "volumes": []interface{}{}, "ports": []interface{}{}, "scaling": map[string]interface{}{},
+		"createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-02T00:00:00Z", "status": "ready", "serverletPlanId": "plan-1", "workspaceId": "workspace-1", "projectId": "project-1", "regionId": "region-1", "env": map[string]interface{}{"LOG_LEVEL": "info"}, "mounts": map[string]interface{}{"/data": "storage-1"}, "ports": []interface{}{}, "scaling": map[string]interface{}{},
 	}
 	validateConfig(t, map[string]interface{}{"serverlets": []interface{}{validFields}})
 
 	for field, value := range map[string]interface{}{
 		"createdAt":       float64(1),
 		"updatedAt":       true,
-		"networkId":       float64(1),
-		"runtime":         false,
-		"state":           float64(1),
+		"status":          float64(1),
 		"serverletPlanId": true,
 		"workspaceId":     float64(1),
 		"projectId":       false,
+		"regionId":        float64(1),
 	} {
 		t.Run(field+" rejects wrong type", func(t *testing.T) {
 			assertConfigFieldError(t, map[string]interface{}{"serverlets": []interface{}{map[string]interface{}{field: value}}}, "serverlets")
@@ -142,11 +126,11 @@ func TestConfigValidatorServerletMetadataFieldTypes(t *testing.T) {
 
 func TestConfigValidatorProxyAPIFields(t *testing.T) {
 	valid := map[string]interface{}{
-		"id": "proxy-1", "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-02T00:00:00Z", "domain": "example.com", "type": "tcp", "target": "127.0.0.1:8080", "port": float64(8080), "status": "active", "strategy": "round_robin", "compress": false, "enforceHttps": false, "followRedirects": true, "preserveHeaders": false, "preserveHost": true, "preservePath": false, "preserveQuery": true, "verifyTls": false,
+		"id": "proxy-1", "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-02T00:00:00Z", "domain": "example.com", "type": "tcp", "target": "127.0.0.1:8080", "port": float64(8080), "status": "active", "strategy": "round-robin", "enforceHttps": false, "followRedirects": true, "preserveHeaders": false, "preserveHost": true, "preservePath": false, "preserveQuery": true, "verifyTls": false, "isVerified": true, "proxyPlanId": "plan-1", "regionId": "region-1",
 	}
 	validateConfig(t, map[string]interface{}{"proxies": []interface{}{valid}})
 
-	for _, field := range []string{"compress", "enforceHttps", "followRedirects", "preserveHeaders", "preserveHost", "preservePath", "preserveQuery", "verifyTls"} {
+	for _, field := range []string{"enforceHttps", "followRedirects", "preserveHeaders", "preserveHost", "preservePath", "preserveQuery", "verifyTls", "isVerified"} {
 		t.Run(field+" rejects invalid boolean", func(t *testing.T) {
 			assertConfigFieldError(t, map[string]interface{}{"proxies": []interface{}{map[string]interface{}{field: float64(2)}}}, "proxies")
 		})
@@ -172,12 +156,12 @@ func TestConfigValidatorDNSRecordFieldTypes(t *testing.T) {
 	}
 }
 
-func TestConfigValidatorVolumeAndCronFieldTypes(t *testing.T) {
+func TestConfigValidatorStorageAndCronFieldTypes(t *testing.T) {
 	for field, value := range map[string]interface{}{
-		"id": float64(1), "name": false, "displayName": float64(1), "domain": true, "sizeGb": float64(-0.1), "type": false, "createdAt": float64(1), "updatedAt": true,
+		"id": float64(1), "name": false, "displayName": float64(1), "domain": true, "storagePlanId": float64(1), "workspaceId": false, "projectId": float64(1), "regionId": true, "public": "maybe", "createdAt": float64(1), "updatedAt": true,
 	} {
-		t.Run("volume "+field+" rejects wrong value", func(t *testing.T) {
-			assertConfigFieldError(t, map[string]interface{}{"volumes": []interface{}{map[string]interface{}{field: value}}}, "volumes")
+		t.Run("storage "+field+" rejects wrong value", func(t *testing.T) {
+			assertConfigFieldError(t, map[string]interface{}{"storages": []interface{}{map[string]interface{}{field: value}}}, "storages")
 		})
 	}
 
@@ -193,7 +177,7 @@ func TestConfigValidatorVolumeAndCronFieldTypes(t *testing.T) {
 func TestConfigValidator(t *testing.T) {
 	_, errors := ConfigValidator.Validate(map[string]interface{}{
 		"serverlets": []interface{}{map[string]interface{}{
-			"name": "api", "image": "example/api", "ram": float64(128), "cpu": float64(100), "minInstances": float64(0), "maxInstances": float64(1),
+			"name": "api", "image": "example/api", "serverletPlanId": "plan-1",
 		}},
 		"proxies": []interface{}{map[string]interface{}{"domain": "example.com", "port": float64(443)}},
 	})
@@ -215,17 +199,6 @@ func TestConfigJSONSchemaIncludesDescriptions(t *testing.T) {
 	serverletProperties := serverletItems["properties"].(map[string]interface{})
 	if serverletProperties["image"].(map[string]interface{})["description"] == "" {
 		t.Fatal("expected serverlet image description")
-	}
-}
-
-func TestConfigValidatorRejectsInvalidServerletRange(t *testing.T) {
-	_, errors := ConfigValidator.Validate(map[string]interface{}{
-		"serverlets": []interface{}{map[string]interface{}{
-			"minInstances": float64(2), "maxInstances": float64(1),
-		}},
-	})
-	if len(errors) == 0 {
-		t.Fatal("expected validation error")
 	}
 }
 
@@ -253,7 +226,7 @@ func TestConfigValidatorRejectsInvalidArrayItems(t *testing.T) {
 		{"serverlet must be an object", "serverlets", []interface{}{true}},
 		{"proxy port must be positive", "proxies", []interface{}{map[string]interface{}{"port": float64(0)}}},
 		{"dns ttl must be integer", "dns", []interface{}{map[string]interface{}{"ttl": float64(1.5)}}},
-		{"volume array items must be objects", "volumes", []interface{}{"data"}},
+		{"storage array items must be objects", "storages", []interface{}{"data"}},
 		{"cron array items must be objects", "crons", []interface{}{float64(1)}},
 	}
 	for _, test := range tests {
@@ -299,13 +272,13 @@ func TestConfigValidatorWarnsAboutUnexpectedKeys(t *testing.T) {
 func TestConfigValidatorAcceptsGeneratedAPIResourceFields(t *testing.T) {
 	_, errors, warnings := ConfigValidator.ValidateWithWarnings(map[string]interface{}{
 		"serverlets": []interface{}{map[string]interface{}{
-			"name": "api", "image": "example/api", "ram": float64(128), "cpu": float64(100), "instances": float64(1), "runtime": "container", "state": "active", "networkId": "net-1",
+			"name": "api", "image": "example/api", "serverletPlanId": "plan-1", "status": "ready", "regionId": "region-1",
 		}},
 		"proxies": []interface{}{map[string]interface{}{
-			"domain": "example.com", "type": "http", "target": "api:8080", "port": float64(443), "compress": true, "enforceHttps": true, "verifyTls": true,
+			"domain": "example.com", "type": "http", "target": "api:8080", "port": float64(443), "enforceHttps": true, "verifyTls": true,
 		}},
-		"volumes": []interface{}{map[string]interface{}{"name": "data", "sizeGb": float64(10), "type": "ssd"}},
-		"crons":   []interface{}{map[string]interface{}{"name": "cleanup", "enabled": true, "url": "https://example.com/cleanup", "createdAt": "2026-01-01T00:00:00Z"}},
+		"storages": []interface{}{map[string]interface{}{"name": "data", "storagePlanId": "plan-1"}},
+		"crons":    []interface{}{map[string]interface{}{"name": "cleanup", "enabled": true, "url": "https://example.com/cleanup", "createdAt": "2026-01-01T00:00:00Z"}},
 	})
 	if len(errors) != 0 {
 		t.Fatalf("unexpected validation errors: %v", errors)

@@ -62,7 +62,8 @@ func TestServerletsCreate(t *testing.T) {
 		respond(201, fixtureServerlet())(w, r)
 	})
 
-	out, err := runArgs(t, ts, "serverlets", "create", "--name", "my-app", "--image", "nginx:latest")
+	out, err := runArgs(t, ts, "serverlets", "create", "--name", "my-app", "--image", "nginx:latest", "--plan", "plan-abc",
+		"--workspace", "11111111-1111-1111-1111-111111111111", "--project", "22222222-2222-2222-2222-222222222222")
 	assertNoError(t, err)
 	assertContains(t, out, "created")
 
@@ -72,34 +73,21 @@ func TestServerletsCreate(t *testing.T) {
 	if received["image"] != "nginx:latest" {
 		t.Errorf("expected image=nginx:latest, got %v", received["image"])
 	}
-}
-
-func TestServerletsCreate_withPlanAndInstances(t *testing.T) {
-	ts := newTestServer(t)
-	var received map[string]interface{}
-	ts.on("POST", "/v2/serverlets", func(w http.ResponseWriter, r *http.Request) {
-		decodeBody(r, &received)
-		respond(201, fixtureServerlet())(w, r)
-	})
-
-	_, err := runArgs(t, ts, "serverlets", "create",
-		"--name", "my-app",
-		"--image", "nginx:latest",
-		"--plan", "plan-abc",
-		"--min", "2",
-		"--max", "5",
-	)
-	assertNoError(t, err)
-
 	if received["serverletPlanId"] != "plan-abc" {
 		t.Errorf("expected serverletPlanId=plan-abc, got %v", received["serverletPlanId"])
 	}
-	if received["minInstances"].(float64) != 2 {
-		t.Errorf("expected minInstances=2, got %v", received["minInstances"])
+	if received["workspaceId"] != "11111111-1111-1111-1111-111111111111" {
+		t.Errorf("expected workspaceId to be resolved, got %v", received["workspaceId"])
 	}
-	if received["maxInstances"].(float64) != 5 {
-		t.Errorf("expected maxInstances=5, got %v", received["maxInstances"])
+	if received["projectId"] != "22222222-2222-2222-2222-222222222222" {
+		t.Errorf("expected projectId to be resolved, got %v", received["projectId"])
 	}
+}
+
+func TestServerletsCreate_requiresPlan(t *testing.T) {
+	ts := newTestServer(t)
+	_, err := runArgs(t, ts, "serverlets", "create", "--name", "my-app", "--image", "nginx:latest")
+	assertError(t, err)
 }
 
 func TestServerletsCreate_requiresAuth(t *testing.T) {

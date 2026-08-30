@@ -32,62 +32,43 @@ type Config struct {
 	Serverlets []ServerletConfig `json:"serverlets,omitempty"`
 	DNS        []DNSConfig       `json:"dns,omitempty"`
 	Proxies    []ProxyConfig     `json:"proxies,omitempty"`
-	Volumes    []VolumeConfig    `json:"volumes,omitempty"`
+	Storages   []StorageConfig   `json:"storages,omitempty"`
 	Crons      []CronConfig      `json:"crons,omitempty"`
 	Locks      map[string]string `json:"locks,omitempty"`
 }
 
 // ServerletConfig exposes the Serverlet API model plus creation/deployment
-// fields that are not part of a Serverlet response.
+// fields that are not part of a Serverlet response. Sizing is entirely
+// determined by ServerletPlanId; the API's Serverlet model already carries
+// Mounts (mountPath -> storageId) and Scaling as response/config fields.
 type ServerletConfig struct {
 	api.Serverlet
-	ServerletPlanId string                 `json:"serverletPlanId,omitempty"`
-	WorkspaceId     string                 `json:"workspaceId,omitempty"`
-	ProjectId       string                 `json:"projectId,omitempty"`
-	Env             map[string]string      `json:"env,omitempty"`
-	Volumes         []ServerletVolumeMount `json:"volumes,omitempty"`
-	Ports           []ServerletPort        `json:"ports,omitempty"`
-	Scaling         *ServerletScaling      `json:"scaling,omitempty"`
+	ServerletPlanId string            `json:"serverletPlanId,omitempty"`
+	WorkspaceId     string            `json:"workspaceId,omitempty"`
+	ProjectId       string            `json:"projectId,omitempty"`
+	Env             map[string]string `json:"env,omitempty"`
+	Ports           []ServerletPort   `json:"ports,omitempty"`
 }
 
 // MarshalJSON keeps declarative serverlet files stable and human-readable:
 // identity and image are emitted before sizing and generated API fields.
 func (s ServerletConfig) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
-		Name            string                 `json:"name,omitempty"`
-		Image           string                 `json:"image,omitempty"`
-		ServerletPlanId string                 `json:"serverletPlanId,omitempty"`
-		WorkspaceId     string                 `json:"workspaceId,omitempty"`
-		ProjectId       string                 `json:"projectId,omitempty"`
-		Ram             float64                `json:"ram,omitempty"`
-		Cpu             float64                `json:"cpu,omitempty"`
-		MinInstances    float64                `json:"minInstances"`
-		MaxInstances    float64                `json:"maxInstances"`
-		Env             map[string]string      `json:"env,omitempty"`
-		Volumes         []ServerletVolumeMount `json:"volumes,omitempty"`
-		Ports           []ServerletPort        `json:"ports,omitempty"`
-		Scaling         *ServerletScaling      `json:"scaling,omitempty"`
-		NetworkId       string                 `json:"networkId,omitempty"`
-		Runtime         string                 `json:"runtime,omitempty"`
-	}{s.Name, s.Image, s.ServerletPlanId, s.WorkspaceId, s.ProjectId, s.Ram, s.Cpu, s.MinInstances, s.MaxInstances, s.Env, s.Volumes, s.Ports, s.Scaling, s.NetworkId, s.Runtime})
-}
-
-type ServerletVolumeMount struct {
-	VolumeId  string `json:"volumeId,omitempty"`
-	MountPath string `json:"mountPath,omitempty"`
-	ReadOnly  bool   `json:"readOnly,omitempty"`
+		Name            string             `json:"name,omitempty"`
+		Image           string             `json:"image,omitempty"`
+		ServerletPlanId string             `json:"serverletPlanId,omitempty"`
+		WorkspaceId     string             `json:"workspaceId,omitempty"`
+		ProjectId       string             `json:"projectId,omitempty"`
+		Env             map[string]string  `json:"env,omitempty"`
+		Mounts          map[string]string  `json:"mounts,omitempty"`
+		Scaling         map[string]float64 `json:"scaling,omitempty"`
+		Ports           []ServerletPort    `json:"ports,omitempty"`
+	}{s.Name, s.Image, s.ServerletPlanId, s.WorkspaceId, s.ProjectId, s.Env, s.Mounts, s.Scaling, s.Ports})
 }
 
 type ServerletPort struct {
 	Port     int    `json:"port"`
 	Protocol string `json:"protocol,omitempty"`
-}
-
-type ServerletScaling struct {
-	CpuPercent   int `json:"cpuPercent,omitempty"`
-	RamPercent   int `json:"ramPercent,omitempty"`
-	UpCooldown   int `json:"upCooldown,omitempty"`
-	DownCooldown int `json:"downCooldown,omitempty"`
 }
 
 // DNSConfig represents a DNS zone and its records. DNS resources are not in
@@ -132,15 +113,15 @@ func (d DNSRecordConfig) MarshalJSON() ([]byte, error) {
 	}{d.Name, d.Type, d.Value, d.TTL, d.Priority})
 }
 
-// ProxyConfig, VolumeConfig, and CronConfig are the generated API models.
-// They need no project-config-specific adjustment, so aliases retain every
-// API field without duplicating the generated definitions.
+// ProxyConfig and CronConfig are the generated API models. They need no
+// project-config-specific adjustment, so aliases retain every API field
+// without duplicating the generated definitions.
 type ProxyConfig api.Proxy
 
 const (
 	defaultProxyPort     = 80
-	defaultProxyType     = "http"
-	defaultProxyStrategy = "round-robin"
+	defaultProxyType     = api.ProxyTypeHttp
+	defaultProxyStrategy = api.ProxyStrategyRoundRobin
 )
 
 // MarshalJSON omits API defaults while retaining explicit overrides.
@@ -155,32 +136,31 @@ func (p ProxyConfig) MarshalJSON() ([]byte, error) {
 	if port == defaultProxyPort {
 		port = 0
 	}
-	typeName := p.Type
-	if typeName == defaultProxyType {
-		typeName = ""
+	var typeName api.ProxyType
+	if p.Type != nil && *p.Type != defaultProxyType {
+		typeName = *p.Type
 	}
-	strategy := p.Strategy
-	if strategy == defaultProxyStrategy {
-		strategy = ""
+	var strategy api.ProxyStrategy
+	if p.Strategy != nil && *p.Strategy != defaultProxyStrategy {
+		strategy = *p.Strategy
 	}
 	return json.Marshal(struct {
-		Domain          string  `json:"domain,omitempty"`
-		Type            string  `json:"type,omitempty"`
-		Target          string  `json:"target,omitempty"`
-		Port            float64 `json:"port,omitempty"`
-		Compress        *bool   `json:"compress,omitempty"`
-		EnforceHttps    *bool   `json:"enforceHttps,omitempty"`
-		FollowRedirects *bool   `json:"followRedirects,omitempty"`
-		PreserveHeaders *bool   `json:"preserveHeaders,omitempty"`
-		PreserveHost    *bool   `json:"preserveHost,omitempty"`
-		PreservePath    *bool   `json:"preservePath,omitempty"`
-		PreserveQuery   *bool   `json:"preserveQuery,omitempty"`
-		VerifyTls       *bool   `json:"verifyTls,omitempty"`
-		Strategy        string  `json:"strategy,omitempty"`
-	}{p.Domain, typeName, p.Target, port, differentBool(p.Compress, false), differentBool(p.EnforceHttps, false), differentBool(p.FollowRedirects, false), differentBool(p.PreserveHeaders, true), differentBool(p.PreserveHost, true), differentBool(p.PreservePath, true), differentBool(p.PreserveQuery, true), differentBool(p.VerifyTls, true), strategy})
+		Domain          string            `json:"domain,omitempty"`
+		Type            api.ProxyType     `json:"type,omitempty"`
+		Target          string            `json:"target,omitempty"`
+		Port            float64           `json:"port,omitempty"`
+		EnforceHttps    *bool             `json:"enforceHttps,omitempty"`
+		FollowRedirects *bool             `json:"followRedirects,omitempty"`
+		PreserveHeaders *bool             `json:"preserveHeaders,omitempty"`
+		PreserveHost    *bool             `json:"preserveHost,omitempty"`
+		PreservePath    *bool             `json:"preservePath,omitempty"`
+		PreserveQuery   *bool             `json:"preserveQuery,omitempty"`
+		VerifyTls       *bool             `json:"verifyTls,omitempty"`
+		Strategy        api.ProxyStrategy `json:"strategy,omitempty"`
+	}{p.Domain, typeName, p.Target, port, differentBool(p.EnforceHttps, false), differentBool(p.FollowRedirects, false), differentBool(p.PreserveHeaders, true), differentBool(p.PreserveHost, true), differentBool(p.PreservePath, true), differentBool(p.PreserveQuery, true), differentBool(p.VerifyTls, true), strategy})
 }
 
-type VolumeConfig = api.Volume
+type StorageConfig = api.Storage
 type CronConfig = api.Cron
 
 // ToJSON serializes this project config as indented futrou.json content.
@@ -254,7 +234,7 @@ func (cfg *Config) Pull(client APIRequester, selector string) error {
 	if err != nil {
 		return err
 	}
-	volumes, err := pullCollection(client, "/v2/volumes"+q)
+	storages, err := pullCollection(client, "/v2/storages"+q)
 	if err != nil {
 		return err
 	}
@@ -262,8 +242,8 @@ func (cfg *Config) Pull(client APIRequester, selector string) error {
 	if err != nil {
 		return err
 	}
-	locks := resourceLocks(project, workspace, serverlets, dns, proxies, volumes, crons)
-	data, _ := json.Marshal(map[string]interface{}{"$schema": constants.ProjectConfigSchemaURL, "workspace": workspace, "project": project.Name, "serverlets": portableItems(serverlets), "dns": portableItems(dns), "proxies": portableItems(proxies), "volumes": portableItems(volumes), "crons": portableItems(crons), "locks": locks})
+	locks := resourceLocks(project, workspace, serverlets, dns, proxies, storages, crons)
+	data, _ := json.Marshal(map[string]interface{}{"$schema": constants.ProjectConfigSchemaURL, "workspace": workspace, "project": project.Name, "serverlets": portableItems(serverlets), "dns": portableItems(dns), "proxies": portableItems(proxies), "storages": portableItems(storages), "crons": portableItems(crons), "locks": locks})
 	// JSON unmarshalling merges maps into an existing struct. Clear it first so
 	// locks and resources are a complete snapshot, never a partial merge.
 	*cfg = Config{}
@@ -276,7 +256,7 @@ func (cfg *Config) Pull(client APIRequester, selector string) error {
 	return cfg.Validate()
 }
 
-func resourceLocks(project *api.Project, workspace string, serverlets, dns, proxies, volumes, crons []map[string]interface{}) map[string]string {
+func resourceLocks(project *api.Project, workspace string, serverlets, dns, proxies, storages, crons []map[string]interface{}) map[string]string {
 	locks := map[string]string{}
 	add := func(key string, item map[string]interface{}) {
 		if key != "" {
@@ -315,8 +295,8 @@ func resourceLocks(project *api.Project, workspace string, serverlets, dns, prox
 	for _, item := range proxies {
 		add("proxies."+stringValue(item["domain"]), item)
 	}
-	for _, item := range volumes {
-		add("volumes."+stringValue(item["name"]), item)
+	for _, item := range storages {
+		add("storages."+stringValue(item["name"]), item)
 	}
 	for _, item := range crons {
 		add("crons."+stringValue(item["name"]), item)

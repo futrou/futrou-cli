@@ -14,7 +14,7 @@ import (
 func TestLoadConfigPrefersJSONAndValidates(t *testing.T) {
 	dir := t.TempDir()
 	jsonPath := filepath.Join(dir, "futrou.json")
-	if err := os.WriteFile(jsonPath, []byte(`{"serverlets":[{"name":"api","image":"example/api","ram":128,"cpu":100,"minInstances":1,"maxInstances":2}]}`), 0644); err != nil {
+	if err := os.WriteFile(jsonPath, []byte(`{"serverlets":[{"name":"api","image":"example/api","serverletPlanId":"plan-1"}]}`), 0644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "futrou.js"), []byte("throw new Error('must not run')"), 0644); err != nil {
@@ -28,12 +28,12 @@ func TestLoadConfigPrefersJSONAndValidates(t *testing.T) {
 		t.Fatalf("unexpected config: %#v (%s)", cfg, path)
 	}
 
-	if err := os.WriteFile(jsonPath, []byte(`{"serverlets":[{"name":"api","ram":128.5}]}`), 0644); err != nil {
+	if err := os.WriteFile(jsonPath, []byte(`{"serverlets":[{"name":"api","projectId":123}]}`), 0644); err != nil {
 		t.Fatal(err)
 	}
 	_, _, err = LoadConfig(dir, "")
-	if err == nil || !strings.Contains(err.Error(), "must be an integer") {
-		t.Fatalf("expected integer validation error, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "must be a string") {
+		t.Fatalf("expected string validation error, got %v", err)
 	}
 }
 
@@ -44,10 +44,10 @@ func TestLoadConfigEndToEndFromDisk(t *testing.T) {
   "$schema": "https://futrou.com/futrou.schema.json",
   "workspace": "acme",
   "project": "website",
-  "serverlets": [{"name":"web","image":"nginx:latest","ram":128,"cpu":100,"minInstances":1,"maxInstances":3}],
+  "serverlets": [{"name":"web","image":"nginx:latest","serverletPlanId":"plan-1"}],
   "dns": [{"name":"example.com","domain":"example.com","ttl":300,"priority":10}],
   "proxies": [{"domain":"example.com","type":"http","target":"web:8080","port":443}],
-  "volumes": [{"name":"uploads"}],
+  "storages": [{"name":"uploads"}],
   "crons": [{"name":"cleanup"}]
 }`
 	if err := os.WriteFile(path, []byte(data), 0644); err != nil {
@@ -64,13 +64,13 @@ func TestLoadConfigEndToEndFromDisk(t *testing.T) {
 	if cfg.Schema != "https://futrou.com/futrou.schema.json" || cfg.Workspace != "acme" || cfg.Project != "website" {
 		t.Fatalf("unexpected selectors: %#v", cfg)
 	}
-	if len(cfg.Serverlets) != 1 || cfg.Serverlets[0].Name != "web" || cfg.Serverlets[0].MaxInstances != 3 {
+	if len(cfg.Serverlets) != 1 || cfg.Serverlets[0].Name != "web" || cfg.Serverlets[0].ServerletPlanId != "plan-1" {
 		t.Fatalf("serverlets were not decoded: %#v", cfg.Serverlets)
 	}
 	if len(cfg.DNS) != 1 || cfg.DNS[0].Domain != "example.com" || cfg.DNS[0].TTL != 300 || cfg.DNS[0].Priority != 10 {
 		t.Fatalf("dns was not decoded: %#v", cfg.DNS)
 	}
-	if len(cfg.Proxies) != 1 || cfg.Proxies[0].Port != 443 || len(cfg.Volumes) != 1 || len(cfg.Crons) != 1 {
+	if len(cfg.Proxies) != 1 || cfg.Proxies[0].Port != 443 || len(cfg.Storages) != 1 || len(cfg.Crons) != 1 {
 		t.Fatalf("resource collections were not decoded: %#v", cfg)
 	}
 }
@@ -117,7 +117,7 @@ func TestLoadConfigExecutesDefaultExportFunction(t *testing.T) {
 	}
 	dir := t.TempDir()
 	path := filepath.Join(dir, "futrou.mjs")
-	source := `export default async () => ({ serverlets: [{ name: "api", image: "example/api", ram: 128, cpu: 100, minInstances: 0, maxInstances: 1 }] })`
+	source := `export default async () => ({ serverlets: [{ name: "api", image: "example/api", serverletPlanId: "plan-1" }] })`
 	if err := os.WriteFile(path, []byte(source), 0644); err != nil {
 		t.Fatal(err)
 	}

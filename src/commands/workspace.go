@@ -6,6 +6,7 @@ import (
 	"regexp"
 
 	"futrou-cli/src/cliconfig"
+	projectconfig "futrou-cli/src/config"
 	"futrou-cli/src/services"
 
 	"github.com/urfave/cli/v2"
@@ -13,8 +14,8 @@ import (
 
 // workspaceFlag and projectFlag are shared by every command that needs to
 // resolve a workspace (and, where relevant, a project within it).
-var workspaceFlag = &cli.StringFlag{Name: "workspace", Usage: "Workspace name or ID (defaults to the workspace selected at login)"}
-var projectFlag = &cli.StringFlag{Name: "project", Usage: "Project name or ID within the workspace (defaults to \"default\")"}
+var workspaceFlag = &cli.StringFlag{Name: "workspace", Usage: "Workspace name or ID (defaults to futrou.json, then the workspace selected at login)"}
+var projectFlag = &cli.StringFlag{Name: "project", Usage: "Project name or ID within the workspace (defaults to futrou.json, then \"default\")"}
 
 var uuidRe = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
@@ -26,16 +27,22 @@ func looksLikeUUID(s string) bool {
 
 // resolveWorkspaceID resolves --workspace to a workspace ID. A UUID is used
 // directly; a name is looked up. If the flag is empty, it falls back to the
-// default workspace stored at login for the current API URL.
+// workspace declared in the project's futrou.json (if one exists in the
+// current directory), then to the default workspace stored at login.
 func resolveWorkspaceID(c *cli.Context) (string, error) {
 	name := c.String("workspace")
+	if name == "" {
+		if cfg, _, err := projectconfig.LoadConfig(".", ""); err == nil {
+			name = cfg.Workspace
+		}
+	}
 	if name == "" {
 		apiUrl := services.NormalizeApiUrl(globalApiUrl(c))
 		if cfg, err := cliconfig.Load(); err == nil {
 			name = cfg.DefaultWorkspaceFor(apiUrl)
 		}
 		if name == "" {
-			return "", fmt.Errorf("no workspace specified — pass --workspace or run 'futrou login' to select a default")
+			return "", fmt.Errorf("no workspace specified — pass --workspace, add \"workspace\" to futrou.json, or run 'futrou login' to select a default")
 		}
 	}
 	if looksLikeUUID(name) {
@@ -69,9 +76,15 @@ func resolveWorkspaceID(c *cli.Context) (string, error) {
 
 // resolveProjectID resolves --project (within the given workspace) to a
 // project ID. A UUID is used directly; a name is looked up via an exact
-// match. If the flag is empty, it falls back to a project named "default".
+// match. If the flag is empty, it falls back to the project declared in the
+// current directory's futrou.json, then to a project named "default".
 func resolveProjectID(c *cli.Context, workspaceID string) (string, error) {
 	name := c.String("project")
+	if name == "" {
+		if cfg, _, err := projectconfig.LoadConfig(".", ""); err == nil {
+			name = cfg.Project
+		}
+	}
 	if name == "" {
 		name = "default"
 	}

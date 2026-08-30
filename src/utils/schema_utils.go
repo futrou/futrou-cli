@@ -13,17 +13,17 @@ import (
 
 // root schemas — the generator will transitively include all $ref dependencies
 var rootSchemas = map[string]bool{
-	"User":              true,
-	"ApiToken":          true,
-	"Serverlet":         true,
-	"ServerletInstance": true,
-	"ServerletPlan":     true,
-	"Project":           true,
-	"Workspace":         true,
-	"Variable":          true,
-	"Volume":            true,
-	"Proxy":             true,
-	"Region":            true,
+	"User":          true,
+	"ApiToken":      true,
+	"Serverlet":     true,
+	"ServerletPlan": true,
+	"Project":       true,
+	"Workspace":     true,
+	"Variable":      true,
+	"Storage":       true,
+	"StoragePlan":   true,
+	"Proxy":         true,
+	"Region":        true,
 }
 
 type openapiSpec struct {
@@ -42,6 +42,7 @@ type schemaObj struct {
 	Nullable             bool                   `json:"nullable"`
 	Format               string                 `json:"format"`
 	AdditionalProperties *propertyDef           `json:"additionalProperties"`
+	Enum                 []string               `json:"enum"`
 }
 
 type propertyDef struct {
@@ -58,7 +59,7 @@ func toPascalCase(s string) string {
 	// Insert underscore before uppercase runs in camelCase, then title-case each part
 	re := regexp.MustCompile(`([a-z])([A-Z])`)
 	snake := re.ReplaceAllString(s, `${1}_${2}`)
-	parts := strings.Split(snake, "_")
+	parts := strings.FieldsFunc(snake, func(r rune) bool { return r == '_' || r == '-' })
 	var b strings.Builder
 	for _, p := range parts {
 		if len(p) == 0 {
@@ -117,7 +118,33 @@ func schemaToGoType(p propertyDef, schemas map[string]schemaObj) string {
 	return t
 }
 
+// generateEnum renders a string-backed named type plus one constant per
+// enum value, e.g. type ProxyType string; const ProxyTypeHttp ProxyType = "http".
+func generateEnum(name string, s schemaObj) string {
+	var sb strings.Builder
+
+	if s.Description != "" {
+		desc := strings.ReplaceAll(s.Description, "\n", "\n// ")
+		sb.WriteString(fmt.Sprintf("// %s %s\n", name, desc))
+	}
+	sb.WriteString(fmt.Sprintf("type %s string\n", name))
+
+	if len(s.Enum) > 0 {
+		sb.WriteString("\nconst (\n")
+		for _, value := range s.Enum {
+			sb.WriteString(fmt.Sprintf("\t%s%s %s = %q\n", name, toPascalCase(value), name, value))
+		}
+		sb.WriteString(")\n")
+	}
+
+	return sb.String()
+}
+
 func generateStruct(name string, s schemaObj, schemas map[string]schemaObj) string {
+	if s.Type == "string" {
+		return generateEnum(name, s)
+	}
+
 	var sb strings.Builder
 
 	if s.Description != "" {
@@ -228,7 +255,9 @@ func JSONSchemaToGo(data []byte, sourceURL string) ([]byte, error) {
 		}
 	}
 	if needsTime {
-		sb.WriteString("import \"time\"\n\n")
+		sb.WriteString("import (\n\t\"strings\"\n\t\"time\"\n)\n\n")
+	} else {
+		sb.WriteString("import \"strings\"\n\n")
 	}
 
 	// Fixed types not in OpenAPI schemas
@@ -241,7 +270,14 @@ type APIError struct {
 }
 
 func (e *APIError) Error() string {
-	return e.Message
+	if len(e.Errors) == 0 {
+		return e.Message
+	}
+	details := make([]string, len(e.Errors))
+	for i, fe := range e.Errors {
+		details[i] = fe.Message
+	}
+	return e.Message + ": " + strings.Join(details, "; ")
 }
 
 // FieldError is a single validation error within an APIError.

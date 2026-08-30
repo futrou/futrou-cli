@@ -210,7 +210,7 @@ func buildApp() *cli.App {
 			withGlobalFlags(dnsCommand),
 			withGlobalFlags(projectsCommand),
 			withGlobalFlags(workspacesCommand),
-			withGlobalFlags(volumesCommand),
+			withGlobalFlags(storagesCommand),
 			withGlobalFlags(licenseCommand),
 			withGlobalFlags(versionCommand),
 			withGlobalFlags(schemaCommand),

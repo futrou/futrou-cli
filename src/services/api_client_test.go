@@ -2,6 +2,7 @@ package services
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -159,6 +160,51 @@ func TestApiClientRequestInto_ErrorAndMutationCallback(t *testing.T) {
 	}
 }
 
+// TestApiClientRequestInto_PlainTextErrorIncludesRequestContext guards
+// against a regression where a non-JSON error body (e.g. a bare "Bad
+// Request" from an upstream proxy) surfaced with no indication of which
+// request failed, making --debug output useless for diagnosing it.
+func TestApiClientRequestInto_PlainTextErrorIncludesRequestContext(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte("Bad Request"))
+	}))
+	defer server.Close()
+
+	client := NewApiClientWithToken(server.URL, "")
+	status, err := client.RequestInto(http.MethodGet, "/v2/storages", nil, nil)
+	if status != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", status)
+	}
+	apiErr, ok := err.(*api.APIError)
+	if !ok {
+		t.Fatalf("error = %#v, want *api.APIError", err)
+	}
+	if !strings.Contains(apiErr.Message, "Bad Request") {
+		t.Errorf("message = %q, want it to contain the raw response body", apiErr.Message)
+	}
+	if !strings.Contains(apiErr.Message, "400") || !strings.Contains(apiErr.Message, "/v2/storages") {
+		t.Errorf("message = %q, want it to contain the status and path for debugging", apiErr.Message)
+	}
+}
+
+func TestApiClientRequestInto_EmptyErrorBodyIncludesRequestContext(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	client := NewApiClientWithToken(server.URL, "")
+	_, err := client.RequestInto(http.MethodDelete, "/v2/storages/s1", nil, nil)
+	apiErr, ok := err.(*api.APIError)
+	if !ok {
+		t.Fatalf("error = %#v, want *api.APIError", err)
+	}
+	if !strings.Contains(apiErr.Message, "500") || !strings.Contains(apiErr.Message, "/v2/storages/s1") {
+		t.Errorf("message = %q, want it to contain the status and path", apiErr.Message)
+	}
+}
+
 func TestApiClientToJSONSchemaAndNormalizeURL(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v2/openapi.json" {
@@ -176,5 +222,186 @@ func TestApiClientToJSONSchemaAndNormalizeURL(t *testing.T) {
 	}
 	if got := NormalizeApiUrl("https://example.test/v2/"); got != "https://example.test" {
 		t.Errorf("NormalizeApiUrl() = %q", got)
+	}
+}
+
+func TestApiClientUploadFile_Success(t *testing.T) {
+	var gotContentType, gotAuth, gotBody string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPut {
+			t.Errorf("method = %q, want PUT", r.Method)
+		}
+		gotContentType = r.Header.Get("Content-Type")
+		gotAuth = r.Header.Get("Authorization")
+		body, _ := io.ReadAll(r.Body)
+		gotBody = string(body)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"id":"file-1"}`))
+	}))
+	defer server.Close()
+
+	client := NewApiClientWithToken(server.URL, "test-token")
+	result, status, err := client.UploadFile("/v2/storages/s1/files/a.txt", "text/plain", strings.NewReader("hello"))
+	if err != nil {
+		t.Fatalf("UploadFile() error = %v", err)
+	}
+	if status != http.StatusOK {
+		t.Errorf("status = %d, want 200", status)
+	}
+	if gotContentType != "text/plain" {
+		t.Errorf("Content-Type = %q", gotContentType)
+	}
+	if gotAuth != "Bearer test-token" {
+		t.Errorf("Authorization = %q", gotAuth)
+	}
+	if gotBody != "hello" {
+		t.Errorf("uploaded body = %q", gotBody)
+	}
+	m, ok := result.(map[string]interface{})
+	if !ok || m["id"] != "file-1" {
+		t.Errorf("result = %#v", result)
+	}
+}
+
+func TestApiClientUploadFile_DefaultContentType(t *testing.T) {
+	var gotContentType string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotContentType = r.Header.Get("Content-Type")
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	client := NewApiClientWithToken(server.URL, "")
+	result, status, err := client.UploadFile("/v2/storages/s1/files/a.bin", "", strings.NewReader("x"))
+	if err != nil {
+		t.Fatalf("UploadFile() error = %v", err)
+	}
+	if status != http.StatusNoContent {
+		t.Errorf("status = %d, want 204", status)
+	}
+	if result != nil {
+		t.Errorf("expected nil result for empty body, got %#v", result)
+	}
+	if gotContentType != "application/octet-stream" {
+		t.Errorf("Content-Type = %q, want default octet-stream", gotContentType)
+	}
+}
+
+func TestApiClientUploadFile_NonJSONSuccessBody(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("plain text ok"))
+	}))
+	defer server.Close()
+
+	client := NewApiClientWithToken(server.URL, "")
+	result, status, err := client.UploadFile("/v2/storages/s1/files/a.txt", "text/plain", strings.NewReader("x"))
+	if err != nil {
+		t.Fatalf("UploadFile() error = %v", err)
+	}
+	if status != http.StatusOK {
+		t.Errorf("status = %d, want 200", status)
+	}
+	if result != "plain text ok" {
+		t.Errorf("result = %#v, want raw string fallback", result)
+	}
+}
+
+func TestApiClientUploadFile_JSONErrorBody(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"message":"quota exceeded"}`))
+	}))
+	defer server.Close()
+
+	client := NewApiClientWithToken(server.URL, "")
+	_, status, err := client.UploadFile("/v2/storages/s1/files/a.txt", "text/plain", strings.NewReader("x"))
+	if status != http.StatusForbidden {
+		t.Errorf("status = %d, want 403", status)
+	}
+	apiErr, ok := err.(*api.APIError)
+	if !ok || apiErr.Message != "quota exceeded" {
+		t.Errorf("error = %#v", err)
+	}
+}
+
+func TestApiClientUploadFile_NonJSONErrorBody(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte("boom"))
+	}))
+	defer server.Close()
+
+	client := NewApiClientWithToken(server.URL, "")
+	_, status, err := client.UploadFile("/v2/storages/s1/files/a.txt", "text/plain", strings.NewReader("x"))
+	if status != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500", status)
+	}
+	apiErr, ok := err.(*api.APIError)
+	if !ok || !strings.Contains(apiErr.Message, "500") {
+		t.Errorf("error = %#v", err)
+	}
+}
+
+func TestApiClientDownloadFile_Success(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Errorf("method = %q, want GET", r.Method)
+		}
+		w.Header().Set("Content-Type", "application/octet-stream")
+		_, _ = w.Write([]byte("binary-data"))
+	}))
+	defer server.Close()
+
+	client := NewApiClientWithToken(server.URL, "")
+	data, contentType, status, err := client.DownloadFile("/v2/storages/s1/files/a.bin")
+	if err != nil {
+		t.Fatalf("DownloadFile() error = %v", err)
+	}
+	if status != http.StatusOK {
+		t.Errorf("status = %d, want 200", status)
+	}
+	if string(data) != "binary-data" {
+		t.Errorf("data = %q", data)
+	}
+	if contentType != "application/octet-stream" {
+		t.Errorf("Content-Type = %q", contentType)
+	}
+}
+
+func TestApiClientDownloadFile_JSONErrorBody(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"message":"file not found"}`))
+	}))
+	defer server.Close()
+
+	client := NewApiClientWithToken(server.URL, "")
+	_, _, status, err := client.DownloadFile("/v2/storages/s1/files/missing.bin")
+	if status != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", status)
+	}
+	apiErr, ok := err.(*api.APIError)
+	if !ok || apiErr.Message != "file not found" {
+		t.Errorf("error = %#v", err)
+	}
+}
+
+func TestApiClientDownloadFile_NonJSONErrorBody(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte("gateway error"))
+	}))
+	defer server.Close()
+
+	client := NewApiClientWithToken(server.URL, "")
+	_, _, status, err := client.DownloadFile("/v2/storages/s1/files/a.bin")
+	if status != http.StatusBadGateway {
+		t.Errorf("status = %d, want 502", status)
+	}
+	apiErr, ok := err.(*api.APIError)
+	if !ok || !strings.Contains(apiErr.Message, "502") {
+		t.Errorf("error = %#v", err)
 	}
 }

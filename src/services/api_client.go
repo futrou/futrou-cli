@@ -113,11 +113,11 @@ func (ac *ApiClient) Request(method, path string, body interface{}) (interface{}
 	defer resp.Body.Close()
 
 	respBody, _ := io.ReadAll(resp.Body)
-	logger.Debug("API %s %s → %d (%d bytes)", method, path, resp.StatusCode, len(respBody))
+	logger.Debug("← %s %s %d (%d bytes): %s", method, path, resp.StatusCode, len(respBody), truncateForLog(respBody))
 
 	if len(respBody) == 0 || resp.StatusCode == http.StatusNoContent {
 		if resp.StatusCode >= 400 {
-			return nil, resp.StatusCode, &api.APIError{Message: http.StatusText(resp.StatusCode)}
+			return nil, resp.StatusCode, &api.APIError{Message: fmt.Sprintf("%s (HTTP %d %s %s)", http.StatusText(resp.StatusCode), resp.StatusCode, method, path)}
 		}
 		return nil, resp.StatusCode, nil
 	}
@@ -125,14 +125,14 @@ func (ac *ApiClient) Request(method, path string, body interface{}) (interface{}
 	contentType := resp.Header.Get("Content-Type")
 	if strings.Contains(contentType, "text/plain") {
 		if resp.StatusCode >= 400 {
-			return nil, resp.StatusCode, &api.APIError{Message: string(respBody)}
+			return nil, resp.StatusCode, &api.APIError{Message: fmt.Sprintf("%s (HTTP %d %s %s)", strings.TrimSpace(string(respBody)), resp.StatusCode, method, path)}
 		}
 		return string(respBody), resp.StatusCode, nil
 	}
 
 	var result interface{}
 	if err := json.Unmarshal(respBody, &result); err != nil {
-		return nil, resp.StatusCode, fmt.Errorf("parsing response: %s", string(respBody))
+		return nil, resp.StatusCode, fmt.Errorf("parsing response from %s %s: %s", method, path, string(respBody))
 	}
 
 	if resp.StatusCode >= 400 {
@@ -140,7 +140,7 @@ func (ac *ApiClient) Request(method, path string, body interface{}) (interface{}
 		if err := json.Unmarshal(respBody, &apiErr); err == nil && apiErr.Message != "" {
 			return nil, resp.StatusCode, &apiErr
 		}
-		return nil, resp.StatusCode, &api.APIError{Message: fmt.Sprintf("request failed: %d", resp.StatusCode)}
+		return nil, resp.StatusCode, &api.APIError{Message: fmt.Sprintf("request failed: %d (%s %s)", resp.StatusCode, method, path)}
 	}
 
 	return result, resp.StatusCode, nil
@@ -155,6 +155,7 @@ func (ac *ApiClient) RequestInto(method, path string, body interface{}, v interf
 	defer resp.Body.Close()
 
 	respBody, _ := io.ReadAll(resp.Body)
+	logger.Debug("← %s %s %d (%d bytes): %s", method, path, resp.StatusCode, len(respBody), truncateForLog(respBody))
 
 	if resp.StatusCode >= 400 {
 		var apiErr api.APIError
@@ -162,9 +163,9 @@ func (ac *ApiClient) RequestInto(method, path string, body interface{}, v interf
 			return resp.StatusCode, &apiErr
 		}
 		if message := strings.TrimSpace(string(respBody)); message != "" {
-			return resp.StatusCode, &api.APIError{Message: message}
+			return resp.StatusCode, &api.APIError{Message: fmt.Sprintf("%s (HTTP %d %s %s)", message, resp.StatusCode, method, path)}
 		}
-		return resp.StatusCode, &api.APIError{Message: fmt.Sprintf("request failed: %d", resp.StatusCode)}
+		return resp.StatusCode, &api.APIError{Message: fmt.Sprintf("request failed: %d (%s %s)", resp.StatusCode, method, path)}
 	}
 
 	if len(respBody) == 0 || resp.StatusCode == http.StatusNoContent {
@@ -177,6 +178,79 @@ func (ac *ApiClient) RequestInto(method, path string, body interface{}, v interf
 	return resp.StatusCode, ac.runAfterMutation(method)
 }
 
+// UploadFile PUTs raw file contents to path with the given content type and
+// returns the response body, decoded as JSON when possible.
+func (ac *ApiClient) UploadFile(path, contentType string, content io.Reader) (interface{}, int, error) {
+	url := strings.TrimSuffix(ac.apiUrl, "/") + path
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPut, url, content)
+	if err != nil {
+		return nil, 0, fmt.Errorf("creating request: %w", err)
+	}
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	req.Header.Set("Content-Type", contentType)
+	req.Header.Set("Accept", "application/json")
+	if ac.apiToken != "" {
+		req.Header.Set("Authorization", "Bearer "+ac.apiToken)
+	}
+
+	logger.Debug("→ PUT %s", url)
+	resp, err := ac.client.Do(req)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(resp.Body)
+	logger.Debug("← PUT %s %d (%d bytes): %s", path, resp.StatusCode, len(respBody), truncateForLog(respBody))
+	if resp.StatusCode >= 400 {
+		var apiErr api.APIError
+		if jsonErr := json.Unmarshal(respBody, &apiErr); jsonErr == nil && apiErr.Message != "" {
+			return nil, resp.StatusCode, &apiErr
+		}
+		if message := strings.TrimSpace(string(respBody)); message != "" {
+			return nil, resp.StatusCode, &api.APIError{Message: fmt.Sprintf("%s (HTTP %d PUT %s)", message, resp.StatusCode, path)}
+		}
+		return nil, resp.StatusCode, &api.APIError{Message: fmt.Sprintf("request failed: %d (PUT %s)", resp.StatusCode, path)}
+	}
+	if len(respBody) == 0 {
+		return nil, resp.StatusCode, ac.runAfterMutation(http.MethodPut)
+	}
+	var result interface{}
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return string(respBody), resp.StatusCode, ac.runAfterMutation(http.MethodPut)
+	}
+	return result, resp.StatusCode, ac.runAfterMutation(http.MethodPut)
+}
+
+// DownloadFile GETs path and returns the raw response body alongside its
+// Content-Type, for endpoints that serve file contents instead of JSON.
+func (ac *ApiClient) DownloadFile(path string) ([]byte, string, int, error) {
+	resp, err := ac.do(context.Background(), http.MethodGet, path, nil)
+	if err != nil {
+		return nil, "", 0, err
+	}
+	defer resp.Body.Close()
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, "", resp.StatusCode, fmt.Errorf("reading response from GET %s: %w", path, err)
+	}
+	logger.Debug("← GET %s %d (%d bytes)", path, resp.StatusCode, len(data))
+	if resp.StatusCode >= 400 {
+		var apiErr api.APIError
+		if jsonErr := json.Unmarshal(data, &apiErr); jsonErr == nil && apiErr.Message != "" {
+			return nil, "", resp.StatusCode, &apiErr
+		}
+		if message := strings.TrimSpace(string(data)); message != "" {
+			return nil, "", resp.StatusCode, &api.APIError{Message: fmt.Sprintf("%s (HTTP %d GET %s)", message, resp.StatusCode, path)}
+		}
+		return nil, "", resp.StatusCode, &api.APIError{Message: fmt.Sprintf("request failed: %d (GET %s)", resp.StatusCode, path)}
+	}
+	return data, resp.Header.Get("Content-Type"), resp.StatusCode, nil
+}
+
 func (ac *ApiClient) runAfterMutation(method string) error {
 	if isMutation(method) && ac.afterMutation != nil {
 		return ac.afterMutation()
@@ -186,6 +260,17 @@ func (ac *ApiClient) runAfterMutation(method string) error {
 
 func isMutation(method string) bool {
 	return method == http.MethodPost || method == http.MethodPatch || method == http.MethodPut || method == http.MethodDelete
+}
+
+// truncateForLog caps a response body shown in debug logs so a large or
+// binary payload doesn't flood the terminal.
+func truncateForLog(body []byte) string {
+	const maxLen = 2000
+	s := string(body)
+	if len(s) > maxLen {
+		return s[:maxLen] + fmt.Sprintf("... (%d more bytes)", len(s)-maxLen)
+	}
+	return s
 }
 
 func (ac *ApiClient) do(ctx context.Context, method, path string, body interface{}) (*http.Response, error) {

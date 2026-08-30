@@ -1,7 +1,6 @@
 package validators
 
 import (
-	"fmt"
 	"math"
 )
 
@@ -15,10 +14,10 @@ func initConfigValidator() *Validator {
 	v.Field("$schema").Description("URL of the Futrou JSON Schema used by editors for validation and completion.").Optional().String().URL()
 	v.Field("workspace").Description("Workspace name or ID that owns this project.").Optional().String().MinLength(1).MaxLength(255)
 	v.Field("project").Description("Project name or ID used as the deployment target.").Optional().String().MinLength(1).MaxLength(255)
-	v.Field("serverlets").Description("Serverlets to create or update in this project.").Optional().Array(initServerletValidator()).Custom(validateServerletRanges)
+	v.Field("serverlets").Description("Serverlets to create or update in this project.").Optional().Array(initServerletValidator())
 	v.Field("dns").Description("DNS zones and records managed by this project.").Optional().Array(initDNSValidator())
 	v.Field("proxies").Description("HTTP, TCP, or UDP proxies managed by this project.").Optional().Array(initProxyValidator())
-	v.Field("volumes").Description("Persistent volumes available to the project.").Optional().Array(initVolumeValidator())
+	v.Field("storages").Description("Persistent storage volumes available to the project.").Optional().Array(initStorageValidator())
 	v.Field("crons").Description("Scheduled HTTP or code jobs for the project.").Optional().Array(initCronValidator())
 	v.Field("locks").Description("Internal stable resource identifiers maintained by the CLI.").Optional()
 	return v
@@ -36,21 +35,16 @@ func initResourceValidator() *Validator {
 func initServerletValidator() *Validator {
 	v := initResourceValidator()
 	v.Field("image").Description("Container image to run.").Optional().String().MinLength(1)
-	v.Field("ram").Description("Memory allocation in MiB.").Optional().Integer().Range(32, 262144)
-	v.Field("cpu").Description("CPU allocation in millicores.").Optional().Integer().Range(10, 32000)
-	v.Field("instances").Description("Current number of serverlet instances.").Optional().Integer().Min(0)
-	v.Field("minInstances").Description("Minimum number of running instances.").Optional().Integer().Range(0, 1000)
-	v.Field("maxInstances").Description("Maximum number of running instances.").Optional().Integer().Range(0, 1000)
+	v.Field("serverletPlanId").Description("Plan ID that determines serverlet sizing.").Optional().String().MinLength(1).MaxLength(255)
 	v.Field("createdAt").Optional().String()
 	v.Field("updatedAt").Optional().String()
-	v.Field("networkId").Optional().String().MinLength(1).MaxLength(255)
-	v.Field("runtime").Optional().String().MinLength(1).MaxLength(255)
-	v.Field("state").Optional().String().MinLength(1).MaxLength(255)
-	v.Field("serverletPlanId").Optional().String().MinLength(1).MaxLength(255)
+	v.Field("status").Optional().String()
 	v.Field("workspaceId").Optional().String().MinLength(1).MaxLength(255)
 	v.Field("projectId").Optional().String().MinLength(1).MaxLength(255)
+	v.Field("regionId").Optional().String().MinLength(1).MaxLength(255)
+	v.Field("arch").Optional()
 	v.Field("env").Optional()
-	v.Field("volumes").Optional()
+	v.Field("mounts").Description("Storage mounts, keyed by mount path to storage ID.").Optional()
 	v.Field("ports").Optional()
 	v.Field("scaling").Optional()
 	return v
@@ -61,7 +55,8 @@ func initProxyValidator() *Validator {
 	v.Field("type").Optional().String().Enum("http", "tcp", "udp")
 	v.Field("target").Optional().String().MinLength(1)
 	v.Field("port").Description("Public proxy port (1–65535).").Optional().Integer().Range(1, 65535)
-	v.Field("compress").Optional().Bool()
+	v.Field("proxyPlanId").Optional().String().MinLength(1).MaxLength(255)
+	v.Field("regionId").Optional().String().MinLength(1).MaxLength(255)
 	v.Field("enforceHttps").Optional().Bool()
 	v.Field("followRedirects").Optional().Bool()
 	v.Field("preserveHeaders").Optional().Bool()
@@ -69,8 +64,12 @@ func initProxyValidator() *Validator {
 	v.Field("preservePath").Optional().Bool()
 	v.Field("preserveQuery").Optional().Bool()
 	v.Field("verifyTls").Optional().Bool()
+	v.Field("isVerified").Optional().Bool()
 	v.Field("status").Optional().String()
-	v.Field("strategy").Optional().String()
+	v.Field("strategy").Optional().String().Enum("round-robin", "primary-failover")
+	v.Field("rules").Optional()
+	v.Field("workspaceId").Optional().String().MinLength(1).MaxLength(255)
+	v.Field("projectId").Optional().String().MinLength(1).MaxLength(255)
 	v.Field("createdAt").Optional().String()
 	v.Field("updatedAt").Optional().String()
 	return v
@@ -95,10 +94,13 @@ func initDNSRecordValidator() *Validator {
 	return v
 }
 
-func initVolumeValidator() *Validator {
+func initStorageValidator() *Validator {
 	v := initResourceValidator()
-	v.Field("sizeGb").Optional().Number().Min(0)
-	v.Field("type").Optional().String()
+	v.Field("storagePlanId").Description("Plan ID that determines storage sizing.").Optional().String().MinLength(1).MaxLength(255)
+	v.Field("workspaceId").Optional().String().MinLength(1).MaxLength(255)
+	v.Field("projectId").Optional().String().MinLength(1).MaxLength(255)
+	v.Field("regionId").Optional().String().MinLength(1).MaxLength(255)
+	v.Field("public").Optional().Bool()
 	v.Field("createdAt").Optional().String()
 	v.Field("updatedAt").Optional().String()
 	return v
@@ -126,23 +128,4 @@ func initCronValidator() *Validator {
 	v.Field("type").Optional()
 	v.Field("workspace").Optional()
 	return v
-}
-
-func validateServerletRanges(value interface{}) error {
-	items, ok := value.([]interface{})
-	if !ok {
-		return fmt.Errorf("must be an array")
-	}
-	for i, raw := range items {
-		item, ok := raw.(map[string]interface{})
-		if !ok {
-			return fmt.Errorf("item %d must be an object", i)
-		}
-		min, hasMin := integer(item["minInstances"])
-		max, hasMax := integer(item["maxInstances"])
-		if hasMin && hasMax && min > max {
-			return fmt.Errorf("item %d.minInstances must not exceed maxInstances", i)
-		}
-	}
-	return nil
 }

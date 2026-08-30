@@ -12,11 +12,11 @@ import (
 )
 
 func TestBuildPlanServerletCreateUpdateDeleteAndNoop(t *testing.T) {
-	cfg := &config.Config{Serverlets: []config.ServerletConfig{{Serverlet: api.Serverlet{Name: "web", Image: "nginx:latest", Ram: 128, Cpu: 100, MinInstances: 1, MaxInstances: 1}}}}
+	cfg := &config.Config{Serverlets: []config.ServerletConfig{{Serverlet: api.Serverlet{Name: "web", Image: "nginx:latest"}, ServerletPlanId: "plan-1"}}}
 	for name, remote := range map[string][]map[string]interface{}{
 		"create": {},
-		"update": {{"id": "sl-1", "name": "web", "image": "nginx:old", "ram": 128, "cpu": 100, "minInstances": 1, "maxInstances": 1}},
-		"noop":   {{"id": "sl-1", "name": "web", "image": "nginx:latest", "ram": 128, "cpu": 100, "minInstances": 1, "maxInstances": 1}},
+		"update": {{"id": "sl-1", "name": "web", "image": "nginx:old", "serverletPlanId": "plan-1"}},
+		"noop":   {{"id": "sl-1", "name": "web", "image": "nginx:latest", "serverletPlanId": "plan-1"}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
