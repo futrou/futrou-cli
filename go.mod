@@ -1,11 +1,11 @@
 module futrou-cli
 
-go 1.25.6
+go 1.26.0
 
 require (
 	github.com/gorilla/websocket v1.5.3
 	github.com/manifoldco/promptui v0.9.0
-	github.com/quic-go/quic-go v0.61.0
+	github.com/quic-go/quic-go v0.62.0
 	github.com/urfave/cli/v2 v2.27.7
 	golang.org/x/term v0.45.0
 )
