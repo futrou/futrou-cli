@@ -40,4 +40,15 @@ jobs:
           echo "Local:  $LOCAL"
           echo "Remote: $REMOTE"
           git push gitlab HEAD:main || (git pull gitlab main --rebase && git push gitlab HEAD:main)
-          git push gitlab --tags
+          # Only push tags GitLab doesn't already have; pushing --tags
+          # unconditionally fails the whole command on the first tag that
+          # already exists remotely (tags are immutable, so re-pushing an
+          # existing one is never needed).
+          LOCAL_TAGS=$(git tag)
+          REMOTE_TAGS=$(git ls-remote --tags gitlab | awk -F'refs/tags/' '{print $2}' | sed 's/\^{}$//' | sort -u)
+          NEW_TAGS=$(comm -23 <(echo "$LOCAL_TAGS" | sort -u) <(echo "$REMOTE_TAGS"))
+          if [ -n "$NEW_TAGS" ]; then
+            echo "$NEW_TAGS" | xargs git push gitlab
+          else
+            echo "No new tags to push."
+          fi
