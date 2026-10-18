@@ -34,8 +34,7 @@ declarative `futrou.json` model in `src/config/`, its validators in
    must validate before touching the API.
 4. **Examples:** `examples/futrou.json`, `examples/futrou.yaml` and `examples/futrou.mjs` set
    every supported option and must stay equivalent (a test checks it). Add every new
-   `futrou.json` option to all three. `make build-docs` embeds them in `README.md` and
-   `SKILL.md`.
+   `futrou.json` option to all three. `make build-docs` embeds them in `SKILL.md`; `README.md` only links to them.
 5. **Config formats:** discovery order is `futrou.json`, `futrou.js`, `futrou.cjs`,
    `futrou.mjs`, `futrou.ts`, `futrou.yaml`, `futrou.yml`. YAML is converted to the JSON
    equivalent (`Config.LoadYAML`) and then validated like JSON. Loading is `Config.Load`, which

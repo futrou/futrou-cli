@@ -26,7 +26,7 @@ func TestReferenceUpToDate(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if start, _ := ExampleMarkers(example.Name); !strings.Contains(want, start) {
+			if start, _ := ExampleMarkers(example.Name); file == "SKILL.md" && !strings.Contains(want, start) {
 				t.Errorf("%s is missing the %s example block", file, example.Name)
 			}
 			want = ReplaceExample(want, example.Name, example.Language, string(content))
@@ -40,48 +40,91 @@ func TestReferenceUpToDate(t *testing.T) {
 func TestReferenceCoversCommandsAndFlags(t *testing.T) {
 	reference := ReferenceMarkdown()
 	for _, want := range []string{
-		"`futrou serverlet ls`", "`futrou network create`", "`futrou server logs <id>`",
-		"`--live`", "`--start-at <string>`", "`--instance-id <string>`",
-		"`futrou dns metrics <id>`", "`futrou storage metrics <id>`",
+		"futrou deploy|up ", "futrou serverlet ls ", "futrou network create --name <string> ", "futrou server logs <id> ",
+		"[--live=false]", "[LOG-OPTIONS]", "[--file|-f <string>]", "[--yes|-y]", "--instance-id <string>",
+		"futrou dns metrics <id> ", "futrou storage metrics <id> ", "futrou serverlet instance logs <id> <instance-id> [LOG-OPTIONS]",
+		"# Deploy or upgrade resources based on futrou.json|yaml config",
 	} {
 		if !strings.Contains(reference, want) {
 			t.Errorf("reference is missing %s", want)
 		}
 	}
-	for _, hidden := range []string{"`futrou serverlets", "`futrou proxies", "--api-url <string>` Futrou"} {
+	for _, hidden := range []string{"futrou serverlets", "futrou proxies", "futrou setup", "futrou teardown"} {
 		if strings.Contains(reference, hidden) {
 			t.Errorf("reference should not contain %s", hidden)
 		}
+	}
+	if strings.Contains(reference, "--offset") && strings.Count(reference, "--offset") != 1 {
+		t.Errorf("the log flags should be spelled out once, in the LOG-OPTIONS summary")
+	}
+}
+
+func TestReferenceIsOneCodeBlockWithAlignedComments(t *testing.T) {
+	reference := ReferenceMarkdown()
+	if strings.Count(reference, "```") != 2 {
+		t.Fatalf("the reference should be a single code block:\n%s", reference)
+	}
+	// Within a group the comments start in the same column.
+	var column int
+	for _, line := range strings.Split(reference, "\n") {
+		if strings.TrimSpace(line) == "" {
+			column = 0
+			continue
+		}
+		if !strings.HasPrefix(line, "futrou ") {
+			continue
+		}
+		i := strings.Index(line, "  # ")
+		if i < 0 {
+			continue
+		}
+		if len(line[:i]) > referenceMaxWidth {
+			continue
+		}
+		if column == 0 {
+			column = i
+		} else if i != column {
+			t.Errorf("comment of %q starts at column %d, want %d", line, i, column)
+		}
+	}
+}
+
+func TestFlagSyntax(t *testing.T) {
+	for name, tc := range map[string]struct {
+		flag     cli.Flag
+		optional bool
+		want     string
+	}{
+		"optional string": {&cli.StringFlag{Name: "name"}, true, "[--name <string>]"},
+		"required string": {&cli.StringFlag{Name: "name", Required: true}, false, "--name <string>"},
+		"alias":           {&cli.StringFlag{Name: "file", Aliases: []string{"f"}}, true, "[--file|-f <string>]"},
+		"bool":            {&cli.BoolFlag{Name: "yes", Aliases: []string{"y"}}, true, "[--yes|-y]"},
+		"bool default on": {&cli.BoolFlag{Name: "live", Value: true}, true, "[--live=false]"},
+		"int":             {&cli.IntFlag{Name: "limit"}, true, "[--limit <int>]"},
+		"slice":           {&cli.StringSliceFlag{Name: "env"}, true, "[--env <string>...]"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := flagSyntax(tc.flag, tc.optional); got != tc.want {
+				t.Fatalf("got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestCommandFlagsCollapsesLogOptionsAndSkipsHidden(t *testing.T) {
+	flags := append([]cli.Flag{&cli.StringFlag{Name: "type"}, &cli.BoolFlag{Name: "secret", Hidden: true}, &cli.BoolFlag{Name: "debug"}}, logFlags...)
+	got := commandFlags(flags, map[string]bool{"debug": true})
+	if got != " [--type <string>] [LOG-OPTIONS]" {
+		t.Fatalf("got %q", got)
+	}
+	if got := commandFlags(logFlags[:2], nil); strings.Contains(got, "LOG-OPTIONS") || !strings.Contains(got, "--offset") {
+		t.Fatalf("a command with only some log flags lists them: %q", got)
 	}
 }
 
 func TestReplaceReference_missingMarkers(t *testing.T) {
 	if _, err := ReplaceReference("no markers", "x"); err == nil {
 		t.Fatal("expected an error")
-	}
-}
-
-func TestDescribeFlag(t *testing.T) {
-	skip := map[string]bool{"debug": true}
-	for name, tc := range map[string]struct {
-		flag cli.Flag
-		want string
-	}{
-		"string with alias": {&cli.StringFlag{Name: "file", Aliases: []string{"f"}, Usage: "Config file"}, "`--file, -f <string>` Config file"},
-		"int":               {&cli.IntFlag{Name: "limit", Usage: "Max"}, "`--limit <int>` Max"},
-		"float":             {&cli.Float64Flag{Name: "ratio", Usage: "Ratio"}, "`--ratio <number>` Ratio"},
-		"slice":             {&cli.StringSliceFlag{Name: "env", Usage: "Env"}, "`--env <string>...` Env"},
-		"required":          {&cli.StringFlag{Name: "name", Required: true, Usage: "Name"}, "`--name <string>` Name (required)"},
-		"bool default true": {&cli.BoolFlag{Name: "live", Value: true, Usage: "Live"}, "`--live` Live (default true)"},
-		"string default":    {&cli.StringFlag{Name: "type", Value: "serverlet", Usage: "Type"}, "`--type <string>` Type (default serverlet)"},
-		"skipped":           {&cli.BoolFlag{Name: "debug"}, ""},
-		"hidden":            {&cli.BoolFlag{Name: "secret", Hidden: true}, ""},
-	} {
-		t.Run(name, func(t *testing.T) {
-			if got := describeFlag(tc.flag, skip); got != tc.want {
-				t.Fatalf("got %q, want %q", got, tc.want)
-			}
-		})
 	}
 }
 
