@@ -77,7 +77,7 @@ futrou whoami
 
 ### Deploy (declarative)
 
-Describe the project in `futrou.json`, `futrou.js`/`.cjs`/`.mjs`/`.ts` or `futrou.yaml`/`.yml` in your project root. The CLI uses the first one it finds, in that order; YAML is converted to the equivalent JSON and validated the same way. When the CLI updates the config (`config pull`, lock refresh after a deploy) it writes it back in the same format, JSON or YAML; JS/TS configs are code and are never rewritten. Resources are arrays; `networks` are created before the serverlets that join them. The same project in each format, with every supported option (also in `examples/`):
+Describe the project in `futrou.json`, `futrou.js`/`.cjs`/`.mjs`/`.ts` or `futrou.yaml`/`.yml` in your project root. The CLI uses the first one it finds, in that order, and as a last resort a Docker Compose file (`compose.yaml`, `compose.yml`, `docker-compose.yaml`, `docker-compose.yml`), which is converted to the same structure; YAML is converted to the equivalent JSON and validated the same way. When the CLI updates the config (`config pull`, lock refresh after a deploy) it writes it back in the same format, JSON or YAML; JS/TS configs are code and are never rewritten. Resources are arrays; `networks` are created before the serverlets that join them. The same project in each format, with every supported option (also in `examples/`):
 
 #### futrou.json
 
@@ -673,8 +673,6 @@ futrou server show <id>
 futrou server create --name edge-1 --region <region-id>
 futrou server update <id> --name edge-2
 futrou server rm <id>
-futrou server reset-join <id>
-futrou server leave <id>
 futrou server logs <id>
 futrou server metrics <id>
 ```
@@ -689,6 +687,19 @@ futrou config init                # create a futrou.json with the default projec
 futrou config schema              # print the JSON Schema of futrou.json
 futrou version
 futrou license
+```
+
+### Docker Compose
+
+Without a futrou config, `futrou deploy` and `futrou down` use a Compose file: services become serverlets (`image`, `command`/`entrypoint` joined into `entrypoint`, `environment`, container `ports`, `networks`, `working_dir`, `user`, `healthcheck`, `stop_grace_period`, `deploy.replicas`), `depends_on` becomes `needs` (`service_healthy` becomes `db:healthy`), top-level `networks` become networks and named `volumes` become storages and mounts. `${VARIABLES}` are expanded. Everything else (`build`, `restart`, bind mounts, `env_file`, ...) is logged as a warning and skipped. Compose has no plans or regions, so set them in `x-futrou` mappings (top level, on a service, or on a volume); the file is never rewritten.
+
+```yaml
+name: website
+x-futrou: { workspace: acme, region: europe }
+services:
+  web:
+    image: nginx
+    x-futrou: { serverletPlanId: <serverlet-plan-id> }
 ```
 
 ### Commands
@@ -741,8 +752,6 @@ futrou server show <id>                                                         
 futrou server create --name <string> [--region <string>] [--workspace <string>]                   # Create a server in the workspace
 futrou server update <id> [--name <string>] [--ipv4 <string>] [--ipv6 <string>] [--api-port <string>]  # Update a server
 futrou server rm <id>                                                                             # Delete a server
-futrou server reset-join <id>                                                                     # Reset a server's join token
-futrou server leave <id>                                                                          # Make a server leave Futrou Cloud
 futrou server metrics <id>                                                                        # Show server metrics
 futrou server logs <id> [--type <string>] [--id <string>] [--instance-id <string>] [LOG-OPTIONS]  # View server logs
 

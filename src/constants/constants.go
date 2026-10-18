@@ -7,9 +7,14 @@ var (
 
 	Description = "Deploy and manage Futrou Cloud from your terminal."
 
+	// ComposeFiles are the Docker Compose file names, in the order the Compose
+	// spec prefers them.
+	ComposeFiles = []string{"compose.yaml", "compose.yml", "docker-compose.yaml", "docker-compose.yml"}
+
 	// ProjectConfigFiles is the project config discovery order: JSON first,
-	// then executable configuration, then YAML.
-	ProjectConfigFiles = []string{"futrou.json", "futrou.js", "futrou.cjs", "futrou.mjs", "futrou.ts", "futrou.yaml", "futrou.yml"}
+	// then executable configuration, then YAML, and last a Docker Compose file,
+	// which is converted to the futrou.json equivalent.
+	ProjectConfigFiles = append([]string{"futrou.json", "futrou.js", "futrou.cjs", "futrou.mjs", "futrou.ts", "futrou.yaml", "futrou.yml"}, ComposeFiles...)
 )
 
 const (

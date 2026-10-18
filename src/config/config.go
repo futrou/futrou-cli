@@ -556,7 +556,11 @@ func (cfg *Config) Load(dir, file string) (string, error) {
 	case ".js", ".cjs", ".mjs", ".ts":
 		err = loaded.LoadJS(path)
 	case ".yaml", ".yml":
-		err = loaded.LoadYAML(path)
+		if IsComposeFile(path) {
+			err = loaded.LoadCompose(path)
+		} else {
+			err = loaded.LoadYAML(path)
+		}
 	default:
 		err = fmt.Errorf("unsupported config file %s", path)
 	}
@@ -646,7 +650,11 @@ func (cfg *Config) Save(dir, file string) (string, error) {
 	case ".js", ".cjs", ".mjs", ".ts":
 		err = cfg.SaveJS(file)
 	case ".yaml", ".yml":
-		err = cfg.SaveYAML(file)
+		if IsComposeFile(file) {
+			err = fmt.Errorf("cannot save %s: a Docker Compose file is converted on load and never rewritten", file)
+		} else {
+			err = cfg.SaveYAML(file)
+		}
 	default:
 		err = cfg.SaveJSON(file)
 	}
@@ -658,6 +666,9 @@ func (cfg *Config) Save(dir, file string) (string, error) {
 
 // CanSave reports whether Save can write a config in the format of path.
 func CanSave(path string) bool {
+	if IsComposeFile(path) {
+		return false
+	}
 	switch strings.ToLower(filepath.Ext(path)) {
 	case ".js", ".cjs", ".mjs", ".ts":
 		return false

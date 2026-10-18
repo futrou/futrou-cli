@@ -539,3 +539,102 @@ func TestDeployRejectsInvalidNeedsBeforeCallingAPI(t *testing.T) {
 		})
 	}
 }
+
+const composeProject = `# no name: the project is not set
+services:
+  db:
+    image: postgres:17
+    x-futrou: {serverletPlanId: plan-db}
+  web:
+    image: nginx:latest
+    restart: always
+    depends_on:
+      db: {condition: service_healthy}
+    ports: ["80:8080"]
+    x-futrou: {serverletPlanId: plan-web}
+`
+
+func TestDeployDockerComposeProject(t *testing.T) {
+	for _, name := range []string{"docker-compose.yml", "compose.yaml"} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			withWorkingDirectory(t, dir)
+			if err := os.WriteFile(filepath.Join(dir, name), []byte(composeProject), 0644); err != nil {
+				t.Fatal(err)
+			}
+			ts := newTestServer(t)
+			var created []string
+			bodies := map[string]map[string]any{}
+			ts.on("GET", "/v2/serverlets", respond(http.StatusOK, []any{}))
+			ts.on("POST", "/v2/serverlets", func(w http.ResponseWriter, r *http.Request) {
+				var body map[string]any
+				decodeBody(r, &body)
+				created = append(created, body["name"].(string))
+				bodies[body["name"].(string)] = body
+				writeJSON(w, map[string]any{"id": "sl-1"})
+			})
+
+			out, err := runArgs(t, ts, "deploy", "--yes")
+			assertNoError(t, err)
+			assertContains(t, out, "Using config: "+name)
+			assertContains(t, out, "restart")
+			if strings.Join(created, ",") != "db,web" {
+				t.Fatalf("created = %v, want db before web", created)
+			}
+			web := bodies["web"]
+			if web["image"] != "nginx:latest" || web["serverletPlanId"] != "plan-web" {
+				t.Errorf("unexpected web payload: %#v", web)
+			}
+			if needs, _ := web["needs"].([]any); len(needs) != 1 || needs[0] != "db:healthy" {
+				t.Errorf("needs = %#v", web["needs"])
+			}
+			if data, _ := os.ReadFile(filepath.Join(dir, name)); string(data) != composeProject {
+				t.Fatalf("the Compose file must never be rewritten:\n%s", data)
+			}
+		})
+	}
+}
+
+func TestDeployPrefersFutrouConfigOverDockerCompose(t *testing.T) {
+	dir := t.TempDir()
+	withWorkingDirectory(t, dir)
+	if err := os.WriteFile(filepath.Join(dir, "docker-compose.yml"), []byte(composeProject), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "futrou.yaml"), []byte("storages:\n  - name: data\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	ts := newTestServer(t)
+	ts.on("GET", "/v2/storages", respond(http.StatusOK, []any{}))
+	out, err := runArgs(t, ts, "deploy", "--dry-run")
+	assertNoError(t, err)
+	assertContains(t, out, "Using config: futrou.yaml")
+	assertContains(t, out, "storage")
+}
+
+func TestDeployInvalidDockerComposeFailsBeforeCallingAPI(t *testing.T) {
+	dir := t.TempDir()
+	withWorkingDirectory(t, dir)
+	if err := os.WriteFile(filepath.Join(dir, "docker-compose.yml"), []byte("services:\n  web:\n    image: x\n    depends_on: [web]\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	ts := newTestServer(t) // any request fails the test
+	_, err := runArgs(t, ts, "deploy", "--yes")
+	assertError(t, err)
+	assertContains(t, err.Error(), "docker-compose.yml")
+}
+
+func TestDownWithDockerComposeProject(t *testing.T) {
+	dir := t.TempDir()
+	withWorkingDirectory(t, dir)
+	compose := "name: demo\nx-futrou: {workspace: \"" + downWorkspaceID + "\"}\nservices:\n  web:\n    image: x\n"
+	if err := os.WriteFile(filepath.Join(dir, "docker-compose.yml"), []byte(compose), 0644); err != nil {
+		t.Fatal(err)
+	}
+	ts, deleted := downServer(t)
+	_, err := runArgs(t, ts, "down", "--yes")
+	assertNoError(t, err)
+	if len(*deleted) != 7 {
+		t.Fatalf("expected the project to be torn down, got %v", *deleted)
+	}
+}

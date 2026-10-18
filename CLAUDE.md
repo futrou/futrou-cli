@@ -36,10 +36,14 @@ declarative `futrou.json` model in `src/config/`, its validators in
    every supported option and must stay equivalent (a test checks it). Add every new
    `futrou.json` option to all three. `make build-docs` embeds them in `SKILL.md`; `README.md` only links to them.
 5. **Config formats:** discovery order is `futrou.json`, `futrou.js`, `futrou.cjs`,
-   `futrou.mjs`, `futrou.ts`, `futrou.yaml`, `futrou.yml`. YAML is converted to the JSON
+   `futrou.mjs`, `futrou.ts`, `futrou.yaml`, `futrou.yml`, then a Docker Compose file (`compose.yaml`,
+   `compose.yml`, `docker-compose.yaml`, `docker-compose.yml`). YAML is converted to the JSON
    equivalent (`Config.LoadYAML`) and then validated like JSON. Loading is `Config.Load`, which
    dispatches to `LoadJSON`/`LoadJS`/`LoadYAML`; saving is `Config.Save`, which dispatches to
-   `SaveJSON`/`SaveYAML` and keeps the file's format (`SaveJS` is unsupported: JS/TS configs are code).
+   `SaveJSON`/`SaveYAML` and keeps the file's format (`SaveJS` is unsupported: JS/TS configs are code). Compose files are converted by
+   `ConvertCompose`/`Config.LoadCompose` (`src/config/compose.go`), warn about every option they
+   cannot convert, take Futrou-only settings from `x-futrou`, and are never saved. Support a new
+   Compose option there and in `examples/docker-compose.yml`.
 6. **Region:** top-level `region` (name or ID) defaults `regionId` of networks, serverlets,
    proxies, storages and crons (not DNS); a resource's own `regionId` wins.
    `entrypoint` is one string; an array is joined with spaces (`config.Entrypoint`).

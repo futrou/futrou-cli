@@ -159,18 +159,6 @@ var serverCommand = &cli.Command{
 			},
 		},
 		{
-			Name:      "reset-join",
-			Usage:     "Reset a server's join token",
-			ArgsUsage: "<id>",
-			Action:    serverAction("POST", "/reset-join", "✓ Server join token reset"),
-		},
-		{
-			Name:      "leave",
-			Usage:     "Make a server leave Futrou Cloud",
-			ArgsUsage: "<id>",
-			Action:    serverAction("POST", "/leave", "✓ Server left"),
-		},
-		{
 			Name:      "metrics",
 			Usage:     "Show server metrics",
 			ArgsUsage: "<id>",

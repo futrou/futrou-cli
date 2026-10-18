@@ -451,7 +451,7 @@ func TestLoadConfigYAMLTimestampsBecomeStrings(t *testing.T) {
 }
 
 func TestLoadConfigDiscoveryOrder(t *testing.T) {
-	order := []string{"futrou.json", "futrou.js", "futrou.cjs", "futrou.mjs", "futrou.ts", "futrou.yaml", "futrou.yml"}
+	order := []string{"futrou.json", "futrou.js", "futrou.cjs", "futrou.mjs", "futrou.ts", "futrou.yaml", "futrou.yml", "compose.yaml", "compose.yml", "docker-compose.yaml", "docker-compose.yml"}
 	dir := t.TempDir()
 	for _, name := range order {
 		writeFile(t, dir, name, "")

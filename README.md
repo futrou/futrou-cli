@@ -56,11 +56,12 @@ Every resource has the same verbs: `ls`, `show`, `create`, `update` and `rm` (th
 
 ## Configuration
 
-The project is described in the first of these files found in the current directory (or the one given with `-f`): `futrou.json`, `futrou.js`, `futrou.cjs`, `futrou.mjs`, `futrou.ts`, `futrou.yaml`, `futrou.yml`. YAML is converted to the JSON form and validated the same way. When the CLI updates the file (`config pull`, or the lock refresh after a deploy) it keeps the format; JS and TS configs are code and are never rewritten.
+The project is described in the first of these files found in the current directory (or the one given with `-f`): `futrou.json`, `futrou.js`, `futrou.cjs`, `futrou.mjs`, `futrou.ts`, `futrou.yaml`, `futrou.yml`, and last a Docker Compose file (`compose.yaml`, `compose.yml`, `docker-compose.yaml`, `docker-compose.yml`). YAML is converted to the JSON form and validated the same way. When the CLI updates the file (`config pull`, or the lock refresh after a deploy) it keeps the format; JS and TS configs are code and are never rewritten.
 
 - `region` sets the default region (name or ID) of every resource except DNS; a resource's own `regionId` wins.
 - A serverlet's `needs` lists the serverlets it waits for: `db`, `db:started` or `db:healthy`. They are created after, and deleted before, the ones they need.
 - A serverlet's `entrypoint` is one string such as `node server.js`.
+- **Docker Compose:** with no futrou config, `futrou deploy` converts the Compose file: services become serverlets, networks and named volumes become networks and storages, `depends_on` becomes `needs`. Options without a Futrou equivalent are logged as warnings and skipped. Futrou-only settings such as `serverletPlanId` go in `x-futrou` mappings; see [examples/docker-compose.yml](examples/docker-compose.yml). The Compose file is never rewritten.
 
 Every option is set in [examples/futrou.json](examples/futrou.json), [examples/futrou.yaml](examples/futrou.yaml) and [examples/futrou.mjs](examples/futrou.mjs). `futrou init config` creates a starter file.
 
@@ -116,8 +117,6 @@ futrou server show <id>                                                         
 futrou server create --name <string> [--region <string>] [--workspace <string>]                   # Create a server in the workspace
 futrou server update <id> [--name <string>] [--ipv4 <string>] [--ipv6 <string>] [--api-port <string>]  # Update a server
 futrou server rm <id>                                                                             # Delete a server
-futrou server reset-join <id>                                                                     # Reset a server's join token
-futrou server leave <id>                                                                          # Make a server leave Futrou Cloud
 futrou server metrics <id>                                                                        # Show server metrics
 futrou server logs <id> [--type <string>] [--id <string>] [--instance-id <string>] [LOG-OPTIONS]  # View server logs
 

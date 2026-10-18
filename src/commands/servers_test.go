@@ -2,6 +2,7 @@ package commands
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 )
 
@@ -88,21 +89,19 @@ func TestServerLogsTypeIDAndInstanceParams(t *testing.T) {
 	assertContains(t, out, "srv-line")
 }
 
-func TestServerShowResetJoinLeaveAndMetrics(t *testing.T) {
+func TestServerShowAndRemovedSubcommands(t *testing.T) {
 	ts := newTestServer(t)
 	ts.on("GET", "/v2/servers/srv-1", respond(200, map[string]any{"id": "srv-1", "name": "edge-detail"}))
-	ts.on("POST", "/v2/servers/srv-1/reset-join", respondEmpty)
-	ts.on("POST", "/v2/servers/srv-1/leave", respondEmpty)
 	out, err := runArgs(t, ts, "server", "show", "srv-1")
 	assertNoError(t, err)
 	assertContains(t, out, "edge-detail")
-	out, err = runArgs(t, ts, "server", "reset-join", "srv-1")
-	assertNoError(t, err)
-	assertContains(t, out, "reset")
-	out, err = runArgs(t, ts, "server", "leave", "srv-1")
-	assertNoError(t, err)
-	assertContains(t, out, "left")
-	for _, sub := range []string{"show", "reset-join", "leave", "metrics", "logs", "update", "rm"} {
+	help, _ := runArgs(t, ts, "server", "--help")
+	for _, removed := range []string{"reset-join", "leave"} {
+		if strings.Contains(help, removed) {
+			t.Errorf("server %s was removed but is still listed:\n%s", removed, help)
+		}
+	}
+	for _, sub := range []string{"show", "metrics", "logs", "update", "rm"} {
 		_, err := runArgs(t, ts, "server", sub)
 		assertError(t, err)
 	}

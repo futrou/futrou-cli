@@ -16,7 +16,7 @@ var downCommand = &cli.Command{
 		&cli.StringFlag{
 			Name:    "file",
 			Aliases: []string{"f"},
-			Usage:   "Config file (default: auto-detect futrou.json|yaml etc.)",
+			Usage:   "Config file (default: auto-detect futrou.json|yaml, then docker-compose.yml)",
 		},
 		&cli.BoolFlag{
 			Name:    "yes",

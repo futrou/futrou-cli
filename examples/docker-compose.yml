@@ -1,0 +1,62 @@
+# docker-compose.yml (or compose.yaml) is used when no futrou.json|yaml|js|ts
+# exists. It is converted to the equivalent futrou.json, so `futrou deploy`
+# works with it. Options that have no Futrou equivalent are logged as warnings
+# and skipped. The Futrou-only settings go in `x-futrou`.
+name: website # becomes the project
+
+x-futrou: # merged into the top level of futrou.json
+  workspace: acme
+  region: <region-name-or-id>
+
+services:
+  web:
+    image: ghcr.io/acme/web:1.4.2
+    entrypoint: node server.js # entrypoint and command are joined into one command
+    working_dir: /app # cwd
+    user: node
+    environment: # a mapping or a list of KEY=value
+      NODE_ENV: production
+      PORT: "8080"
+    ports:
+      - "80:8080" # only the container port is used: 8080
+    networks: [backend]
+    volumes:
+      - uploads:/data # named volumes become storage mounts
+    depends_on:
+      db:
+        condition: service_healthy # becomes needs: db:healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 1m # startTimeout
+    stop_grace_period: 30s # stopTimeout
+    deploy:
+      replicas: 2 # minInstances and maxInstances
+    x-futrou: # merged into the serverlet
+      serverletPlanId: <serverlet-plan-id>
+      regionId: <region-id>
+
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-change-me} # ${VARIABLES} are expanded
+    networks: [backend]
+    healthcheck:
+      test: pg_isready -U postgres
+      interval: 10s
+    x-futrou:
+      serverletPlanId: <serverlet-plan-id>
+
+networks:
+  backend:
+    internal: false
+    ipam:
+      config:
+        - subnet: 10.20.0.0/24
+
+volumes:
+  uploads:
+    x-futrou: # merged into the storage
+      storagePlanId: <storage-plan-id>

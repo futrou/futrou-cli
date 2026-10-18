@@ -136,7 +136,7 @@ func TestHelpMentionsJSONAndYAMLConfig(t *testing.T) {
 	for _, args := range [][]string{{"deploy", "--help"}, {"down", "--help"}} {
 		out, err := captureRun(append([]string{"futrou"}, args...))
 		assertNoError(t, err)
-		assertContains(t, out, "auto-detect futrou.json|yaml")
+		assertContains(t, out, "auto-detect futrou.json|yaml, then docker-compose.yml")
 	}
 }
 
