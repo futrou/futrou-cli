@@ -3,7 +3,11 @@
 # futrou.yaml (or futrou.yml) is converted to the equivalent futrou.json and
 # then validated and deployed exactly like it. Every option is shown below.
 # Config files are looked up in this order: futrou.json, futrou.js, futrou.cjs,
-# futrou.mjs, futrou.ts, futrou.yaml, futrou.yml.
+# futrou.mjs, futrou.ts, futrou.yaml, futrou.yml, then a Docker Compose file.
+#
+# Like services in Docker Compose, every collection can be written as a list
+# of items with a name, or as an object whose keys are the names (the domain
+# for proxies and dns). A `name` set inside an item wins over its key.
 
 $schema: https://futrou.com/futrou.schema.json
 workspace: acme # workspace name or ID
@@ -11,18 +15,29 @@ project: website # project name or ID; the deploy target
 region: <region-name-or-id> # default region (name or ID) of every resource below
 
 networks:
-  - name: backend
+  backend:
     ipv4: 10.20.0.0/24
     ipv6: fd00:20::/64
     internal: false # true = no outbound access
 
 storages:
-  - name: uploads
+  uploads:
     storagePlanId: <storage-plan-id>
     public: false
 
 serverlets:
-  - name: web
+  db:
+    image: postgres:17
+    serverletPlanId: <serverlet-plan-id>
+    env:
+      POSTGRES_PASSWORD: change-me
+    healthcheck: pg_isready -U postgres
+    healthcheckInterval: 10
+    ports:
+      - port: 5432
+    networks: [backend]
+
+  web:
     image: ghcr.io/acme/web:1.4.2
     serverletPlanId: <serverlet-plan-id>
     regionId: <region-id> # overrides the project region for this serverlet only
@@ -53,19 +68,8 @@ serverlets:
     strategy:
       type: rolling
 
-  - name: db
-    image: postgres:17
-    serverletPlanId: <serverlet-plan-id>
-    env:
-      POSTGRES_PASSWORD: change-me
-    healthcheck: pg_isready -U postgres
-    healthcheckInterval: 10
-    ports:
-      - port: 5432
-    networks: [backend]
-
 proxies:
-  - domain: www.example.com
+  www.example.com: # the key is the domain
     type: http # http, tcp or udp
     target: web
     port: 8080
@@ -81,7 +85,7 @@ proxies:
     proxyPlanId: <proxy-plan-id>
 
 dns:
-  - domain: example.com
+  example.com: # the key is the domain
     name: example.com
     ttl: 300
     priority: 0
@@ -97,7 +101,7 @@ dns:
         priority: 10
 
 crons:
-  - name: cleanup
+  cleanup:
     type: simple # simple (HTTP request) or code
     schedule: "30 14 * * *" # cron expression
     method: POST

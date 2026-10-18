@@ -167,3 +167,19 @@ func TestDownJSONPrintsPlan(t *testing.T) {
 	assertNoError(t, err)
 	assertContains(t, out, "project")
 }
+
+func TestDownProjectSelectsTheMatchingConfigFile(t *testing.T) {
+	dir := t.TempDir()
+	withWorkingDirectory(t, dir)
+	writeFiles(t, dir, map[string]string{
+		"futrou.json":      `{"workspace":"` + downWorkspaceID + `","project":"other"}`,
+		"futrou.prod.json": `{"workspace":"` + downWorkspaceID + `","project":"demo"}`,
+	})
+	ts, deleted := downServer(t)
+	out, err := runArgs(t, ts, "down", "--project", "prod", "--yes")
+	assertNoError(t, err)
+	assertContains(t, out, "Using config: futrou.prod.json")
+	if len(*deleted) != 7 {
+		t.Fatalf("the project of futrou.prod.json must be torn down: %v", *deleted)
+	}
+}

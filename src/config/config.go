@@ -267,6 +267,24 @@ func (cfg *Config) ToJSONSchema() map[string]interface{} {
 	schema := validators.ConfigValidator.ToJSONSchema()
 	schema["$id"] = constants.ProjectConfigSchemaURL
 	if properties, ok := schema["properties"].(map[string]interface{}); ok {
+		// Each collection is a list, or an object keyed by name.
+		for collection := range keyedCollections {
+			list, ok := properties[collection].(map[string]interface{})
+			if !ok {
+				continue
+			}
+			item, _ := list["items"].(map[string]interface{})
+			keyed := map[string]interface{}{
+				"type":                 "object",
+				"description":          "The same items as an object whose keys are the " + keyedCollections[collection] + "s.",
+				"additionalProperties": item,
+			}
+			properties[collection] = map[string]interface{}{
+				"description": list["description"],
+				"oneOf":       []interface{}{list, keyed},
+			}
+			delete(list, "description")
+		}
 		properties["locks"] = map[string]interface{}{
 			"description":          "CLI-maintained opaque resource lock fingerprints.",
 			"type":                 "object",
@@ -545,7 +563,23 @@ var ErrNoFutrouConfig = errors.New("no Futrou config found")
 // the extension and read by LoadJSON, LoadJS or LoadYAML. It returns the path
 // that was loaded.
 func (cfg *Config) Load(dir, file string) (string, error) {
-	path, err := findConfig(dir, file)
+	return cfg.LoadProject(dir, file, "")
+}
+
+// LoadProject is Load for a named project. Without a file it first looks for
+// futrou.<project>.json (and the other formats, in the usual order), so one
+// directory can hold several projects (futrou.dev.json, futrou.prod.json).
+// When no such file exists it falls back to the default config and the config
+// is renamed to the project; a project file that names no project of its own
+// is named after the project too. With an empty project the default
+// discovery applies: futrou.* and then a Docker Compose file.
+func (cfg *Config) LoadProject(dir, file, project string) (string, error) {
+	if project != "" {
+		if err := ValidateProjectFileName(project); err != nil {
+			return "", err
+		}
+	}
+	path, projectFile, err := findProjectConfig(dir, file, project)
 	if err != nil {
 		return "", err
 	}
@@ -567,8 +601,20 @@ func (cfg *Config) Load(dir, file string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if project != "" && (!projectFile || loaded.Project == "") {
+		loaded.Project = project
+	}
 	*cfg = *loaded
 	return path, nil
+}
+
+// ValidateProjectFileName rejects project names that cannot be part of a
+// config file name.
+func ValidateProjectFileName(project string) error {
+	if project == "" || strings.ContainsAny(project, `/\`) || strings.Contains(project, "..") || strings.HasPrefix(project, ".") {
+		return fmt.Errorf("invalid project name %q for a config file name", project)
+	}
+	return nil
 }
 
 // LoadJSON replaces cfg with the configuration in the JSON file at path,
@@ -602,6 +648,66 @@ func (cfg *Config) LoadYAML(path string) error {
 	return cfg.loadDocument(path, raw)
 }
 
+// keyedCollections are the collections that can be written as an object keyed
+// by the resource's name instead of a list, like services in Docker Compose.
+// The value is the field the key fills in: the name, or the domain for
+// resources that are identified by their domain.
+var keyedCollections = map[string]string{
+	"networks":   "name",
+	"storages":   "name",
+	"serverlets": "name",
+	"crons":      "name",
+	"proxies":    "domain",
+	"dns":        "domain",
+}
+
+// normalizeKeyedCollections turns every collection written as an object into
+// the equivalent list: each key becomes the item's name (or domain), unless
+// the item sets it itself (a dns zone also gets its name). Items are ordered by key. Anything that is not an
+// object is left for the validators to reject.
+func normalizeKeyedCollections(object map[string]interface{}) {
+	for collection, field := range keyedCollections {
+		keyed, ok := object[collection].(map[string]interface{})
+		if !ok {
+			continue
+		}
+		keys := make([]string, 0, len(keyed))
+		for key := range keyed {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		items := make([]interface{}, 0, len(keys))
+		for _, key := range keys {
+			switch value := keyed[key].(type) {
+			case nil:
+				item := map[string]interface{}{field: key}
+				if collection == "dns" {
+					item["name"] = key
+				}
+				items = append(items, item)
+			case map[string]interface{}:
+				item := make(map[string]interface{}, len(value)+1)
+				for k, v := range value {
+					item[k] = v
+				}
+				if text, _ := item[field].(string); text == "" {
+					item[field] = key
+				}
+				if collection == "dns" {
+					// A zone has both a domain and a name; fill in the one that is missing.
+					if text, _ := item["name"].(string); text == "" {
+						item["name"] = item["domain"]
+					}
+				}
+				items = append(items, item)
+			default:
+				items = append(items, value) // not an object: the validators report it
+			}
+		}
+		object[collection] = items
+	}
+}
+
 // loadDocument validates a JSON document and decodes it into cfg. path is
 // only used in error messages.
 func (cfg *Config) loadDocument(path string, raw []byte) error {
@@ -611,6 +717,7 @@ func (cfg *Config) loadDocument(path string, raw []byte) error {
 	if err := decoder.Decode(&object); err != nil {
 		return fmt.Errorf("parsing %s: %w", path, err)
 	}
+	normalizeKeyedCollections(object)
 	// Validators work with float64; normalize JSON numbers after preserving the
 	// strict decode above, so 1.2 cannot silently become an integer.
 	plain, err := json.Marshal(object)
@@ -764,8 +871,14 @@ func (cfg *Config) ToYAML() ([]byte, error) {
 
 // LoadConfig returns the configuration found by Config.Load and its path.
 func LoadConfig(dir, file string) (*Config, string, error) {
+	return LoadProjectConfig(dir, file, "")
+}
+
+// LoadProjectConfig returns the configuration found by Config.LoadProject and
+// its path.
+func LoadProjectConfig(dir, file, project string) (*Config, string, error) {
 	cfg := &Config{}
-	path, err := cfg.Load(dir, file)
+	path, err := cfg.LoadProject(dir, file, project)
 	if err != nil {
 		return nil, "", err
 	}
@@ -778,6 +891,22 @@ func SaveConfig(dir, file string, cfg *Config) (string, error) {
 		return "", fmt.Errorf("configuration is required")
 	}
 	return cfg.Save(dir, file)
+}
+
+// findProjectConfig resolves the file to load. It reports whether the file is
+// specific to the project (futrou.<project>.*), as opposed to the default
+// config used as a fallback.
+func findProjectConfig(dir, file, project string) (path string, projectFile bool, err error) {
+	if file == "" && project != "" {
+		for _, name := range constants.ProjectConfigFilesFor(project) {
+			candidate := filepath.Join(dir, name)
+			if info, statErr := os.Stat(candidate); statErr == nil && !info.IsDir() {
+				return candidate, true, nil
+			}
+		}
+	}
+	path, err = findConfig(dir, file)
+	return path, false, err
 }
 
 func findConfig(dir, file string) (string, error) {

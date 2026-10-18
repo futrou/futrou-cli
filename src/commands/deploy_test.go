@@ -638,3 +638,134 @@ func TestDownWithDockerComposeProject(t *testing.T) {
 		t.Fatalf("expected the project to be torn down, got %v", *deleted)
 	}
 }
+
+func TestDeployKeyedYAMLCollections(t *testing.T) {
+	dir := t.TempDir()
+	withWorkingDirectory(t, dir)
+	config := "serverlets:\n  web:\n    image: nginx\n    needs: [db]\n  db:\n    image: postgres\nstorages:\n  data: {storagePlanId: sp-1}\n"
+	if err := os.WriteFile(filepath.Join(dir, "futrou.yaml"), []byte(config), 0644); err != nil {
+		t.Fatal(err)
+	}
+	ts := newTestServer(t)
+	var created []string
+	ts.on("GET", "/v2/serverlets", respond(http.StatusOK, []any{}))
+	ts.on("GET", "/v2/storages", respond(http.StatusOK, []any{}))
+	for _, resource := range []string{"serverlets", "storages"} {
+		ts.on("POST", "/v2/"+resource, func(w http.ResponseWriter, r *http.Request) {
+			var body map[string]any
+			decodeBody(r, &body)
+			created = append(created, resource+":"+body["name"].(string))
+			writeJSON(w, map[string]any{"id": "x"})
+		})
+	}
+	_, err := runArgs(t, ts, "deploy", "--yes")
+	assertNoError(t, err)
+	if strings.Join(created, ",") != "serverlets:db,serverlets:web,storages:data" {
+		t.Fatalf("created = %v", created)
+	}
+}
+
+func writeFiles(t *testing.T, dir string, files map[string]string) {
+	t.Helper()
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// storageServer mocks a workspace "acme" holding the projects main, prod, dev
+// and qa, all empty, and records the storages that get created.
+func storageServer(t *testing.T) (*testServer, *[]string) {
+	ts := newTestServer(t)
+	var created []string
+	ts.on("GET", "/v2/workspaces", respond(http.StatusOK, []any{map[string]any{"id": "ws-1", "name": "acme"}}))
+	ts.on("GET", "/v2/workspaces/ws-1", respond(http.StatusOK, map[string]any{"id": "ws-1", "name": "acme"}))
+	var projects []any
+	for _, name := range []string{"main", "prod", "dev", "qa", "shop-prod"} {
+		projects = append(projects, map[string]any{"id": "proj-" + name, "name": name, "workspaceId": "ws-1"})
+	}
+	ts.on("GET", "/v2/projects", respond(http.StatusOK, projects))
+	for _, path := range []string{"/v2/networks", "/v2/serverlets", "/v2/dns", "/v2/proxies", "/v2/crons"} {
+		ts.on("GET", path, respond(http.StatusOK, []any{}))
+	}
+	ts.on("GET", "/v2/storages", respond(http.StatusOK, []any{}))
+	ts.on("POST", "/v2/storages", func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		decodeBody(r, &body)
+		created = append(created, body["name"].(string))
+		writeJSON(w, map[string]any{"id": "st-1"})
+	})
+	return ts, &created
+}
+
+func TestDeployProjectSelectsTheMatchingConfigFile(t *testing.T) {
+	files := map[string]string{
+		"futrou.json":      `{"workspace":"acme","project":"main","storages":[{"name":"from-json"}]}`,
+		"futrou.prod.json": `{"workspace":"acme","storages":[{"name":"from-prod"}]}`,
+		"futrou.dev.yaml":  "workspace: acme\nstorages:\n  from-dev: {}\n",
+	}
+	for name, tc := range map[string]struct {
+		args []string
+		file string
+		want string
+	}{
+		"no project uses futrou.json": {[]string{"deploy", "--yes"}, "futrou.json", "from-json"},
+		"--project prod":              {[]string{"deploy", "--project", "prod", "--yes"}, "futrou.prod.json", "from-prod"},
+		"-p dev reads the yaml":       {[]string{"deploy", "-p", "dev", "--yes"}, "futrou.dev.yaml", "from-dev"},
+		"unknown project falls back":  {[]string{"deploy", "-p", "qa", "--yes"}, "futrou.json", "from-json"},
+		"-f beats the project":        {[]string{"deploy", "-p", "prod", "-f", "futrou.json", "--yes"}, "futrou.json", "from-json"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			withWorkingDirectory(t, dir)
+			writeFiles(t, dir, files)
+			ts, created := storageServer(t)
+			out, err := runArgs(t, ts, tc.args...)
+			assertNoError(t, err)
+			assertContains(t, out, "Using config: "+tc.file)
+			if strings.Join(*created, ",") != tc.want {
+				t.Fatalf("created = %v, want %s", *created, tc.want)
+			}
+		})
+	}
+}
+
+func TestDeployWithoutDefaultFilesUsesFutrouJSON(t *testing.T) {
+	dir := t.TempDir()
+	withWorkingDirectory(t, dir)
+	writeFiles(t, dir, map[string]string{"futrou.json": `{"workspace":"acme","project":"main","storages":[{"name":"plain"}]}`, "futrou.prod.json": `{"storages":[{"name":"prod"}]}`})
+	ts, created := storageServer(t)
+	out, err := runArgs(t, ts, "deploy", "--yes")
+	assertNoError(t, err)
+	assertContains(t, out, "Using config: futrou.json")
+	if strings.Join(*created, ",") != "plain" {
+		t.Fatalf("a project file is only used when asked for: %v", *created)
+	}
+}
+
+func TestDeployProjectDoesNotRewriteTheDefaultConfig(t *testing.T) {
+	dir := t.TempDir()
+	withWorkingDirectory(t, dir)
+	main := `{"workspace":"acme","project":"main"}`
+	writeFiles(t, dir, map[string]string{
+		"futrou.json":      main,
+		"futrou.prod.json": `{"workspace":"acme","storages":[{"name":"prod"}]}`,
+	})
+	ts, _ := storageServer(t)
+	_, err := runArgs(t, ts, "deploy", "-p", "prod", "--yes")
+	assertNoError(t, err)
+	if data, _ := os.ReadFile(filepath.Join(dir, "futrou.json")); string(data) != main {
+		t.Fatalf("deploying futrou.prod.json must not touch futrou.json: %s", data)
+	}
+}
+
+func TestDeployRejectsInvalidProjectNames(t *testing.T) {
+	dir := t.TempDir()
+	withWorkingDirectory(t, dir)
+	writeFiles(t, dir, map[string]string{"futrou.json": `{}`})
+	ts := newTestServer(t) // any request fails the test
+	_, err := runArgs(t, ts, "deploy", "-p", "../etc/passwd", "--yes")
+	assertError(t, err)
+	assertContains(t, err.Error(), "invalid project name")
+}

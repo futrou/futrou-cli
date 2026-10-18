@@ -77,7 +77,7 @@ futrou whoami
 
 ### Deploy (declarative)
 
-Describe the project in `futrou.json`, `futrou.js`/`.cjs`/`.mjs`/`.ts` or `futrou.yaml`/`.yml` in your project root. The CLI uses the first one it finds, in that order, and as a last resort a Docker Compose file (`compose.yaml`, `compose.yml`, `docker-compose.yaml`, `docker-compose.yml`), which is converted to the same structure; YAML is converted to the equivalent JSON and validated the same way. When the CLI updates the config (`config pull`, lock refresh after a deploy) it writes it back in the same format, JSON or YAML; JS/TS configs are code and are never rewritten. Resources are arrays; `networks` are created before the serverlets that join them. The same project in each format, with every supported option (also in `examples/`):
+Describe the project in `futrou.json`, `futrou.js`/`.cjs`/`.mjs`/`.ts` or `futrou.yaml`/`.yml` in your project root. The CLI uses the first one it finds, in that order, and as a last resort a Docker Compose file (`compose.yaml`, `compose.yml`, `docker-compose.yaml`, `docker-compose.yml`), which is converted to the same structure; YAML is converted to the equivalent JSON and validated the same way. When the CLI updates the config (`config pull`, lock refresh after a deploy) it writes it back in the same format, JSON or YAML; JS/TS configs are code and are never rewritten. Resources are arrays, or objects keyed by name like Docker Compose services (`serverlets: { web: { image: nginx } }`; the key is the domain for `proxies` and `dns`, and a `name` inside an item wins); `networks` are created before the serverlets that join them. The same project in each format, with every supported option (also in `examples/`):
 
 #### futrou.json
 
@@ -89,24 +89,38 @@ Describe the project in `futrou.json`, `futrou.js`/`.cjs`/`.mjs`/`.ts` or `futro
   "workspace": "acme",
   "project": "website",
   "region": "<region-name-or-id>",
-  "networks": [
-    {
-      "name": "backend",
+  "networks": {
+    "backend": {
       "ipv4": "10.20.0.0/24",
       "ipv6": "fd00:20::/64",
       "internal": false
     }
-  ],
-  "storages": [
-    {
-      "name": "uploads",
+  },
+  "storages": {
+    "uploads": {
       "storagePlanId": "<storage-plan-id>",
       "public": false
     }
-  ],
-  "serverlets": [
-    {
-      "name": "web",
+  },
+  "serverlets": {
+    "db": {
+      "image": "postgres:17",
+      "serverletPlanId": "<serverlet-plan-id>",
+      "env": {
+        "POSTGRES_PASSWORD": "change-me"
+      },
+      "ports": [
+        {
+          "port": 5432
+        }
+      ],
+      "networks": [
+        "backend"
+      ],
+      "healthcheck": "pg_isready -U postgres",
+      "healthcheckInterval": 10
+    },
+    "web": {
       "image": "ghcr.io/acme/web:1.4.2",
       "serverletPlanId": "<serverlet-plan-id>",
       "regionId": "<region-id>",
@@ -146,29 +160,10 @@ Describe the project in `futrou.json`, `futrou.js`/`.cjs`/`.mjs`/`.ts` or `futro
       "strategy": {
         "type": "rolling"
       }
-    },
-    {
-      "name": "db",
-      "image": "postgres:17",
-      "serverletPlanId": "<serverlet-plan-id>",
-      "env": {
-        "POSTGRES_PASSWORD": "change-me"
-      },
-      "ports": [
-        {
-          "port": 5432
-        }
-      ],
-      "networks": [
-        "backend"
-      ],
-      "healthcheck": "pg_isready -U postgres",
-      "healthcheckInterval": 10
     }
-  ],
-  "proxies": [
-    {
-      "domain": "www.example.com",
+  },
+  "proxies": {
+    "www.example.com": {
       "type": "http",
       "target": "web",
       "port": 8080,
@@ -183,10 +178,9 @@ Describe the project in `futrou.json`, `futrou.js`/`.cjs`/`.mjs`/`.ts` or `futro
       "verifyTls": true,
       "proxyPlanId": "<proxy-plan-id>"
     }
-  ],
-  "dns": [
-    {
-      "domain": "example.com",
+  },
+  "dns": {
+    "example.com": {
       "name": "example.com",
       "ttl": 300,
       "priority": 0,
@@ -206,10 +200,9 @@ Describe the project in `futrou.json`, `futrou.js`/`.cjs`/`.mjs`/`.ts` or `futro
         }
       ]
     }
-  ],
-  "crons": [
-    {
-      "name": "cleanup",
+  },
+  "crons": {
+    "cleanup": {
       "type": "simple",
       "schedule": "30 14 * * *",
       "method": "POST",
@@ -221,7 +214,7 @@ Describe the project in `futrou.json`, `futrou.js`/`.cjs`/`.mjs`/`.ts` or `futro
       "enabled": true,
       "cronPlanId": "<cron-plan-id>"
     }
-  ]
+  }
 }
 ```
 
@@ -237,7 +230,11 @@ Describe the project in `futrou.json`, `futrou.js`/`.cjs`/`.mjs`/`.ts` or `futro
 # futrou.yaml (or futrou.yml) is converted to the equivalent futrou.json and
 # then validated and deployed exactly like it. Every option is shown below.
 # Config files are looked up in this order: futrou.json, futrou.js, futrou.cjs,
-# futrou.mjs, futrou.ts, futrou.yaml, futrou.yml.
+# futrou.mjs, futrou.ts, futrou.yaml, futrou.yml, then a Docker Compose file.
+#
+# Like services in Docker Compose, every collection can be written as a list
+# of items with a name, or as an object whose keys are the names (the domain
+# for proxies and dns). A `name` set inside an item wins over its key.
 
 $schema: https://futrou.com/futrou.schema.json
 workspace: acme # workspace name or ID
@@ -245,18 +242,29 @@ project: website # project name or ID; the deploy target
 region: <region-name-or-id> # default region (name or ID) of every resource below
 
 networks:
-  - name: backend
+  backend:
     ipv4: 10.20.0.0/24
     ipv6: fd00:20::/64
     internal: false # true = no outbound access
 
 storages:
-  - name: uploads
+  uploads:
     storagePlanId: <storage-plan-id>
     public: false
 
 serverlets:
-  - name: web
+  db:
+    image: postgres:17
+    serverletPlanId: <serverlet-plan-id>
+    env:
+      POSTGRES_PASSWORD: change-me
+    healthcheck: pg_isready -U postgres
+    healthcheckInterval: 10
+    ports:
+      - port: 5432
+    networks: [backend]
+
+  web:
     image: ghcr.io/acme/web:1.4.2
     serverletPlanId: <serverlet-plan-id>
     regionId: <region-id> # overrides the project region for this serverlet only
@@ -287,19 +295,8 @@ serverlets:
     strategy:
       type: rolling
 
-  - name: db
-    image: postgres:17
-    serverletPlanId: <serverlet-plan-id>
-    env:
-      POSTGRES_PASSWORD: change-me
-    healthcheck: pg_isready -U postgres
-    healthcheckInterval: 10
-    ports:
-      - port: 5432
-    networks: [backend]
-
 proxies:
-  - domain: www.example.com
+  www.example.com: # the key is the domain
     type: http # http, tcp or udp
     target: web
     port: 8080
@@ -315,7 +312,7 @@ proxies:
     proxyPlanId: <proxy-plan-id>
 
 dns:
-  - domain: example.com
+  example.com: # the key is the domain
     name: example.com
     ttl: 300
     priority: 0
@@ -331,7 +328,7 @@ dns:
         priority: 10
 
 crons:
-  - name: cleanup
+  cleanup:
     type: simple # simple (HTTP request) or code
     schedule: "30 14 * * *" # cron expression
     method: POST
@@ -353,6 +350,9 @@ crons:
 // futrou.mjs — an ES module. The default export may be an object, or a
 // function (sync or async) returning one. Because it is real code you can
 // compute values, for example from environment variables.
+//
+// Collections are objects keyed by name (the domain for proxies and dns); a
+// list of items with a name works too.
 const region = process.env.FUTROU_REGION ?? "<region-name-or-id>";
 
 export default {
@@ -360,24 +360,38 @@ export default {
   "workspace": "acme",
   "project": "website",
   "region": region,
-  "networks": [
-    {
-      "name": "backend",
+  "networks": {
+    "backend": {
       "ipv4": "10.20.0.0/24",
       "ipv6": "fd00:20::/64",
       "internal": false
     }
-  ],
-  "storages": [
-    {
-      "name": "uploads",
+  },
+  "storages": {
+    "uploads": {
       "storagePlanId": "<storage-plan-id>",
       "public": false
     }
-  ],
-  "serverlets": [
-    {
-      "name": "web",
+  },
+  "serverlets": {
+    "db": {
+      "image": "postgres:17",
+      "serverletPlanId": "<serverlet-plan-id>",
+      "env": {
+        "POSTGRES_PASSWORD": "change-me"
+      },
+      "ports": [
+        {
+          "port": 5432
+        }
+      ],
+      "networks": [
+        "backend"
+      ],
+      "healthcheck": "pg_isready -U postgres",
+      "healthcheckInterval": 10
+    },
+    "web": {
       "image": "ghcr.io/acme/web:1.4.2",
       "serverletPlanId": "<serverlet-plan-id>",
       "regionId": "<region-id>",
@@ -417,29 +431,10 @@ export default {
       "strategy": {
         "type": "rolling"
       }
-    },
-    {
-      "name": "db",
-      "image": "postgres:17",
-      "serverletPlanId": "<serverlet-plan-id>",
-      "env": {
-        "POSTGRES_PASSWORD": "change-me"
-      },
-      "ports": [
-        {
-          "port": 5432
-        }
-      ],
-      "networks": [
-        "backend"
-      ],
-      "healthcheck": "pg_isready -U postgres",
-      "healthcheckInterval": 10
     }
-  ],
-  "proxies": [
-    {
-      "domain": "www.example.com",
+  },
+  "proxies": {
+    "www.example.com": {
       "type": "http",
       "target": "web",
       "port": 8080,
@@ -454,10 +449,9 @@ export default {
       "verifyTls": true,
       "proxyPlanId": "<proxy-plan-id>"
     }
-  ],
-  "dns": [
-    {
-      "domain": "example.com",
+  },
+  "dns": {
+    "example.com": {
       "name": "example.com",
       "ttl": 300,
       "priority": 0,
@@ -477,10 +471,9 @@ export default {
         }
       ]
     }
-  ],
-  "crons": [
-    {
-      "name": "cleanup",
+  },
+  "crons": {
+    "cleanup": {
       "type": "simple",
       "schedule": "30 14 * * *",
       "method": "POST",
@@ -492,7 +485,7 @@ export default {
       "enabled": true,
       "cronPlanId": "<cron-plan-id>"
     }
-  ]
+  }
 };
 ```
 
@@ -712,13 +705,13 @@ Generated by `make build-docs`; do not edit by hand. `[...]` is optional and `<.
 ```bash
 # global options: --api-url <string>, --api-token|--api-key <string>, --log-level <string>, --local, --dev, --debug
 
-futrou deploy|up [--file|-f <string>] [--yes|-y] [--dry-run] [--destroy]  # Deploy or upgrade resources based on futrou.json|yaml config
-futrou down [--file|-f <string>] [--yes|-y] [--dry-run]                   # Deprovision every resource in the project and delete the project
-futrou login [--workspace <string>]                                       # Log in to Futrou Cloud on this machine
-futrou logout                                                             # Log out from Futrou Cloud on this machine
-futrou whoami                                                             # Display the currently authenticated user or api token info
+futrou deploy|up [--file|-f <string>] [--project|-p <string>] [--yes|-y] [--dry-run] [--destroy]  # Deploy or upgrade resources based on futrou.json|yaml config
+futrou down [--file|-f <string>] [--project|-p <string>] [--yes|-y] [--dry-run]                   # Deprovision every resource in the project and delete the project
+futrou login [--workspace <string>]                                                               # Log in to Futrou Cloud on this machine
+futrou logout                                                                                     # Log out from Futrou Cloud on this machine
+futrou whoami                                                                                     # Display the currently authenticated user or api token info
 
-futrou config [--file|-f <string>]                                         # Display the loaded Futrou project configuration as JSON
+futrou config [--file|-f <string>] [--project|-p <string>]                 # Display the loaded Futrou project configuration as JSON
 futrou config init [--file|-f <string>] [--project <string>]               # Create a new Futrou project config with the default project name
 futrou config pull [--project|-p <string>] [--file|-f <string>] [--force]  # Fetch a cloud project and write it as a Futrou project config
 futrou config schema                                                       # Print the Futrou project config JSON Schema

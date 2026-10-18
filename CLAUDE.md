@@ -44,6 +44,11 @@ declarative `futrou.json` model in `src/config/`, its validators in
    `ConvertCompose`/`Config.LoadCompose` (`src/config/compose.go`), warn about every option they
    cannot convert, take Futrou-only settings from `x-futrou`, and are never saved. Support a new
    Compose option there and in `examples/docker-compose.yml`.
+   `deploy`/`down`/`config -p <name>` load `futrou.<name>.*` first (`Config.LoadProject`), else the
+   default config renamed to the project; `-f` always wins.
+   Collections (`networks`, `storages`, `serverlets`, `proxies`, `dns`, `crons`) may be a list or
+   an object keyed by name (domain for proxies/dns); `normalizeKeyedCollections` converts the
+   object form to a list before validation, `ToJSONSchema` allows both, and saving writes lists.
 6. **Region:** top-level `region` (name or ID) defaults `regionId` of networks, serverlets,
    proxies, storages and crons (not DNS); a resource's own `regionId` wins.
    `entrypoint` is one string; an array is joined with spaces (`config.Entrypoint`).

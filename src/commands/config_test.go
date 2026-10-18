@@ -180,3 +180,15 @@ func TestConfigPullUsesLocalProjectWithoutProjectFlag(t *testing.T) {
 	_, err := runArgs(t, ts, "config", "pull")
 	assertNoError(t, err)
 }
+
+func TestConfigShowsTheSelectedProjectFile(t *testing.T) {
+	dir := t.TempDir()
+	withWorkingDirectory(t, dir)
+	writeFiles(t, dir, map[string]string{"futrou.json": `{"project":"main"}`, "futrou.prod.json": `{"project":"prod-project"}`})
+	out, err := captureRun([]string{"futrou", "config", "--project", "prod"})
+	assertNoError(t, err)
+	assertContains(t, out, "prod-project")
+	out, err = captureRun([]string{"futrou", "config"})
+	assertNoError(t, err)
+	assertContains(t, out, "main")
+}

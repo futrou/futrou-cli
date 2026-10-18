@@ -11,10 +11,18 @@ var (
 	// spec prefers them.
 	ComposeFiles = []string{"compose.yaml", "compose.yml", "docker-compose.yaml", "docker-compose.yml"}
 
-	// ProjectConfigFiles is the project config discovery order: JSON first,
-	// then executable configuration, then YAML, and last a Docker Compose file,
-	// which is converted to the futrou.json equivalent.
-	ProjectConfigFiles = append([]string{"futrou.json", "futrou.js", "futrou.cjs", "futrou.mjs", "futrou.ts", "futrou.yaml", "futrou.yml"}, ComposeFiles...)
+	// ConfigExtensions are the config file formats, in discovery order: JSON
+	// first, then executable configuration, then YAML.
+	ConfigExtensions = []string{"json", "js", "cjs", "mjs", "ts", "yaml", "yml"}
+
+	// DefaultConfigNames are the config file base names used when no project is
+	// selected.
+	DefaultConfigNames = []string{"futrou"}
+
+	// ProjectConfigFiles is the whole default discovery order: every format of
+	// futrou, and last a Docker Compose file, which is converted to the
+	// futrou.json equivalent.
+	ProjectConfigFiles = configFileNames(DefaultConfigNames, ConfigExtensions, ComposeFiles)
 )
 
 const (
@@ -70,3 +78,21 @@ This software is open source and its complete source code is available at:
 
 You are free to inspect, modify, rebuild and distribute.`
 )
+
+// configFileNames lists every base.extension combination (base-major), then the
+// extra names.
+func configFileNames(bases, extensions, extra []string) []string {
+	var names []string
+	for _, base := range bases {
+		for _, ext := range extensions {
+			names = append(names, base+"."+ext)
+		}
+	}
+	return append(names, extra...)
+}
+
+// ProjectConfigFilesFor lists the config files that select the named project:
+// futrou.<project>.json, futrou.<project>.js, ...
+func ProjectConfigFilesFor(project string) []string {
+	return configFileNames([]string{"futrou." + project}, ConfigExtensions, nil)
+}

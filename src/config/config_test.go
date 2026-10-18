@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"futrou-cli/src/api"
+	"futrou-cli/src/constants"
 	"futrou-cli/src/logger"
 )
 
@@ -521,7 +522,12 @@ func TestExamplesAreValidAndEquivalent(t *testing.T) {
 }
 
 func TestExamplesUseEveryServerletOption(t *testing.T) {
-	serverlet := loadExample(t, "futrou.json")["serverlets"].([]interface{})[0].(map[string]interface{})
+	serverlet := map[string]interface{}{}
+	for _, item := range loadExample(t, "futrou.json")["serverlets"].([]interface{}) {
+		if item.(map[string]interface{})["name"] == "web" {
+			serverlet = item.(map[string]interface{})
+		}
+	}
 	for _, key := range []string{"name", "image", "serverletPlanId", "regionId", "env", "mounts", "ports", "networks", "entrypoint", "cwd",
 		"user", "needs", "healthcheck", "healthcheckInterval", "healthcheckTimeout", "healthcheckRetries", "startTimeout", "stopTimeout",
 		"minInstances", "maxInstances", "scaling", "strategy"} {
@@ -856,7 +862,7 @@ func TestConfigSaveYAMLKeepsAllServerletRuntimeOptions(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("saving the full example as YAML changed it:\n got %v\nwant %v", got, want)
 	}
-	web := reloaded.Serverlets[0]
+	web := reloaded.Serverlets[1]
 	if web.Entrypoint != "node server.js" || web.MinInstances != 1 || web.HealthcheckRetries != 3 || web.Strategy["type"] != "rolling" || web.Needs[0] != "db:healthy" {
 		t.Fatalf("serverlet options were lost: %#v", web)
 	}
@@ -925,3 +931,277 @@ func TestNeedsLoadFromEveryFormat(t *testing.T) {
 		t.Fatalf("an undeclared need must be rejected, got %v", err)
 	}
 }
+
+func TestNormalizeKeyedCollections(t *testing.T) {
+	object := map[string]interface{}{
+		"serverlets": map[string]interface{}{
+			"web":     map[string]interface{}{"image": "nginx"},
+			"api":     map[string]interface{}{"name": "renamed", "image": "x"},
+			"nothing": nil,
+		},
+		"proxies":  map[string]interface{}{"example.com": map[string]interface{}{"target": "web"}, "other.com": map[string]interface{}{"domain": "set.com"}},
+		"dns":      map[string]interface{}{"example.com": map[string]interface{}{"ttl": 300}},
+		"networks": []interface{}{map[string]interface{}{"name": "list"}},
+		"storages": map[string]interface{}{"data": "not an object"},
+		"crons":    "also not a collection",
+	}
+	normalizeKeyedCollections(object)
+
+	serverlets := object["serverlets"].([]interface{})
+	var names []string
+	for _, item := range serverlets {
+		names = append(names, item.(map[string]interface{})["name"].(string))
+	}
+	if strings.Join(names, ",") != "renamed,nothing,web" { // ordered by key (api, nothing, web); a name inside the item wins
+		t.Errorf("serverlet names = %v", names)
+	}
+	proxies := object["proxies"].([]interface{})
+	if proxies[0].(map[string]interface{})["domain"] != "example.com" || proxies[1].(map[string]interface{})["domain"] != "set.com" {
+		t.Errorf("proxies = %v (the key fills the domain unless the item sets one)", proxies)
+	}
+	if dns := object["dns"].([]interface{})[0].(map[string]interface{}); dns["domain"] != "example.com" || dns["name"] != "example.com" {
+		t.Errorf("a keyed dns zone gets both its domain and its name: %v", dns)
+	}
+	if !reflect.DeepEqual(object["networks"], []interface{}{map[string]interface{}{"name": "list"}}) {
+		t.Errorf("a list must be left alone: %v", object["networks"])
+	}
+	if !reflect.DeepEqual(object["storages"], []interface{}{"not an object"}) || object["crons"] != "also not a collection" {
+		t.Errorf("non-objects are left for the validators: %v / %v", object["storages"], object["crons"])
+	}
+	// The key must not leak into the original value.
+	if _, present := serverlets[2].(map[string]interface{})["name"]; !present {
+		t.Error("items need a name")
+	}
+}
+
+func TestKeyedCollectionsLoadLikeLists(t *testing.T) {
+	keyed := `
+networks:
+  backend: {internal: true}
+storages:
+  data: {storagePlanId: sp-1}
+serverlets:
+  web:
+    image: nginx
+    needs: [db:healthy]
+    networks: [backend]
+  db:
+    image: postgres
+proxies:
+  example.com: {target: web, port: 8080}
+dns:
+  example.com:
+    ttl: 300
+crons:
+  nightly: {schedule: "0 0 * * *"}
+`
+	listed := `
+networks: [{name: backend, internal: true}]
+storages: [{name: data, storagePlanId: sp-1}]
+serverlets:
+  - {name: db, image: postgres}
+  - {name: web, image: nginx, needs: ["db:healthy"], networks: [backend]}
+proxies: [{domain: example.com, target: web, port: 8080}]
+dns: [{domain: example.com, name: example.com, ttl: 300}]
+crons: [{name: nightly, schedule: "0 0 * * *"}]
+`
+	dir := t.TempDir()
+	keyedPath := writeFile(t, dir, "keyed.yaml", keyed)
+	listPath := writeFile(t, dir, "listed.yaml", listed)
+	a, b := &Config{}, &Config{}
+	if err := a.LoadYAML(keyedPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.LoadYAML(listPath); err != nil {
+		t.Fatal(err)
+	}
+	ao, _ := toObject(a)
+	bo, _ := toObject(b)
+	if !reflect.DeepEqual(ao, bo) {
+		t.Fatalf("the keyed form must load as the list form:\n%v\n%v", ao, bo)
+	}
+
+	// JSON takes the keyed form too, and validation still applies to it.
+	jsonPath := writeFile(t, dir, "futrou.json", `{"serverlets":{"web":{"image":"nginx"}}}`)
+	c := &Config{}
+	if err := c.LoadJSON(jsonPath); err != nil || c.Serverlets[0].Name != "web" {
+		t.Fatalf("keyed JSON: %v, %v", c.Serverlets, err)
+	}
+	bad := writeFile(t, dir, "bad.json", `{"serverlets":{"web":{"ports":[{"port":0}]}}}`)
+	if err := (&Config{}).LoadJSON(bad); err == nil {
+		t.Fatal("keyed items must be validated")
+	}
+	needs := writeFile(t, dir, "needs.json", `{"serverlets":{"web":{"needs":["ghost"]}}}`)
+	if err := (&Config{}).LoadJSON(needs); err == nil || !strings.Contains(err.Error(), "not declared") {
+		t.Fatalf("needs are validated across keyed serverlets: %v", err)
+	}
+}
+
+func TestKeyedCollectionsRejectBadShapes(t *testing.T) {
+	for name, doc := range map[string]string{
+		"item is a string":  `{"serverlets":{"web":"nginx"}}`,
+		"item is a number":  `{"networks":{"backend":5}}`,
+		"collection string": `{"proxies":"example.com"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			path := writeFile(t, t.TempDir(), "futrou.json", doc)
+			if err := (&Config{}).LoadJSON(path); err == nil {
+				t.Fatal("expected a validation error")
+			}
+		})
+	}
+}
+
+func TestSaveWritesCollectionsAsLists(t *testing.T) {
+	path := writeFile(t, t.TempDir(), "in.yaml", "serverlets:\n  web: {image: nginx}\n")
+	cfg := &Config{}
+	if err := cfg.LoadYAML(path); err != nil {
+		t.Fatal(err)
+	}
+	data, err := cfg.ToYAML()
+	if err != nil || !strings.Contains(string(data), "serverlets:\n  - name: web") {
+		t.Fatalf("saved configs use the list form: %s (%v)", data, err)
+	}
+}
+
+func TestSchemaAcceptsListsAndKeyedObjects(t *testing.T) {
+	schema := (&Config{}).ToJSONSchema()
+	properties := schema["properties"].(map[string]interface{})
+	for collection := range keyedCollections {
+		property := properties[collection].(map[string]interface{})
+		options, ok := property["oneOf"].([]interface{})
+		if !ok || len(options) != 2 {
+			t.Fatalf("%s should accept a list or an object: %v", collection, property)
+		}
+		if options[0].(map[string]interface{})["type"] != "array" || options[1].(map[string]interface{})["type"] != "object" {
+			t.Errorf("%s options = %v", collection, options)
+		}
+		if _, ok := options[1].(map[string]interface{})["additionalProperties"].(map[string]interface{}); !ok {
+			t.Errorf("%s keyed form must describe its items", collection)
+		}
+		if property["description"] == "" || property["description"] == nil {
+			t.Errorf("%s lost its description", collection)
+		}
+	}
+}
+
+func TestKeyedCollectionsAlwaysLoadAsListsWithNames(t *testing.T) {
+	path := writeFile(t, t.TempDir(), "futrou.yaml", `
+networks: {backend: {}}
+storages: {data: {}}
+serverlets: {web: {image: nginx}}
+crons: {nightly: {}}
+proxies: {example.com: {target: web}}
+dns:
+  example.com: {}
+  other.com: {name: custom}
+`)
+	cfg := &Config{}
+	if err := cfg.LoadYAML(path); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Networks[0].Name != "backend" || cfg.Storages[0].Name != "data" || cfg.Serverlets[0].Name != "web" || cfg.Crons[0].Name != "nightly" {
+		t.Errorf("every item carries its name: %#v", cfg)
+	}
+	if cfg.Proxies[0].Domain != "example.com" {
+		t.Errorf("proxy = %#v", cfg.Proxies[0])
+	}
+	if cfg.DNS[0].Domain != "example.com" || cfg.DNS[0].Name != "example.com" || cfg.DNS[1].Domain != "other.com" || cfg.DNS[1].Name != "custom" {
+		t.Errorf("dns = %#v", cfg.DNS)
+	}
+}
+
+func TestDefaultDiscoveryOrderCoversEveryFormatThenCompose(t *testing.T) {
+	order := []string{
+		"futrou.json", "futrou.js", "futrou.cjs", "futrou.mjs", "futrou.ts", "futrou.yaml", "futrou.yml",
+		"compose.yaml", "compose.yml", "docker-compose.yaml", "docker-compose.yml",
+	}
+	dir := t.TempDir()
+	for _, name := range order {
+		writeFile(t, dir, name, "")
+	}
+	for _, want := range order {
+		path, err := findConfig(dir, "")
+		if err != nil || filepath.Base(path) != want {
+			t.Fatalf("found %s (%v), want %s", path, err, want)
+		}
+		if err := os.Remove(path); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestLoadProjectPrefersTheProjectFile(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "futrou.json", `{"project":"main","region":"default-region"}`)
+	writeFile(t, dir, "futrou.prod.json", `{"project":"shop-prod","region":"eu"}`)
+	writeFile(t, dir, "futrou.prod.yaml", "project: ignored\n")
+	writeFile(t, dir, "futrou.dev.yaml", "region: dev-region\n")
+
+	cases := map[string]struct{ project, wantFile, wantProject, wantRegion string }{
+		"no project uses futrou.json": {"", "futrou.json", "main", "default-region"},
+		"a project file wins":         {"prod", "futrou.prod.json", "shop-prod", "eu"},
+		"formats keep their order":    {"dev", "futrou.dev.yaml", "dev", "dev-region"}, // no project inside: named after the flag
+		"unknown project falls back":  {"staging", "futrou.json", "staging", "default-region"},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			cfg, path, err := LoadProjectConfig(dir, "", tc.project)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if filepath.Base(path) != tc.wantFile || cfg.Project != tc.wantProject || cfg.Region != tc.wantRegion {
+				t.Fatalf("loaded %s with project %q and region %q; want %s, %q, %q", filepath.Base(path), cfg.Project, cfg.Region, tc.wantFile, tc.wantProject, tc.wantRegion)
+			}
+		})
+	}
+}
+
+func TestLoadProjectFallsBackToFutrouJSONAndComposeAndRenamesTheProject(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "futrou.json", `{"project":"main"}`)
+	cfg, path, err := LoadProjectConfig(dir, "", "qa")
+	if err != nil || filepath.Base(path) != "futrou.json" || cfg.Project != "qa" {
+		t.Fatalf("fallback: %s %v %v", path, cfg, err)
+	}
+
+	compose := t.TempDir()
+	writeFile(t, compose, "compose.yaml", "services:\n  web:\n    image: x\n")
+	cfg, path, err = LoadProjectConfig(compose, "", "qa")
+	if err != nil || filepath.Base(path) != "compose.yaml" || cfg.Project != "qa" {
+		t.Fatalf("compose fallback: %s %v %v", path, cfg, err)
+	}
+	if _, _, err := LoadProjectConfig(t.TempDir(), "", "qa"); !errors.Is(err, ErrNoFutrouConfig) {
+		t.Fatalf("expected ErrNoFutrouConfig, got %v", err)
+	}
+}
+
+func TestLoadProjectExplicitFileWinsAndNamesAreValidated(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "futrou.prod.json", `{"project":"prod-project"}`)
+	writeFile(t, dir, "custom.json", `{}`)
+	cfg, path, err := LoadProjectConfig(dir, "custom.json", "prod")
+	if err != nil || filepath.Base(path) != "custom.json" || cfg.Project != "prod" {
+		t.Fatalf("an explicit file is used as given: %s %v %v", path, cfg, err)
+	}
+	for _, bad := range []string{"../x", "a/b", `a\b`, ".hidden", "a..b"} {
+		if _, _, err := LoadProjectConfig(dir, "", bad); err == nil {
+			t.Errorf("project name %q must be rejected", bad)
+		}
+	}
+	for _, good := range []string{"prod", "dev-1", "team_a", "v1.2"} {
+		if err := ValidateProjectFileName(good); err != nil {
+			t.Errorf("project name %q must be accepted: %v", good, err)
+		}
+	}
+}
+
+func TestProjectConfigFilesFor(t *testing.T) {
+	got := strings.Join(constantsProjectFiles("prod"), ",")
+	want := "futrou.prod.json,futrou.prod.js,futrou.prod.cjs,futrou.prod.mjs,futrou.prod.ts,futrou.prod.yaml,futrou.prod.yml"
+	if got != want {
+		t.Fatalf("got %s\nwant %s", got, want)
+	}
+}
+
+func constantsProjectFiles(project string) []string { return constants.ProjectConfigFilesFor(project) }

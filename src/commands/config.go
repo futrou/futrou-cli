@@ -24,9 +24,14 @@ var configCommand = &cli.Command{
 			Aliases: []string{"f"},
 			Usage:   "Config file path (default: auto-detect)",
 		},
+		&cli.StringFlag{
+			Name:    "project",
+			Aliases: []string{"p"},
+			Usage:   "Project to show: reads futrou.<project>.json|yaml first, then the default config",
+		},
 	},
 	Action: func(c *cli.Context) error {
-		cfg, _, err := projectconfig.LoadConfig(".", c.String("file"))
+		cfg, _, err := projectconfig.LoadProjectConfig(".", c.String("file"), c.String("project"))
 		if err != nil {
 			if errors.Is(err, projectconfig.ErrNoFutrouConfig) {
 				cfg = &projectconfig.Config{}

@@ -1,6 +1,9 @@
 // futrou.mjs — an ES module. The default export may be an object, or a
 // function (sync or async) returning one. Because it is real code you can
 // compute values, for example from environment variables.
+//
+// Collections are objects keyed by name (the domain for proxies and dns); a
+// list of items with a name works too.
 const region = process.env.FUTROU_REGION ?? "<region-name-or-id>";
 
 export default {
@@ -8,24 +11,38 @@ export default {
   "workspace": "acme",
   "project": "website",
   "region": region,
-  "networks": [
-    {
-      "name": "backend",
+  "networks": {
+    "backend": {
       "ipv4": "10.20.0.0/24",
       "ipv6": "fd00:20::/64",
       "internal": false
     }
-  ],
-  "storages": [
-    {
-      "name": "uploads",
+  },
+  "storages": {
+    "uploads": {
       "storagePlanId": "<storage-plan-id>",
       "public": false
     }
-  ],
-  "serverlets": [
-    {
-      "name": "web",
+  },
+  "serverlets": {
+    "db": {
+      "image": "postgres:17",
+      "serverletPlanId": "<serverlet-plan-id>",
+      "env": {
+        "POSTGRES_PASSWORD": "change-me"
+      },
+      "ports": [
+        {
+          "port": 5432
+        }
+      ],
+      "networks": [
+        "backend"
+      ],
+      "healthcheck": "pg_isready -U postgres",
+      "healthcheckInterval": 10
+    },
+    "web": {
       "image": "ghcr.io/acme/web:1.4.2",
       "serverletPlanId": "<serverlet-plan-id>",
       "regionId": "<region-id>",
@@ -65,29 +82,10 @@ export default {
       "strategy": {
         "type": "rolling"
       }
-    },
-    {
-      "name": "db",
-      "image": "postgres:17",
-      "serverletPlanId": "<serverlet-plan-id>",
-      "env": {
-        "POSTGRES_PASSWORD": "change-me"
-      },
-      "ports": [
-        {
-          "port": 5432
-        }
-      ],
-      "networks": [
-        "backend"
-      ],
-      "healthcheck": "pg_isready -U postgres",
-      "healthcheckInterval": 10
     }
-  ],
-  "proxies": [
-    {
-      "domain": "www.example.com",
+  },
+  "proxies": {
+    "www.example.com": {
       "type": "http",
       "target": "web",
       "port": 8080,
@@ -102,10 +100,9 @@ export default {
       "verifyTls": true,
       "proxyPlanId": "<proxy-plan-id>"
     }
-  ],
-  "dns": [
-    {
-      "domain": "example.com",
+  },
+  "dns": {
+    "example.com": {
       "name": "example.com",
       "ttl": 300,
       "priority": 0,
@@ -125,10 +122,9 @@ export default {
         }
       ]
     }
-  ],
-  "crons": [
-    {
-      "name": "cleanup",
+  },
+  "crons": {
+    "cleanup": {
       "type": "simple",
       "schedule": "30 14 * * *",
       "method": "POST",
@@ -140,5 +136,5 @@ export default {
       "enabled": true,
       "cronPlanId": "<cron-plan-id>"
     }
-  ]
+  }
 };
