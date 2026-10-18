@@ -3,7 +3,6 @@ package commands
 import (
 	"errors"
 	"fmt"
-	"path/filepath"
 	"time"
 
 	"futrou-cli/src/cliconfig"
@@ -88,9 +87,9 @@ func ensureConfigWorkspace(c *cli.Context, client *services.ApiClient, cfg *proj
 	return nil
 }
 
-// syncLocalProjectConfig refreshes an existing JSON project configuration. It
-// intentionally skips projects without a local config and executable configs,
-// which cannot safely be rewritten as JSON.
+// syncLocalProjectConfig refreshes an existing JSON or YAML project
+// configuration. It intentionally skips projects without a local config and
+// executable configs, which cannot safely be rewritten.
 func syncLocalProjectConfig(client *services.ApiClient) error {
 	cfg, path, err := projectconfig.LoadConfig(".", "")
 	if errors.Is(err, projectconfig.ErrNoFutrouConfig) {
@@ -99,7 +98,7 @@ func syncLocalProjectConfig(client *services.ApiClient) error {
 	if err != nil {
 		return err
 	}
-	if filepath.Ext(path) != ".json" || cfg.Project == "" {
+	if !projectconfig.CanSave(path) || cfg.Project == "" {
 		return nil
 	}
 	if err := cfg.Pull(client, ""); err != nil {

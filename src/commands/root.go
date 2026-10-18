@@ -196,26 +196,8 @@ func buildApp() *cli.App {
 			}
 			return cli.ShowAppHelp(c)
 		},
-		Commands: []*cli.Command{
-			withGlobalFlags(configCommand),
-			withGlobalFlags(loginCommand),
-			withGlobalFlags(logoutCommand),
-			withGlobalFlags(whoamiCommand),
-			withGlobalFlags(setupCommand),
-			withGlobalFlags(initCommand),
-			withGlobalFlags(deployCommand),
-			withGlobalFlags(upgradeCommand),
-			withGlobalFlags(serverletsCommand),
-			withGlobalFlags(proxiesCommand),
-			withGlobalFlags(dnsCommand),
-			withGlobalFlags(projectsCommand),
-			withGlobalFlags(workspacesCommand),
-			withGlobalFlags(storagesCommand),
-			withGlobalFlags(licenseCommand),
-			withGlobalFlags(versionCommand),
-			withGlobalFlags(schemaCommand),
-		},
-		Before: applyGlobalFlagShorthands,
+		Commands: appCommands(),
+		Before:   applyGlobalFlagShorthands,
 		ExitErrHandler: func(c *cli.Context, err error) {
 			if err == nil {
 				return
@@ -233,4 +215,42 @@ func buildApp() *cli.App {
 			cli.HandleExitCoder(err)
 		},
 	}
+}
+
+// appCommands lists the top-level commands, each followed by its hidden
+// legacy (plural) duplicates.
+func appCommands() []*cli.Command {
+	var commands []*cli.Command
+	for _, command := range []*cli.Command{
+		// Keep in sync with helpGroupBreaks in help.go, which separates the
+		// groups with a blank line in the top-level help.
+		deployCommand,
+		downCommand,
+
+		loginCommand,
+		logoutCommand,
+		whoamiCommand,
+		configCommand,
+
+		initCommand,
+
+		workspacesCommand,
+		projectsCommand,
+		serverCommand,
+
+		serverletsCommand,
+		networkCommand,
+		proxiesCommand,
+		dnsCommand,
+		storagesCommand,
+		logsCommand,
+
+		upgradeCommand,
+		schemaCommand,
+		versionCommand,
+		licenseCommand,
+	} {
+		commands = append(commands, withLegacyTopLevel(withGlobalFlags(command))...)
+	}
+	return commands
 }

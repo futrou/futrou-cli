@@ -16,18 +16,23 @@ import (
 )
 
 var deployCommand = &cli.Command{
-	Name:  "deploy",
-	Usage: "Deploy or upgrade resources based on futrou.json config",
+	Name:    "deploy",
+	Aliases: []string{"up"},
+	Usage:   "Deploy or upgrade resources based on futrou.json|yaml config",
 	Flags: []cli.Flag{
 		&cli.StringFlag{
 			Name:    "file",
 			Aliases: []string{"f"},
-			Usage:   "Config file (default: auto-detect futrou.json etc.)",
+			Usage:   "Config file (default: auto-detect futrou.json|yaml etc.)",
 		},
 		&cli.BoolFlag{
 			Name:    "yes",
 			Aliases: []string{"y"},
 			Usage:   "Auto-approve without prompting",
+		},
+		&cli.BoolFlag{
+			Name:  "dry-run",
+			Usage: "Show the planned changes and exit without applying them",
 		},
 		&cli.BoolFlag{
 			Name:  "destroy",
@@ -40,6 +45,10 @@ var deployCommand = &cli.Command{
 			return err
 		}
 		fmt.Printf("Using config: %s\n", cfgFile)
+
+		if err := cfg.Validate(); err != nil {
+			return err
+		}
 
 		client, err := requireAuth(c)
 		if err != nil {
@@ -61,7 +70,10 @@ var deployCommand = &cli.Command{
 			return nil
 		}
 		printDeployPlan(plan)
-		if !c.Bool("yes") && !promptConfirm("Apply these changes?") {
+		if c.Bool("dry-run") {
+			return nil
+		}
+		if !confirmApply(c, "Apply these changes?") {
 			fmt.Println("Cancelled.")
 			return nil
 		}
@@ -80,7 +92,7 @@ var deployCommand = &cli.Command{
 }
 
 func refreshDeploymentConfig(client *services.ApiClient, cfg *projectconfig.Config, path string) {
-	if cfg.Project == "" || !strings.HasSuffix(path, ".json") {
+	if cfg.Project == "" || !projectconfig.CanSave(path) {
 		return
 	}
 	if err := cfg.Pull(client, ""); err != nil {
@@ -190,6 +202,19 @@ func printActionFieldChanges(action deployer.Action) {
 	for _, key := range keys {
 		printChanged("  "+key, fmt.Sprint(action.Previous[key]), fmt.Sprint(action.Changes[key]))
 	}
+}
+
+// confirmApply reports whether the planned changes should be applied: always
+// with --yes or in CI (CI=true), otherwise after the user answers y or yes.
+func confirmApply(c *cli.Context, prompt string) bool {
+	if c.Bool("yes") {
+		return true
+	}
+	if os.Getenv("CI") == "true" {
+		fmt.Println("CI detected: applying without confirmation.")
+		return true
+	}
+	return promptConfirm(prompt)
 }
 
 // promptConfirm asks the user yes/no and returns true for yes.

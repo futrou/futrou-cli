@@ -14,12 +14,12 @@ import (
 )
 
 var storagesCommand = &cli.Command{
-	Name:  "storages",
+	Name:  "storage",
 	Usage: "Manage persistent storage",
 	Subcommands: []*cli.Command{
 		{
-			Name:  "list",
-			Usage: "List storages in a project (defaults to futrou.json, then the login workspace's \"default\" project)",
+			Name:  "ls",
+			Usage: "List storages in a project (defaults to futrou.json|yaml, then the login workspace's \"default\" project)",
 			Flags: []cli.Flag{
 				workspaceFlag,
 				projectFlag,
@@ -49,8 +49,8 @@ var storagesCommand = &cli.Command{
 			},
 		},
 		{
-			Name:      "get",
-			Usage:     "Get a storage by ID",
+			Name:      "show",
+			Usage:     "Show a storage by ID",
 			ArgsUsage: "<id>",
 			Action: func(c *cli.Context) error {
 				id := c.Args().First()
@@ -74,7 +74,7 @@ var storagesCommand = &cli.Command{
 		},
 		{
 			Name:  "create",
-			Usage: "Create a storage (defaults to futrou.json, then the login workspace's \"default\" project)",
+			Usage: "Create a storage (defaults to futrou.json|yaml, then the login workspace's \"default\" project)",
 			Flags: []cli.Flag{
 				&cli.StringFlag{Name: "name", Required: true, Usage: "Storage name"},
 				&cli.StringFlag{Name: "plan", Required: true, Usage: "Storage plan ID"},
@@ -159,7 +159,7 @@ var storagesCommand = &cli.Command{
 			},
 		},
 		{
-			Name:      "delete",
+			Name:      "rm",
 			Usage:     "Delete a storage",
 			ArgsUsage: "<id>",
 			Action: func(c *cli.Context) error {
@@ -186,63 +186,32 @@ var storagesCommand = &cli.Command{
 			},
 		},
 		{
-			Name:      "instances",
-			Usage:     "List storage instances",
-			ArgsUsage: "<id>",
-			Action: func(c *cli.Context) error {
-				id := c.Args().First()
-				if id == "" {
-					return fmt.Errorf("storage ID required")
-				}
-				client, err := requireAuth(c)
-				if err != nil {
-					return err
-				}
-				var result interface{}
-				status, err := client.RequestInto("GET", "/v2/storages/"+id+"/instances", nil, &result)
-				if err != nil {
-					return err
-				}
-				if status >= 400 {
-					return fmt.Errorf("request failed with status %d", status)
-				}
-				if isJSON(c) {
-					return printJSON(result)
-				}
-				printTable(result, []string{"id", "status", "createdAt"})
-				return nil
+			Name:  "instance",
+			Usage: "Manage storage instances",
+			Subcommands: []*cli.Command{
+				{
+					Name:      "ls",
+					Usage:     "List storage instances",
+					ArgsUsage: "<id>",
+					Action:    storageInstancesAction,
+				},
 			},
+			// "instance <id>" keeps working as a shorthand for "instance ls <id>".
+			ArgsUsage: "<id>",
+			Action:    storageInstancesAction,
+		},
+		{
+			Name:      "metrics",
+			Usage:     "Get storage metrics",
+			ArgsUsage: "<id>",
+			Action:    metricsAction("storage", "/v2/storages"),
 		},
 		{
 			Name:      "logs",
 			Usage:     "View storage logs",
 			ArgsUsage: "<id>",
-			Flags: []cli.Flag{
-				&cli.BoolFlag{Name: "tail", Usage: "Show only recent logs"},
-			},
-			Action: func(c *cli.Context) error {
-				id := c.Args().First()
-				if id == "" {
-					return fmt.Errorf("storage ID required")
-				}
-				client, err := requireAuth(c)
-				if err != nil {
-					return err
-				}
-				path := "/v2/storages/" + id + "/logs"
-				if c.Bool("tail") {
-					path += "/tail"
-				}
-				var result interface{}
-				status, err := client.RequestInto("GET", path, nil, &result)
-				if err != nil {
-					return err
-				}
-				if status >= 400 {
-					return fmt.Errorf("request failed with status %d", status)
-				}
-				return printJSON(result)
-			},
+			Flags:     logFlags,
+			Action:    resourceLogsAction("storage", "/v2/storages", logOptions{hasTail: true, tailOmit: []string{"offset", "limit"}}),
 		},
 		storagePlansCommand,
 		storageFilesCommand,
@@ -251,11 +220,11 @@ var storagesCommand = &cli.Command{
 }
 
 var storagePlansCommand = &cli.Command{
-	Name:  "plans",
+	Name:  "plan",
 	Usage: "Manage storage plans",
 	Subcommands: []*cli.Command{
 		{
-			Name:  "list",
+			Name:  "ls",
 			Usage: "List all storage plans",
 			Action: func(c *cli.Context) error {
 				client, err := requireAuth(c)
@@ -278,8 +247,8 @@ var storagePlansCommand = &cli.Command{
 			},
 		},
 		{
-			Name:      "get",
-			Usage:     "Get a storage plan by ID",
+			Name:      "show",
+			Usage:     "Show a storage plan by ID",
 			ArgsUsage: "<id>",
 			Action: func(c *cli.Context) error {
 				id := c.Args().First()
@@ -677,11 +646,11 @@ var storageSyncCommand = &cli.Command{
 }
 
 var storageFilesCommand = &cli.Command{
-	Name:  "files",
+	Name:  "file",
 	Usage: "Manage files within a storage",
 	Subcommands: []*cli.Command{
 		{
-			Name:      "list",
+			Name:      "ls",
 			Usage:     "List or search files in a storage; the path may be a glob (e.g. images/*, **/*.log)",
 			ArgsUsage: "<storage-id> [path-or-glob]",
 			Flags: []cli.Flag{
@@ -973,4 +942,28 @@ var storageFilesCommand = &cli.Command{
 			},
 		},
 	},
+}
+
+var storageInstancesAction = func(c *cli.Context) error {
+	id := c.Args().First()
+	if id == "" {
+		return fmt.Errorf("storage ID required")
+	}
+	client, err := requireAuth(c)
+	if err != nil {
+		return err
+	}
+	var result interface{}
+	status, err := client.RequestInto("GET", "/v2/storages/"+id+"/instances", nil, &result)
+	if err != nil {
+		return err
+	}
+	if status >= 400 {
+		return fmt.Errorf("request failed with status %d", status)
+	}
+	if isJSON(c) {
+		return printJSON(result)
+	}
+	printTable(result, []string{"id", "status", "createdAt"})
+	return nil
 }

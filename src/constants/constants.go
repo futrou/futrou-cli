@@ -7,9 +7,9 @@ var (
 
 	Description = "Deploy and manage Futrou Cloud from your terminal."
 
-	// ProjectConfigFiles is the project config discovery order. JSON is checked
-	// first so it takes precedence over executable configuration.
-	ProjectConfigFiles = []string{"futrou.json", "futrou.js", "futrou.cjs", "futrou.mjs", "futrou.ts"}
+	// ProjectConfigFiles is the project config discovery order: JSON first,
+	// then executable configuration, then YAML.
+	ProjectConfigFiles = []string{"futrou.json", "futrou.js", "futrou.cjs", "futrou.mjs", "futrou.ts", "futrou.yaml", "futrou.yml"}
 )
 
 const (

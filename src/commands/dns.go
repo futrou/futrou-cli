@@ -11,7 +11,7 @@ var dnsCommand = &cli.Command{
 	Usage: "Manage DNS zones and records",
 	Subcommands: []*cli.Command{
 		{
-			Name:  "list",
+			Name:  "ls",
 			Usage: "List all DNS zones",
 			Action: func(c *cli.Context) error {
 				client, err := requireAuth(c)
@@ -34,8 +34,8 @@ var dnsCommand = &cli.Command{
 			},
 		},
 		{
-			Name:      "get",
-			Usage:     "Get a DNS zone by ID",
+			Name:      "show",
+			Usage:     "Show a DNS zone by ID",
 			ArgsUsage: "<id>",
 			Action: func(c *cli.Context) error {
 				id := c.Args().First()
@@ -126,7 +126,7 @@ var dnsCommand = &cli.Command{
 			},
 		},
 		{
-			Name:      "delete",
+			Name:      "rm",
 			Usage:     "Delete a DNS zone",
 			ArgsUsage: "<id>",
 			Action: func(c *cli.Context) error {
@@ -153,63 +153,33 @@ var dnsCommand = &cli.Command{
 			},
 		},
 		{
+			Name:      "metrics",
+			Usage:     "Get metrics for a DNS zone",
+			ArgsUsage: "<id>",
+			Action:    metricsAction("DNS zone", "/v2/dns"),
+		},
+		{
 			Name:      "logs",
 			Usage:     "View logs for a DNS zone",
 			ArgsUsage: "<id>",
 			Flags:     logFlags,
-			Action: func(c *cli.Context) error {
-				id := c.Args().First()
-				if id == "" {
-					return fmt.Errorf("DNS zone ID required")
-				}
-				client, err := requireAuth(c)
-				if err != nil {
-					return err
-				}
-				var result interface{}
-				status, err := client.RequestInto("GET", "/v2/dns/"+id+"/logs"+logQueryString(c), nil, &result)
-				if err != nil {
-					return err
-				}
-				if status >= 400 {
-					return fmt.Errorf("request failed with status %d", status)
-				}
-				return printJSON(result)
-			},
+			Action:    resourceLogsAction("DNS zone", "/v2/dns", logOptions{hasTail: true}),
 			Subcommands: []*cli.Command{
 				{
 					Name:      "tail",
 					Usage:     "View recent logs for a DNS zone",
 					ArgsUsage: "<id>",
 					Flags:     logFlags,
-					Action: func(c *cli.Context) error {
-						id := c.Args().First()
-						if id == "" {
-							return fmt.Errorf("DNS zone ID required")
-						}
-						client, err := requireAuth(c)
-						if err != nil {
-							return err
-						}
-						var result interface{}
-						status, err := client.RequestInto("GET", "/v2/dns/"+id+"/logs/tail"+logQueryString(c), nil, &result)
-						if err != nil {
-							return err
-						}
-						if status >= 400 {
-							return fmt.Errorf("request failed with status %d", status)
-						}
-						return printJSON(result)
-					},
+					Action:    resourceLogsAction("DNS zone", "/v2/dns", logOptions{hasTail: true, forceTail: true}),
 				},
 			},
 		},
 		{
-			Name:  "records",
+			Name:  "record",
 			Usage: "Manage DNS records for a zone",
 			Subcommands: []*cli.Command{
 				{
-					Name:      "list",
+					Name:      "ls",
 					Usage:     "List records in a DNS zone",
 					ArgsUsage: "<zone-id>",
 					Action: func(c *cli.Context) error {
@@ -237,8 +207,8 @@ var dnsCommand = &cli.Command{
 					},
 				},
 				{
-					Name:      "get",
-					Usage:     "Get a DNS record",
+					Name:      "show",
+					Usage:     "Show a DNS record",
 					ArgsUsage: "<zone-id> <record-id>",
 					Action: func(c *cli.Context) error {
 						zoneId := c.Args().Get(0)
@@ -362,7 +332,7 @@ var dnsCommand = &cli.Command{
 					},
 				},
 				{
-					Name:      "delete",
+					Name:      "rm",
 					Usage:     "Delete a DNS record",
 					ArgsUsage: "<zone-id> <record-id>",
 					Action: func(c *cli.Context) error {

@@ -1,6 +1,9 @@
 package validators
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func validateConfig(t *testing.T, value map[string]interface{}) {
 	t.Helper()
@@ -105,7 +108,7 @@ func TestConfigValidatorStorageAndCronValidation(t *testing.T) {
 
 func TestConfigValidatorServerletMetadataFieldTypes(t *testing.T) {
 	validFields := map[string]interface{}{
-		"createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-02T00:00:00Z", "status": "ready", "serverletPlanId": "plan-1", "workspaceId": "workspace-1", "projectId": "project-1", "regionId": "region-1", "env": map[string]interface{}{"LOG_LEVEL": "info"}, "mounts": map[string]interface{}{"/data": "storage-1"}, "ports": []interface{}{}, "scaling": map[string]interface{}{},
+		"name": "web", "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-02T00:00:00Z", "status": "ready", "serverletPlanId": "plan-1", "workspaceId": "workspace-1", "projectId": "project-1", "regionId": "region-1", "env": map[string]interface{}{"LOG_LEVEL": "info"}, "mounts": map[string]interface{}{"/data": "storage-1"}, "ports": []interface{}{}, "scaling": map[string]interface{}{},
 	}
 	validateConfig(t, map[string]interface{}{"serverlets": []interface{}{validFields}})
 
@@ -144,7 +147,7 @@ func TestConfigValidatorProxyAPIFields(t *testing.T) {
 
 func TestConfigValidatorDNSRecordFieldTypes(t *testing.T) {
 	validRecord := map[string]interface{}{"id": "record-1", "name": "www", "displayName": "WWW", "domain": "example.com", "type": "A", "value": "192.0.2.1", "ttl": float64(60), "priority": float64(0)}
-	validateConfig(t, map[string]interface{}{"dns": []interface{}{map[string]interface{}{"records": []interface{}{validRecord}}}})
+	validateConfig(t, map[string]interface{}{"dns": []interface{}{map[string]interface{}{"domain": "example.com", "records": []interface{}{validRecord}}}})
 
 	for field, value := range map[string]interface{}{
 		"id": float64(1), "name": false, "displayName": float64(1), "domain": true, "type": float64(1), "value": false, "ttl": float64(-1), "priority": float64(-1),
@@ -285,5 +288,181 @@ func TestConfigValidatorAcceptsGeneratedAPIResourceFields(t *testing.T) {
 	}
 	if len(warnings) != 0 {
 		t.Fatalf("generated API fields should not warn: %v", warnings)
+	}
+}
+
+func TestConfigValidatorServerletConfigShapes(t *testing.T) {
+	serverlet := func(fields map[string]interface{}) map[string]interface{} {
+		fields["name"] = "web"
+		return map[string]interface{}{"serverlets": []interface{}{fields}}
+	}
+	validateConfig(t, serverlet(map[string]interface{}{
+		"ports":      []interface{}{map[string]interface{}{"port": float64(8080), "protocol": "tcp"}},
+		"networks":   []interface{}{"backend"},
+		"entrypoint": "node server.js",
+		"scaling":    map[string]interface{}{"min": float64(1)},
+	}))
+
+	for name, fields := range map[string]map[string]interface{}{
+		"port out of range":        {"ports": []interface{}{map[string]interface{}{"port": float64(70000)}}},
+		"port missing":             {"ports": []interface{}{map[string]interface{}{"protocol": "tcp"}}},
+		"unknown protocol":         {"ports": []interface{}{map[string]interface{}{"port": float64(80), "protocol": "icmp"}}},
+		"networks not strings":     {"networks": []interface{}{float64(1)}},
+		"networks empty string":    {"networks": []interface{}{" "}},
+		"networks not array":       {"networks": "backend"},
+		"entrypoint not strings":   {"entrypoint": []interface{}{true}},
+		"entrypoint empty":         {"entrypoint": " "},
+		"entrypoint number":        {"entrypoint": float64(1)},
+		"env value not string":     {"env": map[string]interface{}{"PORT": float64(80)}},
+		"mounts value not string":  {"mounts": map[string]interface{}{"/data": float64(1)}},
+		"scaling value not number": {"scaling": map[string]interface{}{"min": "one"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			assertConfigFieldError(t, serverlet(fields), "serverlets")
+		})
+	}
+}
+
+func TestConfigValidatorNetworks(t *testing.T) {
+	validateConfig(t, map[string]interface{}{"networks": []interface{}{
+		map[string]interface{}{"name": "backend", "ipv4": "10.0.0.0/24", "internal": true, "regionId": "region-1"},
+	}})
+	assertConfigFieldError(t, map[string]interface{}{"networks": []interface{}{map[string]interface{}{"name": "a", "internal": "maybe"}}}, "networks")
+	assertConfigFieldError(t, map[string]interface{}{"networks": "backend"}, "networks")
+}
+
+func TestConfigValidatorRequiresUniqueResourceNames(t *testing.T) {
+	for field, key := range map[string]string{"serverlets": "name", "networks": "name", "storages": "name", "crons": "name", "proxies": "domain", "dns": "domain"} {
+		t.Run(field, func(t *testing.T) {
+			assertConfigFieldError(t, map[string]interface{}{field: []interface{}{map[string]interface{}{}}}, field)
+			assertConfigFieldError(t, map[string]interface{}{field: []interface{}{
+				map[string]interface{}{key: "same"}, map[string]interface{}{key: "same"},
+			}}, field)
+			validateConfig(t, map[string]interface{}{field: []interface{}{
+				map[string]interface{}{key: "one"}, map[string]interface{}{key: "two"},
+			}})
+		})
+	}
+}
+
+func TestConfigValidatorServerletRuntimeOptions(t *testing.T) {
+	serverlet := func(fields map[string]interface{}) map[string]interface{} {
+		fields["name"] = "web"
+		return map[string]interface{}{"serverlets": []interface{}{map[string]interface{}{"name": "db"}, fields}}
+	}
+	validateConfig(t, serverlet(map[string]interface{}{
+		"minInstances": float64(1), "maxInstances": float64(3), "user": "node", "needs": []interface{}{"db"},
+		"healthcheck": "curl -f localhost", "healthcheckInterval": float64(30), "healthcheckTimeout": float64(5),
+		"healthcheckRetries": float64(3), "startTimeout": float64(60), "stopTimeout": float64(30),
+		"strategy": map[string]interface{}{"type": "rolling"},
+	}))
+	for name, fields := range map[string]map[string]interface{}{
+		"negative min":        {"minInstances": float64(-1)},
+		"fractional max":      {"maxInstances": 1.5},
+		"user not string":     {"user": float64(1)},
+		"needs not strings":   {"needs": []interface{}{float64(1)}},
+		"healthcheck number":  {"healthcheck": float64(1)},
+		"negative interval":   {"healthcheckInterval": float64(-1)},
+		"retries not integer": {"healthcheckRetries": 1.5},
+		"timeout not number":  {"startTimeout": "soon"},
+		"stop timeout bad":    {"stopTimeout": "soon"},
+		"strategy not object": {"strategy": "rolling"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			assertConfigFieldError(t, serverlet(fields), "serverlets")
+		})
+	}
+}
+
+func TestConfigValidatorProxyVariantRulesAndCronType(t *testing.T) {
+	validateConfig(t, map[string]interface{}{
+		"proxies": []interface{}{map[string]interface{}{"domain": "example.com", "variant": "non-www", "rules": []interface{}{}}},
+		"crons":   []interface{}{map[string]interface{}{"name": "job", "type": "code"}},
+	})
+	assertConfigFieldError(t, map[string]interface{}{"proxies": []interface{}{map[string]interface{}{"domain": "example.com", "variant": "sometimes"}}}, "proxies")
+	assertConfigFieldError(t, map[string]interface{}{"proxies": []interface{}{map[string]interface{}{"domain": "example.com", "rules": "none"}}}, "proxies")
+	assertConfigFieldError(t, map[string]interface{}{"crons": []interface{}{map[string]interface{}{"name": "job", "type": "shell"}}}, "crons")
+}
+
+func TestConfigValidatorEntrypointStringOrArray(t *testing.T) {
+	serverlet := func(entrypoint interface{}) map[string]interface{} {
+		return map[string]interface{}{"serverlets": []interface{}{map[string]interface{}{"name": "web", "entrypoint": entrypoint}}}
+	}
+	validateConfig(t, serverlet("node server.js"))
+	validateConfig(t, serverlet("/usr/local/bin/start"))
+	validateConfig(t, serverlet([]interface{}{"node", "server.js"}))
+	assertConfigFieldError(t, serverlet("  "), "serverlets")
+	assertConfigFieldError(t, serverlet(float64(1)), "serverlets")
+	assertConfigFieldError(t, serverlet([]interface{}{"node", float64(1)}), "serverlets")
+}
+
+func TestConfigValidatorRegion(t *testing.T) {
+	validateConfig(t, map[string]interface{}{"region": "europe"})
+	validateConfig(t, map[string]interface{}{"region": "019b1334-dabc-7000-8000-000000000001"})
+	assertConfigFieldError(t, map[string]interface{}{"region": float64(1)}, "region")
+	assertConfigFieldError(t, map[string]interface{}{"region": []interface{}{"europe"}}, "region")
+	assertConfigFieldError(t, map[string]interface{}{"region": strings.Repeat("x", 256)}, "region")
+}
+
+func TestParseNeed(t *testing.T) {
+	for need, want := range map[string][2]string{
+		"db": {"db", ""}, "db:healthy": {"db", "healthy"}, "db:started": {"db", "started"}, " db : healthy ": {"db", "healthy"},
+	} {
+		name, status, err := ParseNeed(need)
+		if err != nil || name != want[0] || status != want[1] {
+			t.Errorf("ParseNeed(%q) = %q, %q, %v; want %v", need, name, status, err, want)
+		}
+	}
+	for _, bad := range []string{"", ":healthy", "db:", "db:ready", "db:healthy:extra", "db:HEALTHY"} {
+		if _, _, err := ParseNeed(bad); err == nil {
+			t.Errorf("ParseNeed(%q) should fail", bad)
+		}
+	}
+}
+
+func TestConfigValidatorNeeds(t *testing.T) {
+	serverlets := func(specs ...map[string]interface{}) map[string]interface{} {
+		items := make([]interface{}, len(specs))
+		for i, spec := range specs {
+			items[i] = spec
+		}
+		return map[string]interface{}{"serverlets": items}
+	}
+	sl := func(name string, needs ...interface{}) map[string]interface{} {
+		spec := map[string]interface{}{"name": name}
+		if len(needs) > 0 {
+			spec["needs"] = needs
+		}
+		return spec
+	}
+	validateConfig(t, serverlets(sl("db"), sl("cache"), sl("web", "db", "cache:started"), sl("worker", "db:healthy", "web")))
+
+	for name, config := range map[string]map[string]interface{}{
+		"undeclared serverlet": serverlets(sl("web", "db")),
+		"needs itself":         serverlets(sl("web", "web")),
+		"direct cycle":         serverlets(sl("a", "b"), sl("b", "a")),
+		"longer cycle":         serverlets(sl("a", "b"), sl("b", "c"), sl("c", "a:healthy")),
+		"unknown status":       serverlets(sl("db"), sl("web", "db:ready")),
+		"empty name":           serverlets(sl("db"), sl("web", ":healthy")),
+		"not strings":          serverlets(sl("db"), sl("web", float64(1))),
+		"not an array":         serverlets(sl("db"), map[string]interface{}{"name": "web", "needs": "db"}),
+	} {
+		t.Run(name, func(t *testing.T) {
+			assertConfigFieldError(t, config, "serverlets")
+		})
+	}
+}
+
+func TestConfigValidatorNeedsErrorsAreSpecific(t *testing.T) {
+	for want, config := range map[string]map[string]interface{}{
+		"which is not declared": {"serverlets": []interface{}{map[string]interface{}{"name": "web", "needs": []interface{}{"db"}}}},
+		"cannot need itself":    {"serverlets": []interface{}{map[string]interface{}{"name": "web", "needs": []interface{}{"web"}}}},
+		"form a cycle":          {"serverlets": []interface{}{map[string]interface{}{"name": "a", "needs": []interface{}{"b"}}, map[string]interface{}{"name": "b", "needs": []interface{}{"a"}}}},
+		"unknown status":        {"serverlets": []interface{}{map[string]interface{}{"name": "db"}, map[string]interface{}{"name": "web", "needs": []interface{}{"db:ready"}}}},
+	} {
+		_, errs, _ := ConfigValidator.ValidateWithWarnings(config)
+		if message := errs["serverlets"]; !strings.Contains(message, want) {
+			t.Errorf("error %q should mention %q", message, want)
+		}
 	}
 }

@@ -14,8 +14,8 @@ import (
 
 // workspaceFlag and projectFlag are shared by every command that needs to
 // resolve a workspace (and, where relevant, a project within it).
-var workspaceFlag = &cli.StringFlag{Name: "workspace", Usage: "Workspace name or ID (defaults to futrou.json, then the workspace selected at login)"}
-var projectFlag = &cli.StringFlag{Name: "project", Usage: "Project name or ID within the workspace (defaults to futrou.json, then \"default\")"}
+var workspaceFlag = &cli.StringFlag{Name: "workspace", Usage: "Workspace name or ID (defaults to futrou.json|yaml, then the workspace selected at login)"}
+var projectFlag = &cli.StringFlag{Name: "project", Usage: "Project name or ID within the workspace (defaults to futrou.json|yaml, then \"default\")"}
 
 var uuidRe = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
@@ -118,11 +118,11 @@ func resolveProjectID(c *cli.Context, workspaceID string) (string, error) {
 }
 
 var workspacesCommand = &cli.Command{
-	Name:  "workspaces",
+	Name:  "workspace",
 	Usage: "Manage workspaces",
 	Subcommands: []*cli.Command{
 		{
-			Name:  "list",
+			Name:  "ls",
 			Usage: "List all workspaces",
 			Action: func(c *cli.Context) error {
 				client, err := requireAuth(c)
@@ -145,8 +145,8 @@ var workspacesCommand = &cli.Command{
 			},
 		},
 		{
-			Name:      "get",
-			Usage:     "Get a workspace by ID",
+			Name:      "show",
+			Usage:     "Show a workspace by ID",
 			ArgsUsage: "<id>",
 			Action: func(c *cli.Context) error {
 				id := c.Args().First()
@@ -211,7 +211,7 @@ var workspacesCommand = &cli.Command{
 			},
 		},
 		{
-			Name:      "delete",
+			Name:      "rm",
 			Usage:     "Delete a workspace",
 			ArgsUsage: "<id>",
 			Action: func(c *cli.Context) error {
@@ -238,7 +238,7 @@ var workspacesCommand = &cli.Command{
 			},
 		},
 		{
-			Name:  "limits",
+			Name:  "limit",
 			Usage: "Get resource limits for a workspace",
 			Flags: []cli.Flag{workspaceFlag},
 			Action: func(c *cli.Context) error {
@@ -266,8 +266,8 @@ var workspacesCommand = &cli.Command{
 			Usage: "Manage workspace billing contact",
 			Subcommands: []*cli.Command{
 				{
-					Name:  "get",
-					Usage: "Get the workspace billing contact",
+					Name:  "show",
+					Usage: "Show the workspace billing contact",
 					Flags: []cli.Flag{workspaceFlag},
 					Action: func(c *cli.Context) error {
 						workspaceID, err := resolveWorkspaceID(c)
@@ -362,11 +362,11 @@ var workspacesCommand = &cli.Command{
 			},
 		},
 		{
-			Name:  "users",
+			Name:  "user",
 			Usage: "Manage users in a workspace",
 			Subcommands: []*cli.Command{
 				{
-					Name:  "list",
+					Name:  "ls",
 					Usage: "List users in a workspace",
 					Flags: []cli.Flag{workspaceFlag},
 					Action: func(c *cli.Context) error {
@@ -394,8 +394,8 @@ var workspacesCommand = &cli.Command{
 					},
 				},
 				{
-					Name:      "get",
-					Usage:     "Get a user in a workspace",
+					Name:      "show",
+					Usage:     "Show a user in a workspace",
 					ArgsUsage: "<workspace-user-id>",
 					Flags:     []cli.Flag{workspaceFlag},
 					Action: func(c *cli.Context) error {
@@ -497,7 +497,7 @@ var workspacesCommand = &cli.Command{
 					},
 				},
 				{
-					Name:      "remove",
+					Name:      "rm",
 					Usage:     "Remove a user from a workspace",
 					ArgsUsage: "<workspace-user-id>",
 					Flags:     []cli.Flag{workspaceFlag},

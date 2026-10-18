@@ -128,7 +128,7 @@ func TestDNSLogs(t *testing.T) {
 	ts := newTestServer(t)
 	ts.on("GET", "/v2/dns/dns-789/logs", respond(200, []interface{}{map[string]string{"message": "query received"}}))
 
-	out, err := runArgs(t, ts, "dns", "logs", "dns-789")
+	out, err := runArgs(t, ts, "dns", "logs", "--live=false", "dns-789")
 	assertNoError(t, err)
 	assertContains(t, out, "query received")
 }
@@ -147,7 +147,7 @@ func TestDNSLogs_withFlags(t *testing.T) {
 		respond(200, []interface{}{})(w, r)
 	})
 
-	_, err := runArgs(t, ts, "dns", "logs", "--offset", "10", "--limit", "50", "--search", "error", "dns-789")
+	_, err := runArgs(t, ts, "dns", "logs", "--live=false", "--offset", "10", "--limit", "50", "--search", "error", "dns-789")
 	assertNoError(t, err)
 	assertContains(t, gotQuery, "offset=10")
 	assertContains(t, gotQuery, "limit=50")

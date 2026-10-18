@@ -210,7 +210,7 @@ func TestServerletsLogs(t *testing.T) {
 		map[string]interface{}{"ts": "2026-01-01T00:00:00Z", "msg": "started"},
 	}))
 
-	out, err := runArgs(t, ts, "serverlets", "logs", "sl-123")
+	out, err := runArgs(t, ts, "serverlets", "logs", "--live=false", "sl-123")
 	assertNoError(t, err)
 	assertContains(t, out, "started")
 }
@@ -230,4 +230,90 @@ func TestServerletsStart_missingID(t *testing.T) {
 	ts := newTestServer(t)
 	_, err := runArgs(t, ts, "serverlets", "start")
 	assertError(t, err)
+}
+
+func TestServerletsLogsAndMetrics(t *testing.T) {
+	ts := newTestServer(t)
+	ts.on("GET", "/v2/serverlets/sl-1/logs", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("limit") != "5" {
+			t.Errorf("expected limit=5, got %q", r.URL.RawQuery)
+		}
+		respond(200, []interface{}{map[string]interface{}{"message": "hello-log"}})(w, r)
+	})
+	ts.on("GET", "/v2/serverlets/sl-1/metrics", respond(200, map[string]interface{}{"cpu": "metric-value"}))
+	ts.on("GET", "/v2/serverlets/sl-1/instances/i-1/logs", respond(200, []interface{}{map[string]interface{}{"message": "inst-log"}}))
+	ts.on("GET", "/v2/serverlets/sl-1/instances/i-1/metrics", respond(200, map[string]interface{}{"cpu": "inst-metric"}))
+
+	out, err := runArgs(t, ts, "serverlet", "logs", "--live=false", "--limit", "5", "sl-1")
+	assertNoError(t, err)
+	assertContains(t, out, "hello-log")
+	out, err = runArgs(t, ts, "serverlet", "metrics", "sl-1")
+	assertNoError(t, err)
+	assertContains(t, out, "metric-value")
+	out, err = runArgs(t, ts, "serverlet", "instance", "logs", "--live=false", "sl-1", "i-1")
+	assertNoError(t, err)
+	assertContains(t, out, "inst-log")
+	out, err = runArgs(t, ts, "serverlet", "instance", "metrics", "sl-1", "i-1")
+	assertNoError(t, err)
+	assertContains(t, out, "inst-metric")
+}
+
+func TestServerletsLifecycle(t *testing.T) {
+	ts := newTestServer(t)
+	for _, action := range []string{"start", "stop", "restart", "wake"} {
+		ts.on("POST", "/v2/serverlets/sl-1/"+action, respondEmpty)
+		out, err := runArgs(t, ts, "serverlet", action, "sl-1")
+		assertNoError(t, err)
+		assertContains(t, out, action)
+	}
+	for _, action := range []string{"start", "stop", "restart"} {
+		ts.on("POST", "/v2/serverlets/sl-1/instances/i-1/"+action, respondEmpty)
+		out, err := runArgs(t, ts, "serverlet", "instance", action, "sl-1", "i-1")
+		assertNoError(t, err)
+		assertContains(t, out, action)
+	}
+}
+
+func TestServerletInstanceCommandsRequireIDs(t *testing.T) {
+	ts := newTestServer(t)
+	for _, args := range [][]string{
+		{"serverlet", "instance", "ls"}, {"serverlet", "instance"}, {"serverlet", "instance", "logs", "sl-1"},
+		{"serverlet", "instance", "metrics", "sl-1"}, {"serverlet", "instance", "start", "sl-1"},
+		{"serverlet", "logs"}, {"serverlet", "metrics"}, {"serverlet", "wake"},
+	} {
+		_, err := runArgs(t, ts, args...)
+		assertError(t, err)
+	}
+}
+
+func TestServerletInstanceLsAndErrors(t *testing.T) {
+	ts := newTestServer(t)
+	ts.on("GET", "/v2/serverlets/sl-1/instances", respond(200, []any{map[string]any{"id": "inst-9", "status": "running"}}))
+	for _, args := range [][]string{{"serverlet", "instance", "ls", "sl-1"}, {"serverlet", "instance", "sl-1"}} {
+		out, err := runArgs(t, ts, args...)
+		assertNoError(t, err)
+		assertContains(t, out, "inst-9")
+	}
+
+	ts.on("POST", "/v2/serverlets/sl-1/instances/i-1/stop", respond(404, fixtureAPIError("gone")))
+	ts.on("GET", "/v2/serverlets/sl-1/metrics", respond(500, fixtureAPIError("boom")))
+	ts.on("POST", "/v2/serverlets/sl-1/start", respond(409, fixtureAPIError("busy")))
+	for _, args := range [][]string{
+		{"serverlet", "instance", "stop", "sl-1", "i-1"}, {"serverlet", "metrics", "sl-1"}, {"serverlet", "start", "sl-1"},
+	} {
+		_, err := runArgs(t, ts, args...)
+		assertError(t, err)
+	}
+}
+
+func TestServerletLifecycleJSON(t *testing.T) {
+	ts := newTestServer(t)
+	ts.on("POST", "/v2/serverlets/sl-1/restart", respondEmpty)
+	ts.on("POST", "/v2/serverlets/sl-1/instances/i-1/restart", respondEmpty)
+	out, err := runArgs(t, ts, "--log-format", "json", "serverlet", "restart", "sl-1")
+	assertNoError(t, err)
+	assertContains(t, out, "restart")
+	out, err = runArgs(t, ts, "--log-format", "json", "serverlet", "instance", "restart", "sl-1", "i-1")
+	assertNoError(t, err)
+	assertContains(t, out, "restart")
 }

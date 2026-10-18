@@ -7,11 +7,11 @@ import (
 )
 
 var proxiesCommand = &cli.Command{
-	Name:  "proxies",
+	Name:  "proxy",
 	Usage: "Manage HTTPs/TCP/UDP proxies",
 	Subcommands: []*cli.Command{
 		{
-			Name:  "list",
+			Name:  "ls",
 			Usage: "List all proxies",
 			Action: func(c *cli.Context) error {
 				client, err := requireAuth(c)
@@ -34,8 +34,8 @@ var proxiesCommand = &cli.Command{
 			},
 		},
 		{
-			Name:      "get",
-			Usage:     "Get a proxy by ID",
+			Name:      "show",
+			Usage:     "Show a proxy by ID",
 			ArgsUsage: "<id>",
 			Action: func(c *cli.Context) error {
 				id := c.Args().First()
@@ -156,7 +156,7 @@ var proxiesCommand = &cli.Command{
 			},
 		},
 		{
-			Name:      "delete",
+			Name:      "rm",
 			Usage:     "Delete a proxy",
 			ArgsUsage: "<id>",
 			Action: func(c *cli.Context) error {
@@ -238,50 +238,14 @@ var proxiesCommand = &cli.Command{
 			Usage:     "View logs for a proxy",
 			ArgsUsage: "<id>",
 			Flags:     logFlags,
-			Action: func(c *cli.Context) error {
-				id := c.Args().First()
-				if id == "" {
-					return fmt.Errorf("proxy ID required")
-				}
-				client, err := requireAuth(c)
-				if err != nil {
-					return err
-				}
-				var result interface{}
-				status, err := client.RequestInto("GET", "/v2/proxies/"+id+"/logs"+logQueryString(c), nil, &result)
-				if err != nil {
-					return err
-				}
-				if status >= 400 {
-					return fmt.Errorf("request failed with status %d", status)
-				}
-				return printJSON(result)
-			},
+			Action:    resourceLogsAction("proxy", "/v2/proxies", logOptions{hasTail: true}),
 			Subcommands: []*cli.Command{
 				{
 					Name:      "tail",
 					Usage:     "View recent logs for a proxy",
 					ArgsUsage: "<id>",
 					Flags:     logFlags,
-					Action: func(c *cli.Context) error {
-						id := c.Args().First()
-						if id == "" {
-							return fmt.Errorf("proxy ID required")
-						}
-						client, err := requireAuth(c)
-						if err != nil {
-							return err
-						}
-						var result interface{}
-						status, err := client.RequestInto("GET", "/v2/proxies/"+id+"/logs/tail"+logQueryString(c), nil, &result)
-						if err != nil {
-							return err
-						}
-						if status >= 400 {
-							return fmt.Errorf("request failed with status %d", status)
-						}
-						return printJSON(result)
-					},
+					Action:    resourceLogsAction("proxy", "/v2/proxies", logOptions{hasTail: true, forceTail: true}),
 				},
 			},
 		},

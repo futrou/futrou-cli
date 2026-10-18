@@ -5,23 +5,27 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
+	"futrou-cli/src/api"
+	projectconfig "futrou-cli/src/config"
 	"futrou-cli/src/constants"
 	"futrou-cli/src/services"
 
 	"github.com/urfave/cli/v2"
 )
 
-var initCommand = &cli.Command{
-	Name:  "init",
-	Usage: "Create a futrou.json config file for this project",
+// initConfigCommand creates a futrou.json for the current directory.
+var initConfigCommand = &cli.Command{
+	Name:  "config",
+	Usage: "Configure a futrou.json|yaml config file for this project",
 	Flags: []cli.Flag{
 		&cli.StringFlag{
 			Name:    "file",
 			Aliases: []string{"f"},
-			Usage:   "Output file path",
+			Usage:   "Output file path; .yaml and .yml files are written as YAML",
 			Value:   "futrou.json",
 		},
 		&cli.StringFlag{Name: "name", Usage: "Serverlet name"},
@@ -77,24 +81,15 @@ var initCommand = &cli.Command{
 			image = strings.TrimSpace(input)
 		}
 
-		cfg := map[string]interface{}{
-			"$schema": constants.ProjectConfigSchemaURL,
-			"project": projectName,
-			"serverlets": []map[string]interface{}{
-				{
-					"name":  name,
-					"image": image,
-				},
-			},
+		cfg := &projectconfig.Config{
+			Schema:     constants.ProjectConfigSchemaURL,
+			Project:    projectName,
+			Serverlets: []projectconfig.ServerletConfig{{Serverlet: api.Serverlet{Name: name, Image: image}}},
 		}
-
-		data, err := json.MarshalIndent(cfg, "", "  ")
-		if err != nil {
-			return fmt.Errorf("encoding config: %w", err)
-		}
-
-		if err := os.WriteFile(outFile, append(data, '\n'), 0644); err != nil {
-			return fmt.Errorf("writing %s: %w", outFile, err)
+		// Save writes the format of the file name: JSON for .json, YAML for
+		// .yaml/.yml.
+		if _, err := cfg.Save(".", outFile); err != nil {
+			return err
 		}
 
 		if isJSON(c) {
@@ -107,6 +102,121 @@ var initCommand = &cli.Command{
 		fmt.Printf("  futrou deploy -y     — deploy without confirmation\n")
 		return nil
 	},
+}
+
+// initCommand sets Futrou up in the current project: "init config" writes
+// futrou.json, "init mcp" and "init skills" configure AI coding agents. A bare
+// "init" still creates the config file.
+var initCommand = &cli.Command{
+	Name:   "init",
+	Usage:  "Set up Futrou in this project (config, mcp, skills)",
+	Flags:  initConfigCommand.Flags,
+	Action: initConfigCommand.Action,
+	Subcommands: []*cli.Command{
+		initMcpCommand,
+		initSkillsCommand,
+		initConfigCommand,
+	},
+}
+
+// initMcpCommand configures the Futrou MCP server for AI coding agents.
+var initMcpCommand = &cli.Command{
+	Name:  "mcp",
+	Usage: "Configure Futrou MCP for AI coding agents",
+	Action: func(c *cli.Context) error {
+		written := []string{}
+
+		if path, err := writeMcpConfig(".mcp.json", "type"); err != nil {
+			return err
+		} else if path != "" {
+			written = append(written, path)
+		}
+
+		if path, err := writeMcpConfig(filepath.Join(".cursor", "mcp.json"), ""); err != nil {
+			return err
+		} else if path != "" {
+			written = append(written, path)
+		}
+
+		if isJSON(c) {
+			return printJSON(map[string]interface{}{"written": written})
+		}
+		for _, p := range written {
+			fmt.Printf("✓ Configured %s\n", p)
+		}
+		if len(written) == 0 {
+			fmt.Println("Futrou MCP is already configured.")
+		}
+		return nil
+	},
+}
+
+// initSkillsCommand installs the Futrou agent skill.
+var initSkillsCommand = &cli.Command{
+	Name:  "skills",
+	Usage: "Configure Futrou Skills for AI coding agents",
+	Action: func(c *cli.Context) error {
+		if _, err := exec.LookPath("npx"); err != nil {
+			return fmt.Errorf("npx is required to install skills — install Node.js and try again")
+		}
+		cmd := exec.Command("npx", "-y", "skills", "add", "futrou/futrou-cli", "-y")
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		cmd.Stdin = os.Stdin
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("installing skills: %w", err)
+		}
+		return nil
+	},
+}
+
+// writeMcpConfig merges a "futrou" MCP server entry into the JSON file at
+// path, creating it if missing. When typeField is non-empty, it's set to
+// "http" alongside the url (Claude Code's .mcp.json shape); Cursor's
+// .cursor/mcp.json omits it. Returns "" if the entry was already present.
+func writeMcpConfig(path, typeField string) (string, error) {
+	config := map[string]interface{}{}
+
+	if data, err := os.ReadFile(path); err == nil {
+		if err := json.Unmarshal(data, &config); err != nil {
+			return "", fmt.Errorf("parsing %s: %w", path, err)
+		}
+	} else if !os.IsNotExist(err) {
+		return "", fmt.Errorf("reading %s: %w", path, err)
+	}
+
+	servers, _ := config["mcpServers"].(map[string]interface{})
+	if servers == nil {
+		servers = map[string]interface{}{}
+	}
+
+	if existing, ok := servers["futrou"].(map[string]interface{}); ok {
+		if existing["url"] == constants.McpUrl {
+			return "", nil
+		}
+	}
+
+	entry := map[string]interface{}{"url": constants.McpUrl}
+	if typeField != "" {
+		entry[typeField] = "http"
+	}
+	servers["futrou"] = entry
+	config["mcpServers"] = servers
+
+	if dir := filepath.Dir(path); dir != "." {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return "", fmt.Errorf("creating %s: %w", dir, err)
+		}
+	}
+
+	data, err := json.MarshalIndent(config, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(path, append(data, '\n'), 0644); err != nil {
+		return "", fmt.Errorf("writing %s: %w", path, err)
+	}
+	return path, nil
 }
 
 // checkServerletName looks up existing serverlets and returns an alternative name if taken.

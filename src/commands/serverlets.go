@@ -20,11 +20,11 @@ import (
 )
 
 var serverletsCommand = &cli.Command{
-	Name:  "serverlets",
+	Name:  "serverlet",
 	Usage: "Manage serverlets",
 	Subcommands: []*cli.Command{
 		{
-			Name:  "list",
+			Name:  "ls",
 			Usage: "List all serverlets",
 			Action: func(c *cli.Context) error {
 				client, err := requireAuth(c)
@@ -47,8 +47,8 @@ var serverletsCommand = &cli.Command{
 			},
 		},
 		{
-			Name:      "get",
-			Usage:     "Get a serverlet by ID",
+			Name:      "show",
+			Usage:     "Show a serverlet by ID",
 			ArgsUsage: "<id>",
 			Action: func(c *cli.Context) error {
 				id := c.Args().First()
@@ -72,7 +72,7 @@ var serverletsCommand = &cli.Command{
 		},
 		{
 			Name:  "create",
-			Usage: "Create a new serverlet (defaults to futrou.json, then the login workspace's \"default\" project)",
+			Usage: "Create a new serverlet (defaults to futrou.json|yaml, then the login workspace's \"default\" project)",
 			Flags: []cli.Flag{
 				&cli.StringFlag{Name: "name", Required: true, Usage: "Serverlet name"},
 				&cli.StringFlag{Name: "image", Required: true, Usage: "Container image"},
@@ -163,7 +163,7 @@ var serverletsCommand = &cli.Command{
 			},
 		},
 		{
-			Name:      "delete",
+			Name:      "rm",
 			Usage:     "Delete a serverlet",
 			ArgsUsage: "<id>",
 			Action: func(c *cli.Context) error {
@@ -208,56 +208,79 @@ var serverletsCommand = &cli.Command{
 			Action:    serverletAction("restart"),
 		},
 		{
+			Name:      "wake",
+			Usage:     "Wake a sleeping serverlet",
+			ArgsUsage: "<id>",
+			Action:    serverletAction("wake"),
+		},
+		{
 			Name:      "logs",
 			Usage:     "View serverlet logs",
 			ArgsUsage: "<id>",
-			Action: func(c *cli.Context) error {
-				id := c.Args().First()
-				if id == "" {
-					return fmt.Errorf("serverlet ID required")
-				}
-				client, err := requireAuth(c)
-				if err != nil {
-					return err
-				}
-				var result interface{}
-				status, err := client.RequestInto("GET", "/v2/serverlets/"+id+"/logs", nil, &result)
-				if err != nil {
-					return err
-				}
-				if status >= 400 {
-					return fmt.Errorf("request failed with status %d", status)
-				}
-				return printJSON(result)
-			},
+			Flags:     logFlags,
+			Action:    resourceLogsAction("serverlet", "/v2/serverlets", logOptions{}),
 		},
 		{
-			Name:      "instances",
-			Usage:     "List serverlet instances",
+			Name:      "metrics",
+			Usage:     "Show serverlet metrics",
 			ArgsUsage: "<id>",
-			Action: func(c *cli.Context) error {
-				id := c.Args().First()
-				if id == "" {
-					return fmt.Errorf("serverlet ID required")
-				}
-				client, err := requireAuth(c)
-				if err != nil {
-					return err
-				}
-				var result interface{}
-				status, err := client.RequestInto("GET", "/v2/serverlets/"+id+"/instances", nil, &result)
-				if err != nil {
-					return err
-				}
-				if status >= 400 {
-					return fmt.Errorf("request failed with status %d", status)
-				}
-				if isJSON(c) {
-					return printJSON(result)
-				}
-				printTable(result, []string{"id", "status", "createdAt"})
-				return nil
+			Action:    serverletGet("/metrics"),
+		},
+		{
+			Name:  "instance",
+			Usage: "Manage serverlet instances",
+			Subcommands: []*cli.Command{
+				{
+					Name:      "ls",
+					Usage:     "List serverlet instances",
+					ArgsUsage: "<id>",
+					Action:    serverletInstancesAction,
+				},
+				{
+					Name:      "start",
+					Usage:     "Start a serverlet instance",
+					ArgsUsage: "<id> <instance-id>",
+					Action:    serverletInstanceAction("start"),
+				},
+				{
+					Name:      "stop",
+					Usage:     "Stop a serverlet instance",
+					ArgsUsage: "<id> <instance-id>",
+					Action:    serverletInstanceAction("stop"),
+				},
+				{
+					Name:      "restart",
+					Usage:     "Restart a serverlet instance",
+					ArgsUsage: "<id> <instance-id>",
+					Action:    serverletInstanceAction("restart"),
+				},
+				{
+					Name:      "logs",
+					Usage:     "View logs of a serverlet instance",
+					ArgsUsage: "<id> <instance-id>",
+					Flags:     logFlags,
+					Action: func(c *cli.Context) error {
+						id, instanceID := c.Args().Get(0), c.Args().Get(1)
+						if id == "" || instanceID == "" {
+							return fmt.Errorf("serverlet ID and instance ID required")
+						}
+						client, err := requireAuth(c)
+						if err != nil {
+							return err
+						}
+						return streamLogs(c, client, "/v2/serverlets/"+id+"/instances/"+instanceID, logOptions{})
+					},
+				},
+				{
+					Name:      "metrics",
+					Usage:     "Show metrics of a serverlet instance",
+					ArgsUsage: "<id> <instance-id>",
+					Action:    serverletInstanceGet("/metrics"),
+				},
 			},
+			// "instance <id>" keeps working as a shorthand for "instance ls <id>".
+			ArgsUsage: "<id>",
+			Action:    serverletInstancesAction,
 		},
 		shellCommand,
 		execCommand,
@@ -705,5 +728,94 @@ func printTable(data interface{}, cols []string) {
 			fmt.Print(strings.Repeat(" ", widths[i]-len(v)))
 		}
 		fmt.Println()
+	}
+}
+
+var serverletInstancesAction = func(c *cli.Context) error {
+	id := c.Args().First()
+	if id == "" {
+		return fmt.Errorf("serverlet ID required")
+	}
+	client, err := requireAuth(c)
+	if err != nil {
+		return err
+	}
+	var result interface{}
+	status, err := client.RequestInto("GET", "/v2/serverlets/"+id+"/instances", nil, &result)
+	if err != nil {
+		return err
+	}
+	if status >= 400 {
+		return fmt.Errorf("request failed with status %d", status)
+	}
+	if isJSON(c) {
+		return printJSON(result)
+	}
+	printTable(result, []string{"id", "status", "createdAt"})
+	return nil
+}
+
+// serverletGet prints the JSON response of GET /v2/serverlets/<id><suffix>.
+func serverletGet(suffix string) cli.ActionFunc {
+	return func(c *cli.Context) error {
+		id := c.Args().First()
+		if id == "" {
+			return fmt.Errorf("serverlet ID required")
+		}
+		return getJSON(c, "/v2/serverlets/"+id+suffix)
+	}
+}
+
+// serverletInstanceGet prints the JSON response of
+// GET /v2/serverlets/<id>/instances/<instance-id><suffix>.
+func serverletInstanceGet(suffix string) cli.ActionFunc {
+	return func(c *cli.Context) error {
+		id, instanceID := c.Args().Get(0), c.Args().Get(1)
+		if id == "" || instanceID == "" {
+			return fmt.Errorf("serverlet ID and instance ID required")
+		}
+		return getJSON(c, "/v2/serverlets/"+id+"/instances/"+instanceID+suffix)
+	}
+}
+
+func getJSON(c *cli.Context, path string) error {
+	client, err := requireAuth(c)
+	if err != nil {
+		return err
+	}
+	var result interface{}
+	status, err := client.RequestInto("GET", path, nil, &result)
+	if err != nil {
+		return err
+	}
+	if status >= 400 {
+		return fmt.Errorf("request failed with status %d", status)
+	}
+	return printJSON(result)
+}
+
+// serverletInstanceAction POSTs /v2/serverlets/<id>/instances/<instance-id>/<action>.
+func serverletInstanceAction(action string) cli.ActionFunc {
+	return func(c *cli.Context) error {
+		id, instanceID := c.Args().Get(0), c.Args().Get(1)
+		if id == "" || instanceID == "" {
+			return fmt.Errorf("serverlet ID and instance ID required")
+		}
+		client, err := requireAuth(c)
+		if err != nil {
+			return err
+		}
+		status, err := client.RequestInto("POST", "/v2/serverlets/"+id+"/instances/"+instanceID+"/"+action, nil, nil)
+		if err != nil {
+			return err
+		}
+		if status >= 400 {
+			return fmt.Errorf("request failed with status %d", status)
+		}
+		if isJSON(c) {
+			return printJSON(map[string]string{"status": action})
+		}
+		fmt.Printf("✓ Instance %s\n", action)
+		return nil
 	}
 }

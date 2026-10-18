@@ -140,7 +140,7 @@ func TestStoragesLogs(t *testing.T) {
 		map[string]interface{}{"ts": "2026-01-01T00:00:00Z", "msg": "ready"},
 	}))
 
-	out, err := runArgs(t, ts, "storages", "logs", "storage-def")
+	out, err := runArgs(t, ts, "storages", "logs", "--live=false", "storage-def")
 	assertNoError(t, err)
 	assertContains(t, out, "ready")
 }
@@ -151,7 +151,7 @@ func TestStoragesLogs_tail(t *testing.T) {
 		map[string]interface{}{"ts": "2026-01-01T00:00:00Z", "msg": "tailed"},
 	}))
 
-	out, err := runArgs(t, ts, "storages", "logs", "--tail", "storage-def")
+	out, err := runArgs(t, ts, "storages", "logs", "--live=false", "--tail", "storage-def")
 	assertNoError(t, err)
 	assertContains(t, out, "tailed")
 }

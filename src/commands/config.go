@@ -17,7 +17,7 @@ import (
 
 var configCommand = &cli.Command{
 	Name:  "config",
-	Usage: "Print the loaded Futrou project configuration as JSON",
+	Usage: "Display the loaded Futrou project configuration as JSON",
 	Flags: []cli.Flag{
 		&cli.StringFlag{
 			Name:    "file",

@@ -129,6 +129,7 @@ func TestConfigPullWritesCloudProjectResources(t *testing.T) {
 	ts.on("GET", "/v2/dns", respond(http.StatusOK, []any{map[string]any{"id": "dns-1", "name": "example.com"}}))
 	ts.on("GET", "/v2/dns/dns-1/records", respond(http.StatusOK, []any{map[string]any{"id": "record-1", "name": "www", "type": "A", "value": "203.0.113.10", "ttl": 300}}))
 	ts.on("GET", "/v2/proxies", respond(http.StatusOK, []any{map[string]any{"id": "proxy-1", "domain": "app.example.com", "type": "http", "target": "web"}}))
+	ts.on("GET", "/v2/networks", respond(http.StatusOK, []any{map[string]any{"id": "net-1", "name": "backend", "ipv4": "10.0.0.0/24"}}))
 	ts.on("GET", "/v2/storages", respond(http.StatusOK, []any{map[string]any{"id": "storage-1", "name": "data", "storagePlanId": "storage-plan-1"}}))
 	ts.on("GET", "/v2/crons", respond(http.StatusOK, []any{map[string]any{"id": "cron-1", "name": "hourly", "schedule": "0 * * * *", "url": "https://example.com/job"}}))
 
@@ -151,6 +152,9 @@ func TestConfigPullWritesCloudProjectResources(t *testing.T) {
 	if _, exists := serverlets[0].(map[string]any)["state"]; exists {
 		t.Fatalf("API-managed serverlet state must not be persisted: %#v", serverlets[0])
 	}
+	if networks, _ := pulled["networks"].([]any); len(networks) != 1 {
+		t.Fatalf("expected pulled network: %#v", pulled["networks"])
+	}
 	dns := pulled["dns"].([]any)
 	if len(dns[0].(map[string]any)["records"].([]any)) != 1 {
 		t.Fatalf("expected pulled DNS records: %#v", dns)
@@ -170,6 +174,7 @@ func TestConfigPullUsesLocalProjectWithoutProjectFlag(t *testing.T) {
 	ts.on("GET", "/v2/serverlets", respond(http.StatusOK, []any{}))
 	ts.on("GET", "/v2/dns", respond(http.StatusOK, []any{}))
 	ts.on("GET", "/v2/proxies", respond(http.StatusOK, []any{}))
+	ts.on("GET", "/v2/networks", respond(http.StatusOK, []any{}))
 	ts.on("GET", "/v2/storages", respond(http.StatusOK, []any{}))
 	ts.on("GET", "/v2/crons", respond(http.StatusOK, []any{}))
 	_, err := runArgs(t, ts, "config", "pull")

@@ -1,0 +1,109 @@
+# yaml-language-server: $schema=https://futrou.com/futrou.schema.json
+#
+# futrou.yaml (or futrou.yml) is converted to the equivalent futrou.json and
+# then validated and deployed exactly like it. Every option is shown below.
+# Config files are looked up in this order: futrou.json, futrou.js, futrou.cjs,
+# futrou.mjs, futrou.ts, futrou.yaml, futrou.yml.
+
+$schema: https://futrou.com/futrou.schema.json
+workspace: acme # workspace name or ID
+project: website # project name or ID; the deploy target
+region: <region-name-or-id> # default region (name or ID) of every resource below
+
+networks:
+  - name: backend
+    ipv4: 10.20.0.0/24
+    ipv6: fd00:20::/64
+    internal: false # true = no outbound access
+
+storages:
+  - name: uploads
+    storagePlanId: <storage-plan-id>
+    public: false
+
+serverlets:
+  - name: web
+    image: ghcr.io/acme/web:1.4.2
+    serverletPlanId: <serverlet-plan-id>
+    regionId: <region-id> # overrides the project region for this serverlet only
+    env: # values must be strings, so quote numbers
+      NODE_ENV: production
+      PORT: "8080"
+    mounts: # mount path -> storage ID
+      /data: <storage-id>
+    ports:
+      - port: 8080 # 1-65535
+        protocol: tcp # tcp, udp or http
+    networks: [backend] # networks the serverlet joins
+    entrypoint: node server.js # replaces the image's start command; an array is joined with spaces
+    cwd: /app
+    user: node
+    needs: # serverlets to wait for: "name", "name:started" or "name:healthy"
+      - db:healthy
+    healthcheck: curl -f http://localhost:8080/health
+    healthcheckInterval: 30 # seconds
+    healthcheckTimeout: 5 # seconds
+    healthcheckRetries: 3
+    startTimeout: 60 # seconds
+    stopTimeout: 30 # seconds
+    minInstances: 1
+    maxInstances: 3
+    scaling:
+      cpu: 70
+    strategy:
+      type: rolling
+
+  - name: db
+    image: postgres:17
+    serverletPlanId: <serverlet-plan-id>
+    env:
+      POSTGRES_PASSWORD: change-me
+    healthcheck: pg_isready -U postgres
+    healthcheckInterval: 10
+    ports:
+      - port: 5432
+    networks: [backend]
+
+proxies:
+  - domain: www.example.com
+    type: http # http, tcp or udp
+    target: web
+    port: 8080
+    strategy: round-robin # round-robin or primary-failover
+    variant: auto # auto, www or non-www
+    enforceHttps: true
+    followRedirects: true
+    preserveHeaders: true
+    preserveHost: true
+    preservePath: true
+    preserveQuery: true
+    verifyTls: true
+    proxyPlanId: <proxy-plan-id>
+
+dns:
+  - domain: example.com
+    name: example.com
+    ttl: 300
+    priority: 0
+    records:
+      - name: www
+        type: CNAME
+        value: proxy.futrou.com
+        ttl: 300
+      - name: "@"
+        type: MX
+        value: mail.example.com
+        ttl: 3600
+        priority: 10
+
+crons:
+  - name: cleanup
+    type: simple # simple (HTTP request) or code
+    schedule: "30 14 * * *" # cron expression
+    method: POST
+    url: https://www.example.com/internal/cleanup
+    headers:
+      Authorization: Bearer <token>
+    body: '{"dryRun":false}'
+    enabled: true
+    cronPlanId: <cron-plan-id>

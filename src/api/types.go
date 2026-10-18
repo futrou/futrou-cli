@@ -1,5 +1,5 @@
 // Code generated from the Futrou OpenAPI spec. DO NOT EDIT.
-// Generated at: 2026-08-30T17:14:09Z
+// Generated at: 2026-10-18T21:03:55Z
 // Source: https://api.futrou.com/v2/openapi.json
 
 package api
@@ -46,6 +46,7 @@ type Activity struct {
 	CreatedAt            time.Time              `json:"createdAt,omitempty"`
 	ExpiresAt            time.Time              `json:"expiresAt,omitempty"`
 	Id                   string                 `json:"id,omitempty"`
+	Ip                   string                 `json:"ip,omitempty"`
 	NewValues            map[string]interface{} `json:"newValues,omitempty"`
 	OldValues            map[string]interface{} `json:"oldValues,omitempty"`
 	ProjectId            string                 `json:"projectId,omitempty"`
@@ -61,6 +62,7 @@ type Activity struct {
 	Type                 *ActivityType          `json:"type,omitempty"`
 	UpdatedAt            time.Time              `json:"updatedAt,omitempty"`
 	User                 *User                  `json:"user,omitempty"`
+	UserAgent            string                 `json:"userAgent,omitempty"`
 	UserId               string                 `json:"userId,omitempty"`
 	UserIdLabel          string                 `json:"userIdLabel,omitempty"`
 	Workspace            *Workspace             `json:"workspace,omitempty"`
@@ -94,6 +96,7 @@ const (
 	ActivityTypeWorkspaceUserCreated ActivityType = "workspace_user_created"
 	ActivityTypeWorkspaceUserUpdated ActivityType = "workspace_user_updated"
 	ActivityTypeWorkspaceUserDeleted ActivityType = "workspace_user_deleted"
+	ActivityTypeChatCreated          ActivityType = "chat_created"
 	ActivityTypeOrderCreated         ActivityType = "order_created"
 	ActivityTypeOrderCanceled        ActivityType = "order_canceled"
 	ActivityTypeVoucherCreated       ActivityType = "voucher_created"
@@ -115,6 +118,9 @@ const (
 	ActivityTypeRegionCreated        ActivityType = "region_created"
 	ActivityTypeRegionUpdated        ActivityType = "region_updated"
 	ActivityTypeRegionDeleted        ActivityType = "region_deleted"
+	ActivityTypeTemplateCreated      ActivityType = "template_created"
+	ActivityTypeTemplateUpdated      ActivityType = "template_updated"
+	ActivityTypeTemplateDeleted      ActivityType = "template_deleted"
 	ActivityTypeServerCreated        ActivityType = "server_created"
 	ActivityTypeServerUpdated        ActivityType = "server_updated"
 	ActivityTypeServerDeleted        ActivityType = "server_deleted"
@@ -136,12 +142,12 @@ const (
 	ActivityTypeVariableCreated      ActivityType = "variable_created"
 	ActivityTypeVariableUpdated      ActivityType = "variable_updated"
 	ActivityTypeVariableDeleted      ActivityType = "variable_deleted"
-	ActivityTypeCertCreated          ActivityType = "cert_created"
-	ActivityTypeCertDeleted          ActivityType = "cert_deleted"
-	ActivityTypeCertRenewed          ActivityType = "cert_renewed"
 	ActivityTypeMonitorCreated       ActivityType = "monitor_created"
 	ActivityTypeMonitorUpdated       ActivityType = "monitor_updated"
 	ActivityTypeMonitorDeleted       ActivityType = "monitor_deleted"
+	ActivityTypeNetworkCreated       ActivityType = "network_created"
+	ActivityTypeNetworkUpdated       ActivityType = "network_updated"
+	ActivityTypeNetworkDeleted       ActivityType = "network_deleted"
 )
 
 // Any Any JSON object not defined as schema
@@ -179,9 +185,10 @@ type ApiToken struct {
 type ApiTokenType string
 
 const (
-	ApiTokenTypeUser      ApiTokenType = "user"
-	ApiTokenTypeWorkspace ApiTokenType = "workspace"
-	ApiTokenTypeServer    ApiTokenType = "server"
+	ApiTokenTypeUser          ApiTokenType = "user"
+	ApiTokenTypeWorkspace     ApiTokenType = "workspace"
+	ApiTokenTypeServer        ApiTokenType = "server"
+	ApiTokenTypeOauth2Refresh ApiTokenType = "oauth2_refresh"
 )
 
 // App App (Model)
@@ -337,6 +344,14 @@ const (
 	LanguageCs Language = "cs"
 )
 
+// MfaType Mfa Type enumeration
+type MfaType string
+
+const (
+	MfaTypeOtpApp   MfaType = "otp_app"
+	MfaTypeOtpEmail MfaType = "otp_email"
+)
+
 // OAuth2Type Oauth2type enumeration
 type OAuth2Type string
 
@@ -446,8 +461,11 @@ type Project struct {
 	DisplayName       string     `json:"displayName,omitempty"`
 	GitRepositoryName string     `json:"gitRepositoryName,omitempty"`
 	GitRepositoryUrl  string     `json:"gitRepositoryUrl,omitempty"`
+	Icon              string     `json:"icon,omitempty"`
 	Id                string     `json:"id,omitempty"`
 	Name              string     `json:"name,omitempty"`
+	Region            *Region    `json:"region,omitempty"`
+	RegionId          string     `json:"regionId,omitempty"`
 	UpdatedAt         time.Time  `json:"updatedAt,omitempty"`
 	Workspace         *Workspace `json:"workspace,omitempty"`
 	WorkspaceId       string     `json:"workspaceId,omitempty"`
@@ -477,6 +495,7 @@ type Proxy struct {
 	Target          string         `json:"target,omitempty"`
 	Type            *ProxyType     `json:"type,omitempty"`
 	UpdatedAt       time.Time      `json:"updatedAt,omitempty"`
+	Variant         *ProxyVariant  `json:"variant,omitempty"`
 	VerifyTls       bool           `json:"verifyTls,omitempty"`
 	Workspace       *Workspace     `json:"workspace,omitempty"`
 	WorkspaceId     string         `json:"workspaceId,omitempty"`
@@ -509,6 +528,15 @@ const (
 	ProxyTypeHttp ProxyType = "http"
 	ProxyTypeTcp  ProxyType = "tcp"
 	ProxyTypeUdp  ProxyType = "udp"
+)
+
+// ProxyVariant Proxy Variant enumeration
+type ProxyVariant string
+
+const (
+	ProxyVariantAuto   ProxyVariant = "auto"
+	ProxyVariantWww    ProxyVariant = "www"
+	ProxyVariantNonWww ProxyVariant = "non-www"
 )
 
 // Region Region (Model)
@@ -554,46 +582,63 @@ const (
 
 // Server Server (Model)
 type Server struct {
-	ApiCertHash string     `json:"apiCertHash,omitempty"`
-	ApiHost     string     `json:"apiHost,omitempty"`
 	ApiPort     string     `json:"apiPort,omitempty"`
 	ApiTokens   []ApiToken `json:"apiTokens,omitempty"`
 	Arch        *Arch      `json:"arch,omitempty"`
 	CreatedAt   time.Time  `json:"createdAt,omitempty"`
 	DisplayName string     `json:"displayName,omitempty"`
 	Domain      string     `json:"domain,omitempty"`
+	Hostname    string     `json:"hostname,omitempty"`
+	Icon        string     `json:"icon,omitempty"`
 	Id          string     `json:"id,omitempty"`
+	Ipv4        string     `json:"ipv4,omitempty"`
+	Ipv6        string     `json:"ipv6,omitempty"`
 	IsPublic    bool       `json:"isPublic,omitempty"`
 	JoinedAt    time.Time  `json:"joinedAt,omitempty"`
+	Kernel      string     `json:"kernel,omitempty"`
 	Name        string     `json:"name,omitempty"`
+	Os          string     `json:"os,omitempty"`
 	Region      *Region    `json:"region,omitempty"`
 	RegionId    string     `json:"regionId,omitempty"`
 	SeenAt      time.Time  `json:"seenAt,omitempty"`
 	UpdatedAt   time.Time  `json:"updatedAt,omitempty"`
+	Version     string     `json:"version,omitempty"`
 	WorkspaceId string     `json:"workspaceId,omitempty"`
 }
 
 // Serverlet Serverlet (Model)
 type Serverlet struct {
-	Arch            *Arch              `json:"arch,omitempty"`
-	CreatedAt       time.Time          `json:"createdAt,omitempty"`
-	Id              string             `json:"id,omitempty"`
-	Image           string             `json:"image,omitempty"`
-	MaxInstances    float64            `json:"maxInstances,omitempty"`
-	MinInstances    float64            `json:"minInstances,omitempty"`
-	Mounts          map[string]string  `json:"mounts,omitempty"`
-	Name            string             `json:"name,omitempty"`
-	Project         *Project           `json:"project,omitempty"`
-	ProjectId       string             `json:"projectId,omitempty"`
-	Region          *Region            `json:"region,omitempty"`
-	RegionId        string             `json:"regionId,omitempty"`
-	Scaling         map[string]float64 `json:"scaling,omitempty"`
-	ServerletPlan   *ServerletPlan     `json:"serverletPlan,omitempty"`
-	ServerletPlanId string             `json:"serverletPlanId,omitempty"`
-	Status          *ServerletStatus   `json:"status,omitempty"`
-	UpdatedAt       time.Time          `json:"updatedAt,omitempty"`
-	Workspace       *Workspace         `json:"workspace,omitempty"`
-	WorkspaceId     string             `json:"workspaceId,omitempty"`
+	Arch                *Arch                  `json:"arch,omitempty"`
+	CreatedAt           time.Time              `json:"createdAt,omitempty"`
+	Cwd                 string                 `json:"cwd,omitempty"`
+	Entrypoint          []string               `json:"entrypoint,omitempty"`
+	Healthcheck         string                 `json:"healthcheck,omitempty"`
+	HealthcheckInterval float64                `json:"healthcheckInterval,omitempty"`
+	HealthcheckRetries  float64                `json:"healthcheckRetries,omitempty"`
+	HealthcheckTimeout  float64                `json:"healthcheckTimeout,omitempty"`
+	Id                  string                 `json:"id,omitempty"`
+	Image               string                 `json:"image,omitempty"`
+	MaxInstances        float64                `json:"maxInstances,omitempty"`
+	MinInstances        float64                `json:"minInstances,omitempty"`
+	Mounts              map[string]string      `json:"mounts,omitempty"`
+	Name                string                 `json:"name,omitempty"`
+	Needs               []string               `json:"needs,omitempty"`
+	Networks            []string               `json:"networks,omitempty"`
+	Project             *Project               `json:"project,omitempty"`
+	ProjectId           string                 `json:"projectId,omitempty"`
+	Region              *Region                `json:"region,omitempty"`
+	RegionId            string                 `json:"regionId,omitempty"`
+	Scaling             map[string]float64     `json:"scaling,omitempty"`
+	ServerletPlan       *ServerletPlan         `json:"serverletPlan,omitempty"`
+	ServerletPlanId     string                 `json:"serverletPlanId,omitempty"`
+	StartTimeout        float64                `json:"startTimeout,omitempty"`
+	Status              *ServerletStatus       `json:"status,omitempty"`
+	StopTimeout         float64                `json:"stopTimeout,omitempty"`
+	Strategy            map[string]interface{} `json:"strategy,omitempty"`
+	UpdatedAt           time.Time              `json:"updatedAt,omitempty"`
+	User                string                 `json:"user,omitempty"`
+	Workspace           *Workspace             `json:"workspace,omitempty"`
+	WorkspaceId         string                 `json:"workspaceId,omitempty"`
 }
 
 // ServerletPlan ServerletPlan (Model)
@@ -666,28 +711,23 @@ type StoragePlan struct {
 
 // Transaction Transaction (Model)
 type Transaction struct {
-	CreatedAt   time.Time  `json:"createdAt,omitempty"`
-	Currency    *Currency  `json:"currency,omitempty"`
-	Description string     `json:"description,omitempty"`
-	Id          string     `json:"id,omitempty"`
-	Price       float64    `json:"price,omitempty"`
-	Project     *Project   `json:"project,omitempty"`
-	ProjectId   string     `json:"projectId,omitempty"`
-	Type        string     `json:"type,omitempty"`
-	Unit        string     `json:"unit,omitempty"`
-	UpdatedAt   time.Time  `json:"updatedAt,omitempty"`
-	Value       float64    `json:"value,omitempty"`
-	Workspace   *Workspace `json:"workspace,omitempty"`
-	WorkspaceId string     `json:"workspaceId,omitempty"`
+	ChatId      string                 `json:"chatId,omitempty"`
+	CreatedAt   time.Time              `json:"createdAt,omitempty"`
+	Currency    *Currency              `json:"currency,omitempty"`
+	Description string                 `json:"description,omitempty"`
+	Id          string                 `json:"id,omitempty"`
+	Metadata    map[string]interface{} `json:"metadata,omitempty"`
+	Price       float64                `json:"price,omitempty"`
+	Project     *Project               `json:"project,omitempty"`
+	ProjectId   string                 `json:"projectId,omitempty"`
+	Type        string                 `json:"type,omitempty"`
+	Unit        string                 `json:"unit,omitempty"`
+	UpdatedAt   time.Time              `json:"updatedAt,omitempty"`
+	UserId      string                 `json:"userId,omitempty"`
+	Value       float64                `json:"value,omitempty"`
+	Workspace   *Workspace             `json:"workspace,omitempty"`
+	WorkspaceId string                 `json:"workspaceId,omitempty"`
 }
-
-// TwoFaType Two Fa Type enumeration
-type TwoFaType string
-
-const (
-	TwoFaTypeOtpApp   TwoFaType = "otp_app"
-	TwoFaTypeOtpEmail TwoFaType = "otp_email"
-)
 
 // User User (Model)
 type User struct {
@@ -700,6 +740,8 @@ type User struct {
 	Id                string                   `json:"id,omitempty"`
 	IsEmailConfirmed  bool                     `json:"isEmailConfirmed,omitempty"`
 	IsStaff           bool                     `json:"isStaff,omitempty"`
+	MfaBackupCodes    []string                 `json:"mfaBackupCodes,omitempty"`
+	MfaType           *MfaType                 `json:"mfaType,omitempty"`
 	OauthAccessTokens []OauthAuthorizationCode `json:"oauthAccessTokens,omitempty"`
 	RegistrationIp    string                   `json:"registrationIp,omitempty"`
 	SsoAvatarUrl      string                   `json:"ssoAvatarUrl,omitempty"`
@@ -709,8 +751,6 @@ type User struct {
 	SsoMicrosoftId    string                   `json:"ssoMicrosoftId,omitempty"`
 	SsoZohoId         string                   `json:"ssoZohoId,omitempty"`
 	StaffRole         *StaffRole               `json:"staffRole,omitempty"`
-	TwoFaBackupCodes  []string                 `json:"twoFaBackupCodes,omitempty"`
-	TwoFaType         *TwoFaType               `json:"twoFaType,omitempty"`
 	UpdatedAt         time.Time                `json:"updatedAt,omitempty"`
 	WorkspaceUsers    []WorkspaceUser          `json:"workspaceUsers,omitempty"`
 	Workspaces        *Any                     `json:"workspaces,omitempty"`
@@ -752,37 +792,40 @@ type Voucher struct {
 
 // Workspace Workspace (Model)
 type Workspace struct {
-	Activities          []Activity      `json:"activities,omitempty"`
-	ApiTokensLimit      float64         `json:"apiTokensLimit,omitempty"`
-	AutoJoinDomain      string          `json:"autoJoinDomain,omitempty"`
-	AutoJoinRole        *WorkspaceRole  `json:"autoJoinRole,omitempty"`
-	Contact             *Contact        `json:"contact,omitempty"`
-	ContactId           string          `json:"contactId,omitempty"`
-	CreatedAt           time.Time       `json:"createdAt,omitempty"`
-	Credit              float64         `json:"credit,omitempty"`
-	Crons               []Cron          `json:"crons,omitempty"`
-	CronsLimit          float64         `json:"cronsLimit,omitempty"`
-	Currency            *Currency       `json:"currency,omitempty"`
-	DisplayName         string          `json:"displayName,omitempty"`
-	DnsLimit            float64         `json:"dnsLimit,omitempty"`
-	FeatureFlags        []string        `json:"featureFlags,omitempty"`
-	Id                  string          `json:"id,omitempty"`
-	Language            *Language       `json:"language,omitempty"`
-	Name                string          `json:"name,omitempty"`
-	Number              float64         `json:"number,omitempty"`
-	Orders              []Order         `json:"orders,omitempty"`
-	Projects            []Project       `json:"projects,omitempty"`
-	ProjectsLimit       float64         `json:"projectsLimit,omitempty"`
-	ProxiesLimit        float64         `json:"proxiesLimit,omitempty"`
-	ServerletsLimit     float64         `json:"serverletsLimit,omitempty"`
-	ServersLimit        float64         `json:"serversLimit,omitempty"`
-	StorageLimit        float64         `json:"storageLimit,omitempty"`
-	Transactions        []Transaction   `json:"transactions,omitempty"`
-	UpdatedAt           time.Time       `json:"updatedAt,omitempty"`
-	Users               *Any            `json:"users,omitempty"`
-	Vouchers            []Voucher       `json:"vouchers,omitempty"`
-	WorkspaceUsers      []WorkspaceUser `json:"workspaceUsers,omitempty"`
-	WorkspaceUsersLimit float64         `json:"workspaceUsersLimit,omitempty"`
+	Activities             []Activity      `json:"activities,omitempty"`
+	AiAgentTokensLimit     float64         `json:"aiAgentTokensLimit,omitempty"`
+	AiAgentUsdLimit        float64         `json:"aiAgentUsdLimit,omitempty"`
+	ApiTokensLimit         float64         `json:"apiTokensLimit,omitempty"`
+	AutoJoinDomain         string          `json:"autoJoinDomain,omitempty"`
+	AutoJoinRole           *WorkspaceRole  `json:"autoJoinRole,omitempty"`
+	ChatAiSessionStartedAt time.Time       `json:"chatAiSessionStartedAt,omitempty"`
+	Contact                *Contact        `json:"contact,omitempty"`
+	ContactId              string          `json:"contactId,omitempty"`
+	CreatedAt              time.Time       `json:"createdAt,omitempty"`
+	Credit                 float64         `json:"credit,omitempty"`
+	Crons                  []Cron          `json:"crons,omitempty"`
+	CronsLimit             float64         `json:"cronsLimit,omitempty"`
+	Currency               *Currency       `json:"currency,omitempty"`
+	DisplayName            string          `json:"displayName,omitempty"`
+	DnsLimit               float64         `json:"dnsLimit,omitempty"`
+	FeatureFlags           []string        `json:"featureFlags,omitempty"`
+	Id                     string          `json:"id,omitempty"`
+	Language               *Language       `json:"language,omitempty"`
+	Name                   string          `json:"name,omitempty"`
+	Number                 float64         `json:"number,omitempty"`
+	Orders                 []Order         `json:"orders,omitempty"`
+	Projects               []Project       `json:"projects,omitempty"`
+	ProjectsLimit          float64         `json:"projectsLimit,omitempty"`
+	ProxiesLimit           float64         `json:"proxiesLimit,omitempty"`
+	ServerletsLimit        float64         `json:"serverletsLimit,omitempty"`
+	ServersLimit           float64         `json:"serversLimit,omitempty"`
+	StorageLimit           float64         `json:"storageLimit,omitempty"`
+	Transactions           []Transaction   `json:"transactions,omitempty"`
+	UpdatedAt              time.Time       `json:"updatedAt,omitempty"`
+	Users                  *Any            `json:"users,omitempty"`
+	Vouchers               []Voucher       `json:"vouchers,omitempty"`
+	WorkspaceUsers         []WorkspaceUser `json:"workspaceUsers,omitempty"`
+	WorkspaceUsersLimit    float64         `json:"workspaceUsersLimit,omitempty"`
 }
 
 // WorkspaceRole Staff role hierarchy - ordered from lowest to highest privilege Workspace roles, keyed in hierarchy order from lowest to highest privilege.

@@ -7,11 +7,11 @@ import (
 )
 
 var projectsCommand = &cli.Command{
-	Name:  "projects",
+	Name:  "project",
 	Usage: "Manage projects",
 	Subcommands: []*cli.Command{
 		{
-			Name:  "list",
+			Name:  "ls",
 			Usage: "List all projects",
 			Action: func(c *cli.Context) error {
 				client, err := requireAuth(c)
@@ -34,8 +34,8 @@ var projectsCommand = &cli.Command{
 			},
 		},
 		{
-			Name:      "get",
-			Usage:     "Get a project by ID",
+			Name:      "show",
+			Usage:     "Show a project by ID",
 			ArgsUsage: "<id>",
 			Action: func(c *cli.Context) error {
 				id := c.Args().First()
@@ -140,7 +140,7 @@ var projectsCommand = &cli.Command{
 			},
 		},
 		{
-			Name:      "delete",
+			Name:      "rm",
 			Usage:     "Delete a project",
 			ArgsUsage: "<id>",
 			Action: func(c *cli.Context) error {

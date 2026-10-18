@@ -37,3 +37,4 @@ docs/
 # Futrou CLI
 .futrou
 futrou.json
+!/examples/futrou.json

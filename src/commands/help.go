@@ -65,11 +65,28 @@ Documentation:
 }
 
 // expandedGroups lists command names whose subcommands should be listed
-// inline in top-level help (e.g. "setup mcp", "setup skills") instead of
-// collapsing to a single "setup" line, since unlike proxies/dns/serverlets/
+// inline in top-level help (e.g. "init config", "init mcp") instead of
+// collapsing to a single "init" line, since unlike proxies/dns/serverlets/
 // etc. their subcommands are the whole point of the command.
 var expandedGroups = map[string]bool{
-	"setup": true,
+	"init": true,
+}
+
+// helpGroupBreaks names the top-level commands that start a new group in the
+// top-level help; a blank line is printed before each. The order of the
+// groups is the order of appCommands in root.go.
+var helpGroupBreaks = map[string]bool{
+	"login":     true, // account and config
+	"init":      true, // project setup
+	"workspace": true, // workspaces, projects and servers
+	"serverlet": true, // services
+	"upgrade":   true, // everything else
+}
+
+// helpDisplayNames overrides how a command is named in the top-level help;
+// the aliases are not listed after the name as usual.
+var helpDisplayNames = map[string]string{
+	"deploy": "up (deploy)",
 }
 
 // commandLines renders the top-level command list, one line per command,
@@ -80,6 +97,11 @@ func commandLines(commands []*cli.Command) string {
 		if cmd.Hidden {
 			continue
 		}
+		if helpGroupBreaks[cmd.Name] {
+			// A tab-terminated empty cell keeps the blank line inside the
+			// aligned column block instead of restarting the alignment.
+			b.WriteString("\n   \t")
+		}
 		if expandedGroups[cmd.Name] {
 			for _, sub := range cmd.Subcommands {
 				if sub.Hidden || sub.Name == "help" {
@@ -89,7 +111,11 @@ func commandLines(commands []*cli.Command) string {
 			}
 			continue
 		}
-		fmt.Fprintf(&b, "\n   %s\t%s", strings.Join(cmd.Names(), ", "), cmd.Usage)
+		display, ok := helpDisplayNames[cmd.Name]
+		if !ok {
+			display = strings.Join(cmd.Names(), ", ")
+		}
+		fmt.Fprintf(&b, "\n   %s\t%s", display, cmd.Usage)
 	}
 	return b.String()
 }
@@ -138,7 +164,7 @@ func setHelpTemplate(app *cli.App) {
 			"commandBadge": commandBadge,
 			"commandLines": commandLines,
 		})
-		io.WriteString(w, strings.ReplaceAll(buf.String(), defaultHelpUsage, helpUsage))
+		io.WriteString(w, hideGlobalHelpFlag(clearBlankLines(strings.ReplaceAll(buf.String(), defaultHelpUsage, helpUsage))))
 	}
 }
 
@@ -148,4 +174,37 @@ func setHelpTemplate(app *cli.App) {
 func commandBadge(helpName string) string {
 	label := strings.TrimSpace(strings.TrimPrefix(helpName, constants.Name))
 	return appBadge(label)
+}
+
+// clearBlankLines removes the padding the column alignment leaves on the
+// separator lines of the command list.
+func clearBlankLines(text string) string {
+	lines := strings.Split(text, "\n")
+	for i, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			lines[i] = ""
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+// hideGlobalHelpFlag drops the "--help, -h" line from the "Global options:"
+// section of the top-level help; every command still accepts the flag, and
+// the per-command help keeps listing it.
+func hideGlobalHelpFlag(text string) string {
+	lines := strings.Split(text, "\n")
+	out := make([]string, 0, len(lines))
+	inGlobal := false
+	for _, line := range lines {
+		switch {
+		case strings.TrimSpace(line) == "Global options:":
+			inGlobal = true
+		case strings.TrimSpace(line) == "":
+			inGlobal = false
+		case inGlobal && strings.HasPrefix(strings.TrimSpace(line), "--help, -h"):
+			continue
+		}
+		out = append(out, line)
+	}
+	return strings.Join(out, "\n")
 }

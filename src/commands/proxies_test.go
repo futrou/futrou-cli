@@ -246,7 +246,7 @@ func TestProxiesLogs(t *testing.T) {
 	ts := newTestServer(t)
 	ts.on("GET", "/v2/proxies/px-456/logs", respond(200, []interface{}{map[string]string{"message": "request handled"}}))
 
-	out, err := runArgs(t, ts, "proxies", "logs", "px-456")
+	out, err := runArgs(t, ts, "proxies", "logs", "--live=false", "px-456")
 	assertNoError(t, err)
 	assertContains(t, out, "request handled")
 }
@@ -265,7 +265,7 @@ func TestProxiesLogs_withFlags(t *testing.T) {
 		respond(200, []interface{}{})(w, r)
 	})
 
-	_, err := runArgs(t, ts, "proxies", "logs", "--offset", "10", "--limit", "50", "--search", "error", "px-456")
+	_, err := runArgs(t, ts, "proxies", "logs", "--live=false", "--offset", "10", "--limit", "50", "--search", "error", "px-456")
 	assertNoError(t, err)
 	assertContains(t, gotQuery, "offset=10")
 	assertContains(t, gotQuery, "limit=50")

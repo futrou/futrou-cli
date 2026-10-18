@@ -1,0 +1,139 @@
+{
+  "$schema": "https://futrou.com/futrou.schema.json",
+  "workspace": "acme",
+  "project": "website",
+  "region": "<region-name-or-id>",
+  "networks": [
+    {
+      "name": "backend",
+      "ipv4": "10.20.0.0/24",
+      "ipv6": "fd00:20::/64",
+      "internal": false
+    }
+  ],
+  "storages": [
+    {
+      "name": "uploads",
+      "storagePlanId": "<storage-plan-id>",
+      "public": false
+    }
+  ],
+  "serverlets": [
+    {
+      "name": "web",
+      "image": "ghcr.io/acme/web:1.4.2",
+      "serverletPlanId": "<serverlet-plan-id>",
+      "regionId": "<region-id>",
+      "env": {
+        "NODE_ENV": "production",
+        "PORT": "8080"
+      },
+      "mounts": {
+        "/data": "<storage-id>"
+      },
+      "ports": [
+        {
+          "port": 8080,
+          "protocol": "tcp"
+        }
+      ],
+      "networks": [
+        "backend"
+      ],
+      "entrypoint": "node server.js",
+      "cwd": "/app",
+      "user": "node",
+      "needs": [
+        "db:healthy"
+      ],
+      "healthcheck": "curl -f http://localhost:8080/health",
+      "healthcheckInterval": 30,
+      "healthcheckTimeout": 5,
+      "healthcheckRetries": 3,
+      "startTimeout": 60,
+      "stopTimeout": 30,
+      "minInstances": 1,
+      "maxInstances": 3,
+      "scaling": {
+        "cpu": 70
+      },
+      "strategy": {
+        "type": "rolling"
+      }
+    },
+    {
+      "name": "db",
+      "image": "postgres:17",
+      "serverletPlanId": "<serverlet-plan-id>",
+      "env": {
+        "POSTGRES_PASSWORD": "change-me"
+      },
+      "ports": [
+        {
+          "port": 5432
+        }
+      ],
+      "networks": [
+        "backend"
+      ],
+      "healthcheck": "pg_isready -U postgres",
+      "healthcheckInterval": 10
+    }
+  ],
+  "proxies": [
+    {
+      "domain": "www.example.com",
+      "type": "http",
+      "target": "web",
+      "port": 8080,
+      "strategy": "round-robin",
+      "variant": "auto",
+      "enforceHttps": true,
+      "followRedirects": true,
+      "preserveHeaders": true,
+      "preserveHost": true,
+      "preservePath": true,
+      "preserveQuery": true,
+      "verifyTls": true,
+      "proxyPlanId": "<proxy-plan-id>"
+    }
+  ],
+  "dns": [
+    {
+      "domain": "example.com",
+      "name": "example.com",
+      "ttl": 300,
+      "priority": 0,
+      "records": [
+        {
+          "name": "www",
+          "type": "CNAME",
+          "value": "proxy.futrou.com",
+          "ttl": 300
+        },
+        {
+          "name": "@",
+          "type": "MX",
+          "value": "mail.example.com",
+          "ttl": 3600,
+          "priority": 10
+        }
+      ]
+    }
+  ],
+  "crons": [
+    {
+      "name": "cleanup",
+      "type": "simple",
+      "schedule": "30 14 * * *",
+      "method": "POST",
+      "url": "https://www.example.com/internal/cleanup",
+      "headers": {
+        "Authorization": "Bearer <token>"
+      },
+      "body": "{\"dryRun\":false}",
+      "enabled": true,
+      "cronPlanId": "<cron-plan-id>"
+    }
+  ]
+}

@@ -231,3 +231,58 @@ func assertContains(t *testing.T, s, substr string) {
 		t.Errorf("expected output to contain %q\ngot: %s", substr, s)
 	}
 }
+
+func TestGlobalFlags_apiUrl(t *testing.T) {
+	ts := newTestServer(t)
+	ts.on("GET", "/v2/serverlets", respond(200, []interface{}{fixtureServerlet()}))
+
+	out, err := runArgs(t, ts, "serverlets", "list")
+	assertNoError(t, err)
+	assertContains(t, out, "sl-123")
+}
+
+func TestGlobalFlags_apiToken_env(t *testing.T) {
+	ts := newTestServer(t)
+	ts.on("GET", "/v2/serverlets", respond(200, []interface{}{fixtureServerlet()}))
+
+	t.Setenv("FUTROU_API_TOKEN", "env-token")
+	t.Setenv("HOME", t.TempDir())
+
+	// run without --api-key flag; token comes from env
+	args := []string{"futrou", "--api-url", ts.URL, "serverlets", "list"}
+	out, err := captureRun(args)
+	assertNoError(t, err)
+	assertContains(t, out, "sl-123")
+}
+
+func TestGlobalFlags_logLevel(t *testing.T) {
+	ts := newTestServer(t)
+	ts.on("GET", "/v2/serverlets", respond(200, []interface{}{fixtureServerlet()}))
+
+	out, err := runArgs(t, ts, "--log-level", "debug", "serverlets", "list")
+	assertNoError(t, err)
+	assertContains(t, out, "sl-123")
+}
+
+func TestGlobalFlags_logFormat_json(t *testing.T) {
+	ts := newTestServer(t)
+	ts.on("GET", "/v2/serverlets/sl-123", respond(200, fixtureServerlet()))
+
+	out, err := runArgs(t, ts, "--log-format", "json", "serverlets", "get", "sl-123")
+	assertNoError(t, err)
+	assertContains(t, out, "sl-123")
+}
+
+func TestGlobalFlags_apiKey_alias(t *testing.T) {
+	ts := newTestServer(t)
+	ts.on("GET", "/v2/serverlets", respond(200, []interface{}{fixtureServerlet()}))
+
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("FUTROU_API_TOKEN", "")
+
+	// --api-token alias should work the same as --api-key
+	args := []string{"futrou", "--api-url", ts.URL, "--api-token", "test-token", "serverlets", "list"}
+	out, err := captureRun(args)
+	assertNoError(t, err)
+	assertContains(t, out, "sl-123")
+}

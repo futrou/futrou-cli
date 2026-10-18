@@ -4,12 +4,14 @@ package deployer
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"reflect"
 	"sort"
 	"strings"
 
 	"futrou-cli/src/config"
 	"futrou-cli/src/services"
+	"futrou-cli/src/validators"
 )
 
 type ActionType string
@@ -42,14 +44,17 @@ type resourceSpec struct {
 	path     string
 	nameKey  string
 	items    func(*config.Config) interface{}
+	// regional resources take a regionId, defaulted from the project's region.
+	regional bool
 }
 
 var resources = []resourceSpec{
-	{"serverlet", "/v2/serverlets", "name", func(c *config.Config) interface{} { return c.Serverlets }},
-	{"dns zone", "/v2/dns", "domain", func(c *config.Config) interface{} { return c.DNS }},
-	{"proxy", "/v2/proxies", "domain", func(c *config.Config) interface{} { return c.Proxies }},
-	{"storage", "/v2/storages", "name", func(c *config.Config) interface{} { return c.Storages }},
-	{"cron", "/v2/crons", "name", func(c *config.Config) interface{} { return c.Crons }},
+	{"network", "/v2/networks", "name", func(c *config.Config) interface{} { return c.Networks }, true},
+	{"serverlet", "/v2/serverlets", "name", func(c *config.Config) interface{} { return c.Serverlets }, true},
+	{"dns zone", "/v2/dns", "domain", func(c *config.Config) interface{} { return c.DNS }, false},
+	{"proxy", "/v2/proxies", "domain", func(c *config.Config) interface{} { return c.Proxies }, true},
+	{"storage", "/v2/storages", "name", func(c *config.Config) interface{} { return c.Storages }, true},
+	{"cron", "/v2/crons", "name", func(c *config.Config) interface{} { return c.Crons }, true},
 }
 
 // BuildPlan compares every resource declared in cfg with the API. destroy
@@ -63,11 +68,25 @@ func BuildPlan(client *services.ApiClient, cfg *config.Config, destroy bool) (*P
 			return nil, fmt.Errorf("pulling cloud configuration: %w", err)
 		}
 	}
+	regionID := ""
+	if cfg.Region != "" {
+		var err error
+		if regionID, err = ResolveRegionID(client, cfg.Region); err != nil {
+			return nil, err
+		}
+	}
 	plan := &Plan{}
 	for _, spec := range resources {
 		desired, err := itemsAsMaps(spec.items(cfg))
 		if err != nil {
 			return nil, fmt.Errorf("reading %s config: %w", spec.resource, err)
+		}
+		if spec.regional && regionID != "" {
+			applyRegion(desired, regionID)
+		}
+		if spec.resource == "serverlet" {
+			// Create what others wait for first; delete it last.
+			desired = orderByNeeds(desired, destroy)
 		}
 		if remoteConfig == nil && len(desired) == 0 {
 			continue
@@ -149,6 +168,85 @@ func BuildPlan(client *services.ApiClient, cfg *config.Config, destroy bool) (*P
 	return plan, nil
 }
 
+// orderByNeeds sorts serverlets so that every serverlet comes after the ones
+// it needs ("db" or "db:healthy" entries); with reverse it comes before them,
+// which is the order for deleting. Serverlets that do not depend on each
+// other keep their relative order, and unknown or cyclic needs are ignored
+// (the config validator rejects them before a deploy gets here).
+func orderByNeeds(items []map[string]interface{}, reverse bool) []map[string]interface{} {
+	byName := map[string]int{}
+	for i, item := range items {
+		byName[stringValue(item["name"])] = i
+	}
+	ordered := make([]map[string]interface{}, 0, len(items))
+	state := make([]int, len(items)) // 1 = visiting, 2 = done
+	var visit func(i int)
+	visit = func(i int) {
+		if state[i] != 0 {
+			return
+		}
+		state[i] = 1
+		needs, _ := items[i]["needs"].([]interface{})
+		for _, entry := range needs {
+			text, _ := entry.(string)
+			name, _, err := validators.ParseNeed(text)
+			if err != nil {
+				continue
+			}
+			if j, ok := byName[name]; ok {
+				visit(j)
+			}
+		}
+		state[i] = 2
+		ordered = append(ordered, items[i])
+	}
+	for i := range items {
+		visit(i)
+	}
+	if reverse {
+		for l, r := 0, len(ordered)-1; l < r; l, r = l+1, r-1 {
+			ordered[l], ordered[r] = ordered[r], ordered[l]
+		}
+	}
+	return ordered
+}
+
+// ResolveRegionID returns the ID of the region whose ID, name or display name
+// equals region (names are matched case-insensitively).
+func ResolveRegionID(client *services.ApiClient, region string) (string, error) {
+	var regions []map[string]interface{}
+	if _, err := client.RequestInto("GET", "/v2/regions", nil, &regions); err != nil {
+		return "", fmt.Errorf("listing regions: %w", err)
+	}
+	var names []string
+	for _, item := range regions {
+		id := stringValue(item["id"])
+		if id == region {
+			return id, nil
+		}
+		for _, key := range []string{"name", "displayName"} {
+			if name := stringValue(item[key]); name != "" {
+				if strings.EqualFold(name, region) {
+					return id, nil
+				}
+			}
+		}
+		if name := stringValue(item["name"]); name != "" {
+			names = append(names, name)
+		}
+	}
+	return "", fmt.Errorf("region %q not found (available: %s)", region, strings.Join(names, ", "))
+}
+
+// applyRegion sets regionId on every item that does not choose its own.
+func applyRegion(items []map[string]interface{}, regionID string) {
+	for _, item := range items {
+		if stringValue(item["regionId"]) == "" {
+			item["regionId"] = regionID
+		}
+	}
+}
+
 func matchingResources(remote, desired []map[string]interface{}, nameKey string) []map[string]interface{} {
 	result := []map[string]interface{}{}
 	for _, item := range remote {
@@ -164,6 +262,8 @@ func matchingResources(remote, desired []map[string]interface{}, nameKey string)
 
 func lockGroup(resource string) string {
 	switch resource {
+	case "network":
+		return "networks"
 	case "serverlet":
 		return "serverlets"
 	case "dns zone":
@@ -342,6 +442,39 @@ func findDNSRecord(remote, desiredRecords []map[string]interface{}, index int, d
 		}
 	}
 	return nil
+}
+
+// teardownOrder lists the resources removed by BuildTeardownPlan, dependents
+// first: workloads before the storages and networks they use.
+var teardownOrder = []string{"cron", "proxy", "serverlet", "storage", "network", "dns zone"}
+
+// BuildTeardownPlan plans the deletion of every resource in the project
+// selected by cfg, followed by the project itself.
+func BuildTeardownPlan(client *services.ApiClient, cfg *config.Config) (*Plan, error) {
+	project, err := cfg.ResolveProject(client)
+	if err != nil {
+		return nil, err
+	}
+	plan := &Plan{}
+	for _, resource := range teardownOrder {
+		for _, spec := range resources {
+			if spec.resource != resource {
+				continue
+			}
+			var remote []map[string]interface{}
+			if _, err := client.RequestInto("GET", spec.path+"?projectId="+url.QueryEscape(project.Id), nil, &remote); err != nil {
+				return nil, fmt.Errorf("listing %ss: %w", spec.resource, err)
+			}
+			if spec.resource == "serverlet" {
+				remote = orderByNeeds(remote, true)
+			}
+			for _, item := range remote {
+				plan.Actions = append(plan.Actions, Action{Type: Delete, Resource: spec.resource, Name: itemName(item, spec.nameKey), ID: stringValue(item["id"]), Path: spec.path})
+			}
+		}
+	}
+	plan.Actions = append(plan.Actions, Action{Type: Delete, Resource: "project", Name: project.Name, ID: project.Id, Path: "/v2/projects"})
+	return plan, nil
 }
 
 // Apply executes every action in order.
