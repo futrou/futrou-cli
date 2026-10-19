@@ -1,6 +1,6 @@
 #!/bin/bash
 # Every test file must be named after the source file it tests:
-# src/commands/storages_test.go tests src/commands/storages.go. An optional
+# src/commands/storage_test.go tests src/commands/storage.go. An optional
 # category suffix is allowed (storages_logs_test.go); the prefix must match
 # an existing source file in the same directory.
 set -euo pipefail

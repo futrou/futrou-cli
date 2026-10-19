@@ -64,8 +64,8 @@ declarative `futrou.json` model in `src/config/`, its validators in
 ## Tests
 
 - Every change and every new behavior needs tests, including error and edge cases.
-- A test file is named after the source file it tests: `storages.go` is tested in
-  `storages_test.go`. An optional category suffix is allowed (`storages_logs_test.go`),
+- A test file is named after the source file it tests: `storage.go` is tested in
+  `storage_test.go`. An optional category suffix is allowed (`storage_logs_test.go`),
   but the prefix must match an existing source file in the same directory.
   `scripts/check-test-names.sh` (run by `make test`) enforces this.
 - Commands are tested through `runArgs` against the mock server in `root_test.go`.
