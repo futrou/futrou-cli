@@ -5,6 +5,7 @@ import (
 
 	"futrou-cli/src/constants"
 	"futrou-cli/src/logger"
+	"futrou-cli/src/services"
 
 	"github.com/urfave/cli/v2"
 )
@@ -17,18 +18,20 @@ func Execute() {
 }
 
 // globalApiUrl returns the --api-url value walking up to the root context.
+// A missing scheme is added and a trailing /v2 dropped (services.NormalizeApiUrl),
+// so "localhost:4000", "api.futrou.com" and "https://api.futrou.com/v2" all work.
 func globalApiUrl(c *cli.Context) string {
 	if v := c.String("api-url"); v != "" {
-		return v
+		return services.NormalizeApiUrl(v)
 	}
 	if c.Lineage() != nil {
 		for _, parent := range c.Lineage() {
 			if v := parent.String("api-url"); v != "" {
-				return v
+				return services.NormalizeApiUrl(v)
 			}
 		}
 	}
-	return constants.ApiUrl
+	return services.NormalizeApiUrl(constants.ApiUrl)
 }
 
 // globalApiKey returns the --api-token value (or its hidden --api-key

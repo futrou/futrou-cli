@@ -20,7 +20,7 @@ var logFlags = []cli.Flag{
 	&cli.StringFlag{Name: "start-at", Usage: "Only return logs at or after this time"},
 	&cli.StringFlag{Name: "end-at", Usage: "Only return logs at or before this time"},
 	&cli.BoolFlag{Name: "tail", Usage: "Show only the most recent log entries"},
-	&cli.BoolFlag{Name: "live", Value: true, Usage: "Keep streaming new log entries; use --live=false to print once and exit"},
+	&cli.BoolFlag{Name: "live", Usage: "Keep streaming new log entries until interrupted"},
 }
 
 // logQuery builds the query parameters for logFlags (tail and live are

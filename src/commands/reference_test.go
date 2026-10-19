@@ -41,7 +41,7 @@ func TestReferenceCoversCommandsAndFlags(t *testing.T) {
 	reference := ReferenceMarkdown()
 	for _, want := range []string{
 		"futrou deploy|up ", "futrou serverlet ls ", "futrou network create --name <string> ", "futrou server logs <id> ",
-		"[--live=false]", "[LOG-OPTIONS]", "[--file|-f <string>]", "[--yes|-y]", "--instance-id <string>",
+		"[--live]", "[LOG-OPTIONS]", "[--file|-f <string>]", "[--yes|-y]", "--instance-id <string>",
 		"futrou dns metrics <id> ", "futrou storage metrics <id> ", "futrou serverlet instance logs <id> <instance-id> [LOG-OPTIONS]",
 		"# Deploy or upgrade resources based on futrou.json|yaml config",
 	} {

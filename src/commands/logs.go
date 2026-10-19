@@ -101,8 +101,8 @@ type logOptions struct {
 
 // streamLogs prints the logs of the resource at base (e.g. /v2/proxies/<id>).
 // --tail limits output to recent entries, using the API's /logs/tail endpoint
-// when opts.hasTail is set; --live (the default) keeps polling and prints
-// only new entries.
+// when opts.hasTail is set; --live keeps polling and prints only new entries.
+// Without either, the logs are printed once.
 func streamLogs(c *cli.Context, client *services.ApiClient, base string, opts logOptions) error {
 	live := c.Bool("live") && !opts.forceTail
 	recent := opts.forceTail || c.Bool("tail") || live

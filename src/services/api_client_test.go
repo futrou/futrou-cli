@@ -405,3 +405,29 @@ func TestApiClientDownloadFile_NonJSONErrorBody(t *testing.T) {
 		t.Errorf("error = %#v", err)
 	}
 }
+
+func TestNormalizeApiUrlAcceptsEverySpelling(t *testing.T) {
+	for in, want := range map[string]string{
+		"":                              "",
+		"api.futrou.com":                "https://api.futrou.com",
+		"api.futrou.com/":               "https://api.futrou.com",
+		"api.futrou.com/v2":             "https://api.futrou.com",
+		"https://api.futrou.com":        "https://api.futrou.com",
+		"https://api.futrou.com/v2/":    "https://api.futrou.com",
+		"HTTPS://api.futrou.com":        "HTTPS://api.futrou.com",
+		"api.futrou.com:8443":           "https://api.futrou.com:8443",
+		"10.0.0.5:8585":                 "https://10.0.0.5:8585",
+		"localhost:4000":                "http://localhost:4000",
+		"127.0.0.1:4000":                "http://127.0.0.1:4000",
+		"[::1]:4000":                    "http://[::1]:4000",
+		"http://localhost:4000/v2":      "http://localhost:4000",
+		"wss://api.futrou.com":          "https://api.futrou.com",
+		"ws://localhost:4000":           "http://localhost:4000",
+		"  https://api.futrou.com/v2  ": "https://api.futrou.com",
+		"[2001:db8::1]:8443":            "https://[2001:db8::1]:8443",
+	} {
+		if got := NormalizeApiUrl(in); got != want {
+			t.Errorf("NormalizeApiUrl(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

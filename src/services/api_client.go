@@ -7,7 +7,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -37,12 +39,40 @@ type ApiClient struct {
 // SetAfterMutation installs a callback run after a successful write request.
 func (ac *ApiClient) SetAfterMutation(callback func() error) { ac.afterMutation = callback }
 
-// NormalizeApiUrl strips a trailing slash and a trailing "/v2" so that both
-// "https://api.futrou.com" and "https://api.futrou.com/v2" resolve the same.
+// NormalizeApiUrl turns whatever --api-url / FUTROU_API_URL holds into a base
+// URL: a missing scheme is added (https, or http for localhost and other
+// loopback addresses, where development servers run), ws/wss become http/https,
+// and a trailing slash and a trailing "/v2" are dropped, so "api.futrou.com",
+// "https://api.futrou.com/" and "https://api.futrou.com/v2" all resolve alike.
 func NormalizeApiUrl(apiUrl string) string {
+	apiUrl = strings.TrimSpace(apiUrl)
+	if apiUrl == "" {
+		return ""
+	}
+	if !strings.Contains(apiUrl, "://") {
+		scheme := "https"
+		if parsed, err := url.Parse("//" + apiUrl); err == nil && isLoopbackHost(parsed.Hostname()) {
+			scheme = "http"
+		}
+		apiUrl = scheme + "://" + apiUrl
+	}
+	switch {
+	case strings.HasPrefix(strings.ToLower(apiUrl), "wss://"):
+		apiUrl = "https://" + apiUrl[len("wss://"):]
+	case strings.HasPrefix(strings.ToLower(apiUrl), "ws://"):
+		apiUrl = "http://" + apiUrl[len("ws://"):]
+	}
 	apiUrl = strings.TrimRight(apiUrl, "/")
 	apiUrl = strings.TrimSuffix(apiUrl, "/v2")
-	return apiUrl
+	return strings.TrimRight(apiUrl, "/")
+}
+
+func isLoopbackHost(host string) bool {
+	if strings.EqualFold(host, "localhost") || strings.HasSuffix(strings.ToLower(host), ".localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 // NewApiClient creates a client loaded from config/env.
@@ -52,8 +82,9 @@ func NewApiClient(apiUrl, token string) (*ApiClient, error) {
 	if err != nil {
 		return nil, err
 	}
+	cfg.ApiUrl = NormalizeApiUrl(cfg.ApiUrl)
 	if apiUrl != "" {
-		cfg.ApiUrl = apiUrl
+		cfg.ApiUrl = NormalizeApiUrl(apiUrl)
 	}
 	resolvedToken := cfg.TokenFor(cfg.ApiUrl)
 	if token != "" {

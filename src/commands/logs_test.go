@@ -117,7 +117,7 @@ func TestLogsFollowPrintsOnlyNewEntries(t *testing.T) {
 		respond(200, entries)(w, r)
 	})
 
-	out, err := runArgs(t, ts, "server", "logs", "srv-1")
+	out, err := runArgs(t, ts, "server", "logs", "--live", "srv-1")
 	assertError(t, err)
 	if strings.Count(out, "first") != 1 || strings.Count(out, "second") != 1 {
 		t.Fatalf("expected each entry once, got:\n%s", out)

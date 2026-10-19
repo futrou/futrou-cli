@@ -15,8 +15,11 @@ declarative `futrou.json` model in `src/config/`, its validators in
   `logs`, and `init` with `init config`, `init mcp`, `init skills` (hidden alias `setup`).
   The `cloud` command belongs to nasua, not this CLI; do not add it back.
 - Log commands share `logFlags` (`--offset --limit --search --start-at --end-at --tail --live`).
-  `--live` defaults to true; `--live=false` prints once. Every resource's `logs`
+  Logs print once by default; `--live` keeps following and `--tail` keeps the recent entries (as in the
+  nasua CLI). Every resource's `logs`
   command must expose exactly the query parameters its API endpoint accepts.
+- `--api-url` / `FUTROU_API_URL` take any spelling `services.NormalizeApiUrl` accepts (`host`, `host:port`,
+  `https://host/v2`; https is added, http for loopback), as in the nasua CLI.
 - API types in `src/api/types.go` are generated from `https://api.futrou.com/v2/openapi.json`
   (`make build-types`). Do not edit them by hand.
 
