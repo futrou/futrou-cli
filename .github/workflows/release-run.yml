@@ -44,6 +44,17 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache: false
 
+      # Release-only build cache. The key prefix is unique to this workflow, so it
+      # never restores (or is restored by) the caches of test.yml or other runs.
+      - name: Cache Go and garble build caches
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/.cache/garble
+            ~/go/pkg/mod
+          key: release-${{ runner.os }}-go-${{ env.GO_VERSION }}-${{ hashFiles('go.sum', 'scripts/build.sh') }}
+
       - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
