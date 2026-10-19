@@ -34,8 +34,8 @@ fi
 # into the module cache (GOTOOLCHAIN=auto). Require an installed Go matching go.mod.
 export GOTOOLCHAIN=local
 
-# Pinned garble version. 
-# We use garble to make the binaries as tidy as possible and to avoid false-positive flagging by dummy scanners
+# Pinned garble version.
+# We use garble (with -tiny) to make the binaries as small as possible and to avoid false-positive flagging by dummy scanners
 # NOTE: Static seed so we can reuse the build cache between builds (garble only uses the first 8 bytes)
 GARBLE_SEED="futrouCLI01"
 GARBLE_VERSION="v0.18.0"
