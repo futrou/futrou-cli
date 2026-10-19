@@ -244,8 +244,34 @@ type NetworkConfig struct {
 	UpdatedAt   string `json:"updatedAt,omitempty"`
 }
 
-type StorageConfig = api.Storage
-type CronConfig = api.Cron
+// StorageConfig and CronConfig are the generated API models. Their timestamps
+// are not pointers, which encoding/json cannot omit; MarshalJSON drops the zero ones so a pulled config does not
+// fill up with "0001-01-01T00:00:00Z" and a deploy never sends them.
+type StorageConfig api.Storage
+type CronConfig api.Cron
+
+func (s StorageConfig) MarshalJSON() ([]byte, error) { return marshalWithoutZeroTimes(api.Storage(s)) }
+func (c CronConfig) MarshalJSON() ([]byte, error)    { return marshalWithoutZeroTimes(api.Cron(c)) }
+
+var timestampFields = []string{"createdAt", "updatedAt", "startedAt"}
+
+func marshalWithoutZeroTimes(value interface{}) ([]byte, error) {
+	data, err := json.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal(data, &object); err != nil {
+		return nil, err
+	}
+	for _, field := range timestampFields {
+		var stamp time.Time
+		if raw, ok := object[field]; ok && json.Unmarshal(raw, &stamp) == nil && stamp.IsZero() {
+			delete(object, field)
+		}
+	}
+	return json.Marshal(object)
+}
 
 // ToJSON serializes this project config as indented futrou.json content.
 func (cfg *Config) ToJSON() ([]byte, error) {

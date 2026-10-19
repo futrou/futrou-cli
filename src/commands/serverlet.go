@@ -426,8 +426,11 @@ func dialShellWithRetry(wsURL, token string) (*websocket.Conn, error) {
 	return nil, fmt.Errorf("could not connect to shell after %d attempts: %w", shellMaxReconnects+1, lastErr)
 }
 
+// reconnectUnit is the delay added per reconnect attempt.
+var reconnectUnit = time.Second
+
 func reconnectBackoff(attempt int) time.Duration {
-	return time.Duration(attempt) * time.Second
+	return time.Duration(attempt) * reconnectUnit
 }
 
 // escapeState tracks progress through the SSH-style "~." disconnect escape:
@@ -453,6 +456,7 @@ func pumpShell(conn *websocket.Conn) {
 	done := make(chan struct{})
 	var disconnecting bool
 	state := escLine
+	stdin := os.Stdin
 
 	go func() {
 		defer close(done)
@@ -470,7 +474,7 @@ func pumpShell(conn *websocket.Conn) {
 	go func() {
 		buf := make([]byte, 4096)
 		for {
-			n, err := os.Stdin.Read(buf)
+			n, err := stdin.Read(buf)
 			for i := 0; i < n; i++ {
 				b := buf[i]
 
@@ -485,7 +489,7 @@ func pumpShell(conn *websocket.Conn) {
 						if disconnecting {
 							// Second "~.": the graceful close hasn't
 							// finished yet, so bail out immediately.
-							term.Restore(int(os.Stdin.Fd()), nil)
+							term.Restore(int(stdin.Fd()), nil)
 							os.Exit(130)
 						}
 						disconnecting = true

@@ -4,6 +4,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"futrou-cli/src/constants"
 )
 
 // commandList returns the lines of the "Commands:" section of the top-level
@@ -203,4 +205,14 @@ func TestServerUsageIsManageServers(t *testing.T) {
 	out, err := captureRun([]string{"futrou", "--help"})
 	assertNoError(t, err)
 	assertContains(t, out, "server       Manage servers\n")
+}
+
+func TestAppBadgeIsPlainWithoutAColorTerminal(t *testing.T) {
+	// the tests do not run on a terminal, so no escape sequences are used
+	for label, want := range map[string]string{"": "v", "help": "help"} {
+		badge := appBadge(label)
+		if strings.Contains(badge, "\033[") || !strings.Contains(badge, want) || !strings.Contains(badge, constants.Name) {
+			t.Errorf("appBadge(%q) = %q", label, badge)
+		}
+	}
 }

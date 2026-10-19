@@ -1,8 +1,15 @@
 package commands
 
 import (
+	"bytes"
+	"encoding/json"
+	"errors"
 	"net/http"
+	"os"
+	"strings"
 	"testing"
+
+	"futrou-cli/src/logger"
 )
 
 func TestMetricsAction(t *testing.T) {
@@ -63,4 +70,68 @@ func TestLogFlagsDefaultsAndQuery(t *testing.T) {
 	})
 	_, err := runArgs(t, ts, "storage", "logs", "--live=false", "st-1")
 	assertNoError(t, err)
+}
+
+func TestJSONErrorHelpers(t *testing.T) {
+	err := printJSONError(404, map[string]string{"message": "nope"})
+	var jsonErr *jsonError
+	if !errors.As(err, &jsonErr) || jsonErr.Status != 404 || err.Error() != "request failed with status 404" {
+		t.Fatalf("error = %#v", err)
+	}
+	var buf bytes.Buffer
+	writeJSONError(&buf, 422, map[string]string{"message": "bad"})
+	var decoded map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &decoded); err != nil || decoded["status"] != float64(422) || decoded["error"].(map[string]any)["message"] != "bad" {
+		t.Fatalf("output = %s (%v)", buf.String(), err)
+	}
+	buf.Reset()
+	writeJSONError(&buf, 500, make(chan int)) // cannot be marshaled: still prints something
+	if strings.TrimSpace(buf.String()) == "" {
+		t.Fatal("an unmarshalable body must still be reported")
+	}
+}
+
+func TestPrintJSONAndIsJSON(t *testing.T) {
+	if isJSON(nil) {
+		t.Fatal("a nil context is never JSON")
+	}
+	if err := printJSON(make(chan int)); err == nil {
+		t.Fatal("an unmarshalable value must be an error")
+	}
+	var buf bytes.Buffer
+	logger.SetOutput(&buf, &buf)
+	defer logger.SetOutput(os.Stdout, os.Stderr)
+	if err := printJSON(map[string]any{"a": 1}); err != nil || !strings.Contains(buf.String(), `"a": 1`) {
+		t.Fatalf("printJSON wrote %q, %v", buf.String(), err)
+	}
+}
+
+func TestPrintTableShapes(t *testing.T) {
+	cols := []string{"id", "name"}
+	for name, tc := range map[string]struct {
+		data any
+		want string
+	}{
+		"rows":            {[]any{map[string]any{"id": "1", "name": "web"}}, "web"},
+		"wrapped in data": {map[string]any{"data": []any{map[string]any{"id": "2", "name": "api"}}}, "api"},
+		"empty list":      {[]any{}, "No results."},
+		"empty wrapper":   {map[string]any{"data": []any{}}, "data"},
+		"not a table":     {"plain text", "plain text"},
+		"missing column":  {[]any{map[string]any{"id": "3"}}, "3"},
+		"unmarshalable":   {make(chan int), "0x"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			out := captureStdout(t, func() { printTable(tc.data, cols) })
+			if !strings.Contains(out, tc.want) {
+				t.Fatalf("output = %q, want it to contain %q", out, tc.want)
+			}
+		})
+	}
+	out := captureStdout(t, func() {
+		printTable([]any{map[string]any{"id": "1", "name": "a"}, map[string]any{"id": "22222", "name": "b"}}, cols)
+	})
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	if len(lines) < 3 || !strings.HasPrefix(lines[0], "ID") {
+		t.Fatalf("table = %q", out)
+	}
 }

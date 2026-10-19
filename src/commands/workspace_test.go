@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -187,4 +188,143 @@ func TestResolveWorkspaceID_ErrorsWithoutAnySource(t *testing.T) {
 	if err != nil {
 		assertContains(t, err.Error(), "no workspace specified")
 	}
+}
+
+const wsID = "11111111-1111-1111-1111-111111111111"
+
+func TestWorkspaceCommandsCallTheAPI(t *testing.T) {
+	for name, tc := range map[string]struct {
+		args     []string
+		method   string
+		path     string
+		response any
+		wantBody map[string]any // nil: the request must have no body
+		wantOut  string
+	}{
+		"ls":                    {[]string{"workspace", "ls"}, "GET", "/v2/workspaces", []any{fixtureWorkspace()}, nil, "my-workspace"},
+		"ls json":               {[]string{"--log-format", "json", "workspace", "ls"}, "GET", "/v2/workspaces", []any{fixtureWorkspace()}, nil, "ws-abc"},
+		"show":                  {[]string{"workspace", "show", "ws-abc"}, "GET", "/v2/workspaces/ws-abc", fixtureWorkspace(), nil, "My Workspace"},
+		"update":                {[]string{"workspace", "update", "--name", "new", "--display-name", "New", "ws-abc"}, "PATCH", "/v2/workspaces/ws-abc", fixtureWorkspace(), map[string]any{"name": "new", "displayName": "New"}, "Workspace updated"},
+		"update json":           {[]string{"--log-format", "json", "workspace", "update", "--name", "n", "ws-abc"}, "PATCH", "/v2/workspaces/ws-abc", fixtureWorkspace(), map[string]any{"name": "n"}, "ws-abc"},
+		"rm":                    {[]string{"workspace", "rm", "ws-abc"}, "DELETE", "/v2/workspaces/ws-abc", nil, nil, "Workspace deleted"},
+		"rm json":               {[]string{"--log-format", "json", "workspace", "rm", "ws-abc"}, "DELETE", "/v2/workspaces/ws-abc", nil, nil, "deleted"},
+		"limit":                 {[]string{"workspace", "limit", "--workspace", wsID}, "GET", "/v2/workspaces/" + wsID + "/limits", map[string]any{"serverlets": 10}, nil, "serverlets"},
+		"contact show":          {[]string{"workspace", "contact", "show", "--workspace", wsID}, "GET", "/v2/workspaces/" + wsID + "/contact", map[string]any{"email": "a@b.c"}, nil, "a@b.c"},
+		"contact update":        {[]string{"workspace", "contact", "update", "--workspace", wsID, "--firstname", "Ada", "--lastname", "L", "--company", "ACME", "--email", "a@b.c", "--phone", "1", "--street-address", "Main 1", "--city", "Town", "--postal-code", "123", "--country", "DE"}, "PATCH", "/v2/workspaces/" + wsID + "/contact", map[string]any{}, map[string]any{"firstname": "Ada", "lastname": "L", "company": "ACME", "email": "a@b.c", "phone": "1", "streetAddress": "Main 1", "city": "Town", "postalCode": "123", "country": "DE"}, "Contact updated"},
+		"contact update json":   {[]string{"--log-format", "json", "workspace", "contact", "update", "--workspace", wsID, "--city", "Town"}, "PATCH", "/v2/workspaces/" + wsID + "/contact", map[string]any{"city": "Town"}, map[string]any{"city": "Town"}, "Town"},
+		"user ls":               {[]string{"workspace", "user", "ls", "--workspace", wsID}, "GET", "/v2/workspaces/" + wsID + "/users", []any{map[string]any{"id": "wu-1", "userId": "u-1", "role": "owner"}}, nil, "wu-1"},
+		"user ls json":          {[]string{"--log-format", "json", "workspace", "user", "ls", "--workspace", wsID}, "GET", "/v2/workspaces/" + wsID + "/users", []any{map[string]any{"id": "wu-1"}}, nil, "wu-1"},
+		"user show":             {[]string{"workspace", "user", "show", "--workspace", wsID, "wu-1"}, "GET", "/v2/workspaces/" + wsID + "/users/wu-1", map[string]any{"id": "wu-1", "role": "owner"}, nil, "owner"},
+		"user add":              {[]string{"workspace", "user", "add", "--workspace", wsID, "--user-id", "u-2", "--role", "developer"}, "POST", "/v2/workspaces/" + wsID + "/users", map[string]any{"id": "wu-2"}, map[string]any{"userId": "u-2", "role": "developer"}, "User added"},
+		"user add default role": {[]string{"workspace", "user", "add", "--workspace", wsID, "--user-id", "u-2"}, "POST", "/v2/workspaces/" + wsID + "/users", map[string]any{"id": "wu-2"}, map[string]any{"userId": "u-2", "role": "viewer"}, "wu-2"},
+		"user add json":         {[]string{"--log-format", "json", "workspace", "user", "add", "--workspace", wsID, "--user-id", "u-2"}, "POST", "/v2/workspaces/" + wsID + "/users", map[string]any{"id": "wu-2"}, map[string]any{"userId": "u-2", "role": "viewer"}, "wu-2"},
+		"user update":           {[]string{"workspace", "user", "update", "--workspace", wsID, "--role", "administrator", "wu-1"}, "PATCH", "/v2/workspaces/" + wsID + "/users/wu-1", map[string]any{}, map[string]any{"role": "administrator"}, "role updated"},
+		"user update json":      {[]string{"--log-format", "json", "workspace", "user", "update", "--workspace", wsID, "--role", "owner", "wu-1"}, "PATCH", "/v2/workspaces/" + wsID + "/users/wu-1", map[string]any{"id": "wu-1"}, map[string]any{"role": "owner"}, "wu-1"},
+		"user rm":               {[]string{"workspace", "user", "rm", "--workspace", wsID, "wu-1"}, "DELETE", "/v2/workspaces/" + wsID + "/users/wu-1", nil, nil, "removed from workspace"},
+		"user rm json":          {[]string{"--log-format", "json", "workspace", "user", "rm", "--workspace", wsID, "wu-1"}, "DELETE", "/v2/workspaces/" + wsID + "/users/wu-1", nil, nil, "removed"},
+		"legacy plural":         {[]string{"workspaces", "list"}, "GET", "/v2/workspaces", []any{fixtureWorkspace()}, nil, "ws-abc"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			ts := newTestServer(t)
+			var body map[string]any
+			called := false
+			ts.on(tc.method, tc.path, func(w http.ResponseWriter, r *http.Request) {
+				called = true
+				decodeBody(r, &body)
+				if tc.response == nil {
+					respondEmpty(w, r)
+					return
+				}
+				respond(200, tc.response)(w, r)
+			})
+			out, err := runArgs(t, ts, tc.args...)
+			assertNoError(t, err)
+			if !called {
+				t.Fatalf("%s %s was never requested", tc.method, tc.path)
+			}
+			assertContains(t, out, tc.wantOut)
+			for key, want := range tc.wantBody {
+				if body[key] != want {
+					t.Errorf("body[%s] = %v, want %v (body %v)", key, body[key], want, body)
+				}
+			}
+			if tc.wantBody != nil && len(body) != len(tc.wantBody) {
+				t.Errorf("body = %v, want exactly %v", body, tc.wantBody)
+			}
+		})
+	}
+}
+
+func TestWorkspaceCommandsValidateTheirInput(t *testing.T) {
+	ts := newTestServer(t) // any request would fail the test
+	for name, tc := range map[string]struct {
+		args []string
+		want string
+	}{
+		"show without id":          {[]string{"workspace", "show"}, "workspace ID required"},
+		"update without id":        {[]string{"workspace", "update", "--name", "x"}, "workspace ID required"},
+		"update without fields":    {[]string{"workspace", "update", "ws-abc"}, "no fields to update"},
+		"rm without id":            {[]string{"workspace", "rm"}, "workspace ID required"},
+		"contact update no fields": {[]string{"workspace", "contact", "update", "--workspace", wsID}, "no fields to update"},
+		"user show without id":     {[]string{"workspace", "user", "show", "--workspace", wsID}, "workspace user ID required"},
+		"user update without id":   {[]string{"workspace", "user", "update", "--workspace", wsID, "--role", "owner"}, "workspace user ID required"},
+		"user rm without id":       {[]string{"workspace", "user", "rm", "--workspace", wsID}, "workspace user ID required"},
+		"user add without user id": {[]string{"workspace", "user", "add", "--workspace", wsID}, "user-id"},
+		"user update without role": {[]string{"workspace", "user", "update", "--workspace", wsID, "wu-1"}, "role"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := runArgs(t, ts, tc.args...)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error = %v, want it to contain %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestWorkspaceCommandsReportAPIFailures(t *testing.T) {
+	for name, args := range map[string][]string{
+		"ls":             {"workspace", "ls"},
+		"show":           {"workspace", "show", "ws-abc"},
+		"update":         {"workspace", "update", "--name", "x", "ws-abc"},
+		"rm":             {"workspace", "rm", "ws-abc"},
+		"limit":          {"workspace", "limit", "--workspace", wsID},
+		"contact show":   {"workspace", "contact", "show", "--workspace", wsID},
+		"contact update": {"workspace", "contact", "update", "--workspace", wsID, "--city", "x"},
+		"user ls":        {"workspace", "user", "ls", "--workspace", wsID},
+		"user show":      {"workspace", "user", "show", "--workspace", wsID, "wu-1"},
+		"user add":       {"workspace", "user", "add", "--workspace", wsID, "--user-id", "u"},
+		"user update":    {"workspace", "user", "update", "--workspace", wsID, "--role", "owner", "wu-1"},
+		"user rm":        {"workspace", "user", "rm", "--workspace", wsID, "wu-1"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			ts, cloud := newCloudServer(t)
+			// every request to the API fails, whatever the method
+			for _, method := range []string{"GET", "POST", "PATCH", "DELETE"} {
+				for _, path := range []string{"/v2/workspaces", "/v2/workspaces/ws-abc", "/v2/workspaces/" + wsID + "/limits", "/v2/workspaces/" + wsID + "/contact", "/v2/workspaces/" + wsID + "/users", "/v2/workspaces/" + wsID + "/users/wu-1"} {
+					ts.on(method, path, respond(500, map[string]string{"message": "boom"}))
+				}
+			}
+			_ = cloud
+			if _, err := runArgs(t, ts, args...); err == nil {
+				t.Fatal("an API failure must be reported")
+			}
+		})
+	}
+}
+
+func TestWorkspaceCommandsResolveAWorkspaceName(t *testing.T) {
+	ts := newTestServer(t)
+	ts.on("GET", "/v2/workspaces", func(w http.ResponseWriter, r *http.Request) {
+		list := []any{}
+		if r.URL.Query().Get("name") == "acme" { // the API filters by name
+			list = append(list, map[string]any{"id": wsID, "name": "acme"})
+		}
+		respond(200, list)(w, r)
+	})
+	ts.on("GET", "/v2/workspaces/"+wsID+"/limits", respond(200, map[string]any{"ok": true}))
+	out, err := runArgs(t, ts, "workspace", "limit", "--workspace", "acme")
+	assertNoError(t, err)
+	assertContains(t, out, "ok")
+	_, err = runArgs(t, ts, "workspace", "limit", "--workspace", "ghost")
+	assertError(t, err)
 }

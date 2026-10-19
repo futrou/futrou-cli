@@ -2,6 +2,9 @@ package validators
 
 import (
 	"encoding/json"
+	"errors"
+	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -912,5 +915,311 @@ func TestValidateWithWarningsReportsUnexpectedKeysWithoutFailing(t *testing.T) {
 	}
 	if warnings[0] != `found unexpected key "items[0].extra"` && warnings[1] != `found unexpected key "items[0].extra"` {
 		t.Fatalf("missing nested warning: %v", warnings)
+	}
+}
+
+// check runs a single-field validator and returns the field's error message.
+func check(build func(*FieldValidator) *FieldValidator, value interface{}) string {
+	v := NewValidator()
+	build(v.Field("f"))
+	_, errs := v.Validate(map[string]interface{}{"f": value})
+	return errs["f"]
+}
+
+func TestRulesAcceptAndRejectValues(t *testing.T) {
+	for name, tc := range map[string]struct {
+		build   func(*FieldValidator) *FieldValidator
+		value   interface{}
+		wantErr string // substring; empty means the value must be accepted
+	}{
+		"regex match":              {func(f *FieldValidator) *FieldValidator { return f.Required().Regex(`^[a-z]+$`) }, "abc", ""},
+		"regex mismatch":           {func(f *FieldValidator) *FieldValidator { return f.Required().Regex(`^[a-z]+$`) }, "ABC", "required format"},
+		"regex not a string":       {func(f *FieldValidator) *FieldValidator { return f.Required().Regex(`x`) }, 5, "must be a string"},
+		"no-regex ok":              {func(f *FieldValidator) *FieldValidator { return f.Required().NoRegex(`\s`) }, "abc", ""},
+		"no-regex hit":             {func(f *FieldValidator) *FieldValidator { return f.Required().NoRegex(`\s`) }, "a b", "must not match"},
+		"no-regex not a string":    {func(f *FieldValidator) *FieldValidator { return f.Required().NoRegex(`x`) }, 5, "must be a string"},
+		"decimal ok":               {func(f *FieldValidator) *FieldValidator { return f.Required().Decimal(2) }, 1.25, ""},
+		"decimal integer":          {func(f *FieldValidator) *FieldValidator { return f.Required().Decimal(2) }, 7, ""},
+		"decimal int64":            {func(f *FieldValidator) *FieldValidator { return f.Required().Decimal(0) }, int64(7), ""},
+		"decimal too many places":  {func(f *FieldValidator) *FieldValidator { return f.Required().Decimal(2) }, 1.255, "at most 2 decimal"},
+		"decimal string":           {func(f *FieldValidator) *FieldValidator { return f.Required().Decimal(1) }, "1.5", ""},
+		"decimal bad string":       {func(f *FieldValidator) *FieldValidator { return f.Required().Decimal(1) }, "abc", "must be a number"},
+		"decimal two dots":         {func(f *FieldValidator) *FieldValidator { return f.Required().Decimal(1) }, "1.2.3", "must be a number"},
+		"decimal wrong type":       {func(f *FieldValidator) *FieldValidator { return f.Required().Decimal(1) }, true, "must be a number"},
+		"min int":                  {func(f *FieldValidator) *FieldValidator { return f.Required().Min(5) }, 4, "at least 5"},
+		"min int64":                {func(f *FieldValidator) *FieldValidator { return f.Required().Min(5) }, int64(5), ""},
+		"min string":               {func(f *FieldValidator) *FieldValidator { return f.Required().Min(5) }, "6", ""},
+		"min bad string":           {func(f *FieldValidator) *FieldValidator { return f.Required().Min(5) }, "x", "must be a number"},
+		"min wrong type":           {func(f *FieldValidator) *FieldValidator { return f.Required().Min(5) }, []int{}, "must be a number"},
+		"max int":                  {func(f *FieldValidator) *FieldValidator { return f.Required().Max(5) }, 6, "at most 5"},
+		"max int64":                {func(f *FieldValidator) *FieldValidator { return f.Required().Max(5) }, int64(5), ""},
+		"max string":               {func(f *FieldValidator) *FieldValidator { return f.Required().Max(5) }, "4", ""},
+		"max bad string":           {func(f *FieldValidator) *FieldValidator { return f.Required().Max(5) }, "x", "must be a number"},
+		"max wrong type":           {func(f *FieldValidator) *FieldValidator { return f.Required().Max(5) }, true, "must be a number"},
+		"integer whole float":      {func(f *FieldValidator) *FieldValidator { return f.Required().Integer() }, float64(3), ""},
+		"integer fraction":         {func(f *FieldValidator) *FieldValidator { return f.Required().Integer() }, 3.5, "must be an integer"},
+		"integer int64":            {func(f *FieldValidator) *FieldValidator { return f.Required().Integer() }, int64(3), ""},
+		"integer huge float":       {func(f *FieldValidator) *FieldValidator { return f.Required().Integer() }, 1e30, "must be an integer"},
+		"integer string":           {func(f *FieldValidator) *FieldValidator { return f.Required().Integer() }, "3", "must be an integer"},
+		"number int":               {func(f *FieldValidator) *FieldValidator { return f.Required().Number() }, 3, ""},
+		"number string":            {func(f *FieldValidator) *FieldValidator { return f.Required().Number() }, "x", "invalid syntax"},
+		"domain ok":                {func(f *FieldValidator) *FieldValidator { return f.Required().Domain() }, "example.com", ""},
+		"domain bad":               {func(f *FieldValidator) *FieldValidator { return f.Required().Domain() }, "not a domain", "domain"},
+		"domain not a string":      {func(f *FieldValidator) *FieldValidator { return f.Required().Domain() }, 4, "string"},
+		"max length not a string":  {func(f *FieldValidator) *FieldValidator { return f.Required().MaxLength(3) }, 1234, "must be a string"},
+		"max length too long":      {func(f *FieldValidator) *FieldValidator { return f.Required().MaxLength(3) }, "abcd", "at most 3"},
+		"min length too short":     {func(f *FieldValidator) *FieldValidator { return f.Required().MinLength(3) }, "ab", "at least 3"},
+		"ipv4 not a string":        {func(f *FieldValidator) *FieldValidator { return f.Required().IPv4() }, 4, "string"},
+		"ipv4 garbage":             {func(f *FieldValidator) *FieldValidator { return f.Required().IPv4() }, "999.1.1.1", "IPv4"},
+		"ipv6 not a string":        {func(f *FieldValidator) *FieldValidator { return f.Required().IPv6() }, 4, "string"},
+		"ipv6 garbage":             {func(f *FieldValidator) *FieldValidator { return f.Required().IPv6() }, "zzz", "IPv6"},
+		"ipv6 given ipv4":          {func(f *FieldValidator) *FieldValidator { return f.Required().IPv6() }, "1.2.3.4", "IPv6"},
+		"ip not a string":          {func(f *FieldValidator) *FieldValidator { return f.Required().IP() }, 4, "string"},
+		"ip garbage":               {func(f *FieldValidator) *FieldValidator { return f.Required().IP() }, "nope", "IPv4 or IPv6"},
+		"url not a string":         {func(f *FieldValidator) *FieldValidator { return f.Required().URL() }, 4, "string"},
+		"url without a host":       {func(f *FieldValidator) *FieldValidator { return f.Required().URL() }, "https://", "scheme and host"},
+		"url unparsable":           {func(f *FieldValidator) *FieldValidator { return f.Required().URL() }, "http://[::1", "valid URL"},
+		"not-number wrong kind ok": {func(f *FieldValidator) *FieldValidator { return f.Required().NotNumber() }, true, ""},
+		"not-number float":         {func(f *FieldValidator) *FieldValidator { return f.Required().NotNumber() }, 1.5, "must not be a number"},
+		"date not a string":        {func(f *FieldValidator) *FieldValidator { return f.Required().Date() }, 5, "must be a string"},
+		"required blank string":    {func(f *FieldValidator) *FieldValidator { return f.Required() }, "   ", "required"},
+		"custom ok": {func(f *FieldValidator) *FieldValidator {
+			return f.Required().Custom(func(interface{}) error { return nil })
+		}, "x", ""},
+		"custom fails": {func(f *FieldValidator) *FieldValidator {
+			return f.Required().Custom(func(interface{}) error { return errors.New("nope") })
+		}, "x", "nope"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got := check(tc.build, tc.value)
+			if tc.wantErr == "" && got != "" {
+				t.Fatalf("value %v must be accepted, got %q", tc.value, got)
+			}
+			if tc.wantErr != "" && !strings.Contains(got, tc.wantErr) {
+				t.Fatalf("error for %v = %q, want it to contain %q", tc.value, got, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestTransformsRunBeforeTheRules(t *testing.T) {
+	for name, tc := range map[string]struct {
+		build    func(*FieldValidator) *FieldValidator
+		in, want string
+	}{
+		"lower":  {func(f *FieldValidator) *FieldValidator { return f.Required().ToLower() }, "HeLLo", "hello"},
+		"upper":  {func(f *FieldValidator) *FieldValidator { return f.Required().ToUpper() }, "HeLLo", "HELLO"},
+		"camel":  {func(f *FieldValidator) *FieldValidator { return f.Required().ToCamelCase() }, "hello big-world_now", "helloBigWorldNow"},
+		"snake":  {func(f *FieldValidator) *FieldValidator { return f.Required().ToSnakeCase() }, "helloBig World-now", "hello_big_world_now"},
+		"pascal": {func(f *FieldValidator) *FieldValidator { return f.Required().ToPascalCase() }, "hello big-world_now", "HelloBigWorldNow"},
+		"trim":   {func(f *FieldValidator) *FieldValidator { return f.Required().Trim() }, "  x  ", "x"},
+		"custom": {func(f *FieldValidator) *FieldValidator {
+			return f.Required().Transform(func(v interface{}) interface{} { return v.(string) + "!" })
+		}, "x", "x!"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			v := NewValidator()
+			tc.build(v.Field("f"))
+			got, errs := v.Validate(map[string]interface{}{"f": tc.in})
+			if len(errs) != 0 || got["f"] != tc.want {
+				t.Fatalf("result = %v, errors = %v; want %q", got, errs, tc.want)
+			}
+		})
+	}
+	// a rule sees the transformed value
+	v := NewValidator()
+	v.Field("f").Required().ToLower().Enum("yes", "no")
+	if _, errs := v.Validate(map[string]interface{}{"f": "YES"}); len(errs) != 0 {
+		t.Fatalf("the enum must see the lower-cased value: %v", errs)
+	}
+}
+
+func TestCaseConversionHelpers(t *testing.T) {
+	for in, want := range map[string][3]string{
+		"":            {"", "", ""},
+		"   ":         {"   ", "___", ""},
+		"hello":       {"hello", "hello", "Hello"},
+		"Hello_World": {"helloWorld", "hello_world", "HelloWorld"},
+		"a-b-c":       {"aBC", "a_b_c", "ABC"},
+	} {
+		if got := toCamelCase(in); got != want[0] {
+			t.Errorf("toCamelCase(%q) = %q, want %q", in, got, want[0])
+		}
+		if got := toSnakeCase(in); got != want[1] {
+			t.Errorf("toSnakeCase(%q) = %q, want %q", in, got, want[1])
+		}
+		if got := toPascalCase(in); got != want[2] {
+			t.Errorf("toPascalCase(%q) = %q, want %q", in, got, want[2])
+		}
+	}
+}
+
+func TestErrorMessageOverridesRuleErrors(t *testing.T) {
+	v := NewValidator()
+	v.Field("name").Required().MinLength(3).ErrorMessage("pick a longer name")
+	for _, data := range []map[string]interface{}{{}, {"name": "ab"}} {
+		_, errs := v.Validate(data)
+		if errs["name"] != "pick a longer name" {
+			t.Fatalf("errors = %v", errs)
+		}
+	}
+}
+
+func TestRuleNamesAndOptionalEmptyValues(t *testing.T) {
+	if (FuncRule{}).String() != "custom" {
+		t.Fatal("custom rules are named custom")
+	}
+	if (BaseRule{name: "x"}).String() != "x" {
+		t.Fatal("a rule reports its name")
+	}
+	v := NewValidator()
+	v.Field("opt").Optional().MinLength(5)
+	if got, errs := v.Validate(map[string]interface{}{"opt": ""}); len(errs) != 0 || got["opt"] != "" {
+		t.Fatalf("an empty optional value skips the rules: %v %v", got, errs)
+	}
+	if got, errs := v.Validate(map[string]interface{}{}); len(errs) != 0 || got["opt"] != nil {
+		t.Fatalf("a missing optional value is fine: %v %v", got, errs)
+	}
+}
+
+type fakeRequest struct {
+	body string
+	err  error
+}
+
+func (f fakeRequest) Body() ([]byte, error) { return []byte(f.body), f.err }
+
+func TestValidateJSONAndValidateRequest(t *testing.T) {
+	v := NewValidator()
+	v.Field("name").Required().String()
+	v.Field("port").Optional().Integer()
+
+	if got, errs := v.ValidateJSON([]byte(`{"name":"web","port":80}`)); len(errs) != 0 || got["name"] != "web" {
+		t.Fatalf("valid JSON: %v %v", got, errs)
+	}
+	if _, errs := v.ValidateJSON([]byte(`{"port":1.5}`)); errs["name"] == "" || errs["port"] == "" {
+		t.Fatalf("every field error is reported: %v", errs)
+	}
+	if _, errs := v.ValidateJSON([]byte(`{nope`)); !strings.Contains(errs["_error"], "JSON") {
+		t.Fatalf("malformed JSON: %v", errs)
+	}
+
+	if got, err := v.ValidateRequest(fakeRequest{body: `{"name":"web"}`}); err != nil || got["name"] != "web" {
+		t.Fatalf("valid request: %v %v", got, err)
+	}
+	if _, err := v.ValidateRequest(fakeRequest{body: `{"name":"web"`}); err == nil || !strings.Contains(err.Error(), "invalid JSON") {
+		t.Fatalf("malformed body: %v", err)
+	}
+	if _, err := v.ValidateRequest(fakeRequest{body: `{}`}); err == nil || !strings.Contains(err.Error(), "validation errors") {
+		t.Fatalf("invalid body: %v", err)
+	}
+	if _, err := v.ValidateRequest(fakeRequest{err: errors.New("closed")}); err == nil || !strings.Contains(err.Error(), "failed to read body") {
+		t.Fatalf("unreadable body: %v", err)
+	}
+}
+
+func TestJSONSchemaGeneration(t *testing.T) {
+	inner := NewValidator()
+	inner.Field("id").Required().Integer().Min(1).Max(9)
+	v := NewValidator().Description("A thing.")
+	v.Field("name").Description("Its name.").Required().String().MinLength(2).MaxLength(8).Regex(`^[a-z]+$`)
+	v.Field("price").Optional().Number().Decimal(2)
+	v.Field("kind").Optional().Enum("a", "b")
+	v.Field("other").Optional().NotEnum("x")
+	v.Field("email").Optional().Email()
+	v.Field("day").Optional().Date()
+	v.Field("at").Optional().DateTime()
+	v.Field("link").Optional().URL()
+	v.Field("uid").Optional().UUID()
+	v.Field("v4").Optional().IPv4()
+	v.Field("v6").Optional().IPv6()
+	v.Field("addr").Optional().IP()
+	v.Field("host").Optional().Domain()
+	v.Field("flag").Optional().Bool()
+	v.Field("notstr").Optional().NotString()
+	v.Field("notnum").Optional().NotNumber()
+	v.Field("items").Optional().Array(inner)
+	v.Field("obj").Optional().Object(inner)
+
+	schema := v.ToJSONSchema()
+	if schema["$schema"] == nil || schema["description"] != "A thing." {
+		t.Fatalf("schema header = %v", schema)
+	}
+	props := schema["properties"].(map[string]interface{})
+	name := props["name"].(map[string]interface{})
+	if name["type"] != "string" || name["minLength"] != 2 || name["maxLength"] != 8 || name["pattern"] != "^[a-z]+$" || name["description"] != "Its name." {
+		t.Fatalf("name = %v", name)
+	}
+	for field, format := range map[string]string{"email": "email", "day": "date", "at": "date-time", "link": "uri", "uid": "uuid", "v4": "ipv4", "v6": "ipv6", "addr": "ip", "host": "hostname"} {
+		if got := props[field].(map[string]interface{}); got["type"] != "string" || got["format"] != format {
+			t.Errorf("%s = %v, want format %s", field, got, format)
+		}
+	}
+	if got := props["price"].(map[string]interface{}); got["type"] != "number" || got["multipleOf"] != 0.01 {
+		t.Errorf("price = %v", got)
+	}
+	if got := props["flag"].(map[string]interface{}); got["type"] != "boolean" {
+		t.Errorf("flag = %v", got)
+	}
+	if got := props["kind"].(map[string]interface{}); got["enum"] == nil {
+		t.Errorf("kind = %v", got)
+	}
+	if got := props["other"].(map[string]interface{}); got["not"] == nil {
+		t.Errorf("other = %v", got)
+	}
+	if got := props["notstr"].(map[string]interface{}); got["not"].(map[string]interface{})["type"] != "string" {
+		t.Errorf("notstr = %v", got)
+	}
+	if got := props["notnum"].(map[string]interface{}); got["not"].(map[string]interface{})["type"] != "number" {
+		t.Errorf("notnum = %v", got)
+	}
+	items := props["items"].(map[string]interface{})
+	if items["type"] != "array" || items["items"].(map[string]interface{})["properties"] == nil {
+		t.Errorf("items = %v", items)
+	}
+	if got := props["obj"].(map[string]interface{}); got["properties"] == nil {
+		t.Errorf("an object field inlines its properties: %v", got)
+	}
+	id := items["items"].(map[string]interface{})["properties"].(map[string]interface{})["id"].(map[string]interface{})
+	if id["type"] != "integer" || id["minimum"] != float64(1) || id["maximum"] != float64(9) {
+		t.Errorf("id = %v", id)
+	}
+	if required, _ := schema["required"].([]string); len(required) != 1 || required[0] != "name" {
+		t.Errorf("required = %v", schema["required"])
+	}
+	if _, ok := items["items"].(map[string]interface{})["$schema"]; ok {
+		t.Error("nested schemas must not repeat the dialect")
+	}
+
+	data, err := v.ToJSONSchemaJSON()
+	if err != nil || !json.Valid(data) {
+		t.Fatalf("schema JSON: %v", err)
+	}
+	if !reflect.DeepEqual(v.ToJsonSchema(), v.ToJSONSchema()) {
+		t.Fatal("ToJsonSchema is an alias of ToJSONSchema")
+	}
+	if decimalMultiple(0) != 1 || decimalMultiple(3) != 0.001 {
+		t.Fatal("decimalMultiple")
+	}
+}
+
+func TestConditionalValidatorEdgeCases(t *testing.T) {
+	v := NewValidator()
+	v.Field("type").Required().String()
+	v.When("type", "http").Then("url").Required().URL()
+	// the condition field is absent: the conditional rule is skipped
+	w := NewValidator()
+	w.When("type", "http").Then("url").Required()
+	if _, errs := w.Validate(map[string]interface{}{}); len(errs) != 0 {
+		t.Fatalf("no condition field, no rule: %v", errs)
+	}
+	if _, errs := v.Validate(map[string]interface{}{"type": "http"}); errs["url"] == "" {
+		t.Fatalf("a matching condition makes the field required: %v", errs)
+	}
+	if got, errs := v.Validate(map[string]interface{}{"type": "http", "url": "https://a.com"}); len(errs) != 0 || got["url"] != "https://a.com" {
+		t.Fatalf("valid conditional value: %v %v", got, errs)
+	}
+	if _, errs := v.Validate(map[string]interface{}{"type": "tcp"}); len(errs) != 0 {
+		t.Fatalf("another condition value skips the rule: %v", errs)
 	}
 }

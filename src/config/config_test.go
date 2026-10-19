@@ -1205,3 +1205,256 @@ func TestProjectConfigFilesFor(t *testing.T) {
 }
 
 func constantsProjectFiles(project string) []string { return constants.ProjectConfigFilesFor(project) }
+
+// failingAPI answers like fakeAPI but fails the listed paths.
+type failingAPI struct {
+	fakeAPI
+	fail map[string]bool
+}
+
+func (f failingAPI) RequestInto(method, path string, body interface{}, v interface{}) (int, error) {
+	if f.fail[strings.SplitN(path, "?", 2)[0]] {
+		return 500, fmt.Errorf("boom %s", path)
+	}
+	return f.fakeAPI.RequestInto(method, path, body, v)
+}
+
+func pullFixture() fakeAPI {
+	return fakeAPI{
+		"/v2/workspaces":      []map[string]interface{}{{"id": "ws-1", "name": "acme"}},
+		"/v2/projects":        []map[string]interface{}{{"id": "proj-1", "name": "demo", "workspaceId": "ws-1"}},
+		"/v2/workspaces/ws-1": map[string]interface{}{"id": "ws-1", "name": "acme"},
+		"/v2/networks":        []map[string]interface{}{{"id": "net-1", "name": "backend", "projectId": "proj-1", "createdAt": "x"}},
+		"/v2/serverlets":      []map[string]interface{}{{"id": "sl-1", "name": "web", "image": "nginx", "status": "ready", "instances": []string{"i"}}},
+		"/v2/dns":             []map[string]interface{}{{"id": "dz-1", "domain": "example.com", "name": "example.com"}},
+		"/v2/dns/dz-1/records": []map[string]interface{}{
+			{"id": "r-1", "dnsId": "dz-1", "name": "@", "type": "A", "value": "192.0.2.1", "ttl": 300},
+			{"id": "r-2", "dnsId": "dz-1", "name": "@", "type": "A", "value": "192.0.2.2", "ttl": 300},
+			{"id": "r-3", "dnsId": "dz-1", "name": "a.b", "type": "TXT", "value": "v", "ttl": 300},
+		},
+		"/v2/proxies":  []map[string]interface{}{{"id": "px-1", "domain": "app.example.com", "target": "web", "port": 8080}},
+		"/v2/storages": []map[string]interface{}{{"id": "st-1", "name": "data"}},
+		"/v2/crons":    []map[string]interface{}{{"id": "cr-1", "name": "nightly"}},
+	}
+}
+
+func TestPullBuildsAPortableSnapshotWithLocksForEveryResource(t *testing.T) {
+	cfg := &Config{Workspace: "acme", Project: "demo", Region: "europe"}
+	if err := cfg.Pull(pullFixture(), ""); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Region != "europe" || cfg.Workspace != "acme" || cfg.Project != "demo" {
+		t.Fatalf("identity = %q %q %q", cfg.Workspace, cfg.Project, cfg.Region)
+	}
+	if len(cfg.Networks) != 1 || len(cfg.Serverlets) != 1 || len(cfg.DNS) != 1 || len(cfg.Proxies) != 1 || len(cfg.Storages) != 1 || len(cfg.Crons) != 1 {
+		t.Fatalf("pulled resources: %#v", cfg)
+	}
+	data, _ := cfg.ToJSON()
+	for _, leaked := range []string{`"id"`, "createdAt", "status", "instances", "dnsId", "projectId"} {
+		if strings.Contains(string(data), leaked) {
+			t.Errorf("pulled config must not contain %s:\n%s", leaked, data)
+		}
+	}
+	wantLocks := map[string]string{
+		"workspace":                         LockHash("ws-1"),
+		"project":                           LockHash("proj-1"),
+		"networks.backend":                  LockHash("net-1"),
+		"serverlets.web":                    LockHash("sl-1"),
+		"dns.example.com":                   LockHash("dz-1"),
+		`dns.example\.com.records.@.A`:      LockHash("r-1"),
+		`dns.example\.com.records.@.A[1]`:   LockHash("r-2"),
+		`dns.example\.com.records.a\.b.TXT`: LockHash("r-3"),
+		"proxies.app.example.com":           LockHash("px-1"),
+		"storages.data":                     LockHash("st-1"),
+		"crons.nightly":                     LockHash("cr-1"),
+	}
+	if !reflect.DeepEqual(cfg.Locks, wantLocks) {
+		t.Fatalf("locks = %v\nwant %v", cfg.Locks, wantLocks)
+	}
+	// a pull replaces the previous state instead of merging into it
+	cfg.Locks["stale"] = "x"
+	cfg.Serverlets = append(cfg.Serverlets, ServerletConfig{})
+	if err := cfg.Pull(pullFixture(), ""); err != nil || len(cfg.Serverlets) != 1 || cfg.Locks["stale"] != "" {
+		t.Fatalf("a second pull must be a clean snapshot: %v %#v", err, cfg.Locks)
+	}
+}
+
+func TestPullSnapshotSavesAndLoadsBack(t *testing.T) {
+	cfg := &Config{Workspace: "acme", Project: "demo"}
+	if err := cfg.Pull(pullFixture(), ""); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"futrou.json", "futrou.yaml"} {
+		dir := t.TempDir()
+		if _, err := cfg.Save(dir, name); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		loaded := &Config{}
+		if _, err := loaded.Load(dir, name); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if !reflect.DeepEqual(loaded.Locks, cfg.Locks) || len(loaded.DNS[0].Records) != 3 {
+			t.Fatalf("%s did not round-trip the locks or records", name)
+		}
+	}
+}
+
+func TestPullErrors(t *testing.T) {
+	var nilCfg *Config
+	if err := nilCfg.Pull(pullFixture(), "demo"); err == nil || !strings.Contains(err.Error(), "required") {
+		t.Fatalf("nil config: %v", err)
+	}
+	if err := (&Config{Workspace: "acme"}).Pull(pullFixture(), ""); err == nil || !strings.Contains(err.Error(), "project name or ID") {
+		t.Fatalf("no project: %v", err)
+	}
+	if err := (&Config{Project: "demo"}).Pull(pullFixture(), ""); err == nil || !strings.Contains(err.Error(), "workspace") {
+		t.Fatalf("no workspace: %v", err)
+	}
+	if err := (&Config{Workspace: "acme"}).Pull(pullFixture(), "ghost"); err == nil || !strings.Contains(err.Error(), `project "ghost" not found`) {
+		t.Fatalf("unknown project: %v", err)
+	}
+	if err := (&Config{Workspace: "nobody", Project: "demo"}).Pull(pullFixture(), ""); err == nil || !strings.Contains(err.Error(), `workspace "nobody" not found`) {
+		t.Fatalf("unknown workspace: %v", err)
+	}
+	for _, path := range []string{"/v2/workspaces", "/v2/projects", "/v2/workspaces/ws-1", "/v2/networks", "/v2/serverlets", "/v2/dns", "/v2/dns/dz-1/records", "/v2/proxies", "/v2/storages", "/v2/crons"} {
+		t.Run("fails on "+path, func(t *testing.T) {
+			cfg := &Config{Workspace: "acme", Project: "demo"}
+			err := cfg.Pull(failingAPI{pullFixture(), map[string]bool{path: true}}, "")
+			if err == nil || !strings.Contains(err.Error(), "boom") && !strings.Contains(err.Error(), "listing") {
+				t.Fatalf("error = %v", err)
+			}
+		})
+	}
+}
+
+func TestPullWorkspaceName(t *testing.T) {
+	embedded := &api.Project{Workspace: &api.Workspace{Name: "embedded"}, WorkspaceId: "ws-1"}
+	if got, err := pullWorkspaceName(pullFixture(), embedded); err != nil || got != "embedded" {
+		t.Fatalf("embedded workspace: %q, %v", got, err)
+	}
+	if got, err := pullWorkspaceName(pullFixture(), &api.Project{}); err != nil || got != "" {
+		t.Fatalf("no workspace: %q, %v", got, err)
+	}
+	if got, err := pullWorkspaceName(pullFixture(), &api.Project{WorkspaceId: "ws-1"}); err != nil || got != "acme" {
+		t.Fatalf("fetched workspace: %q, %v", got, err)
+	}
+	nameless := fakeAPI{"/v2/workspaces/ws-2": map[string]interface{}{"id": "ws-2"}}
+	if _, err := pullWorkspaceName(nameless, &api.Project{WorkspaceId: "ws-2"}); err == nil || !strings.Contains(err.Error(), "has no name") {
+		t.Fatalf("nameless workspace: %v", err)
+	}
+	if _, err := pullWorkspaceName(fakeAPI{}, &api.Project{WorkspaceId: "ws-3"}); err == nil || !strings.Contains(err.Error(), "fetching workspace") {
+		t.Fatalf("unreachable workspace: %v", err)
+	}
+}
+
+func TestResolveCloudWorkspaceIDAcceptsAnID(t *testing.T) {
+	id := "11111111-1111-1111-1111-111111111111"
+	if got, err := resolveCloudWorkspaceID(fakeAPI{}, id); err != nil || got != id {
+		t.Fatalf("a UUID is used as is without a lookup: %q, %v", got, err)
+	}
+	if looksLikeResourceID("acme") || looksLikeResourceID(strings.Repeat("x", 36)) {
+		t.Fatal("names are not IDs")
+	}
+}
+
+func TestEscapeLockPart(t *testing.T) {
+	for in, want := range map[string]string{"plain": "plain", "a.b": `a\.b`, `a\b`: `a\\b`, `a\.b`: `a\\\.b`, "": ""} {
+		if got := escapeLockPart(in); got != want {
+			t.Errorf("escapeLockPart(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestProxyMarshalOmitsApiDefaults(t *testing.T) {
+	var proxy ProxyConfig
+	if err := json.Unmarshal([]byte(`{"domain":"a.example.com","port":80,"type":"http","strategy":"round-robin"}`), &proxy); err != nil {
+		t.Fatal(err)
+	}
+	data, err := json.Marshal(proxy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, redundant := range []string{`"port"`, `"type"`, `"strategy"`, "preserve", "verifyTls"} {
+		if strings.Contains(string(data), redundant) {
+			t.Errorf("defaults must not be written back: %s", data)
+		}
+	}
+	custom := `{"domain":"b.example.com","port":8443,"type":"tcp","strategy":"least-connections","preserveHost":false}`
+	if err := json.Unmarshal([]byte(custom), &proxy); err != nil {
+		t.Fatal(err)
+	}
+	data, _ = json.Marshal(proxy)
+	for _, kept := range []string{`"port":8443`, `"type":"tcp"`, `"strategy":"least-connections"`, `"preserveHost":false`} {
+		if !strings.Contains(string(data), kept) {
+			t.Errorf("%s must survive: %s", kept, data)
+		}
+	}
+	if err := json.Unmarshal([]byte(`{"domain": 5}`), &proxy); err == nil {
+		t.Fatal("a mistyped proxy must be rejected")
+	}
+}
+
+func TestResourceLocksSkipsItemsWithoutIDsAndNames(t *testing.T) {
+	project := &api.Project{Id: "p", Name: "demo", WorkspaceId: "w"}
+	locks := resourceLocks(project, "acme",
+		[]map[string]interface{}{{"name": "no-id"}},
+		[]map[string]interface{}{{"id": "s", "name": "web"}},
+		[]map[string]interface{}{{"id": "z", "name": "fallback.example"}},
+		nil, nil, nil)
+	if _, ok := locks["networks.no-id"]; ok {
+		t.Fatalf("an item without an ID cannot be locked: %v", locks)
+	}
+	if locks["serverlets.web"] != LockHash("s") || locks["dns.fallback.example"] != LockHash("z") {
+		t.Fatalf("locks = %v", locks)
+	}
+	if got := resourceLocks(&api.Project{}, "", nil, nil, nil, nil, nil, nil); len(got) != 0 {
+		t.Fatalf("an empty project has no locks: %v", got)
+	}
+}
+
+func TestConfigValidateAndSaveRejectUnmarshalableState(t *testing.T) {
+	cfg := &Config{Template: map[string]interface{}{"bad": make(chan int)}}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate must report an unserializable config")
+	}
+	if _, err := cfg.ToJS(); err == nil {
+		t.Fatal("ToJS must fail")
+	}
+	if _, err := cfg.ToYAML(); err == nil {
+		t.Fatal("ToYAML must fail")
+	}
+	dir := t.TempDir()
+	if err := cfg.SaveJSON(filepath.Join(dir, "a.json")); err == nil {
+		t.Fatal("SaveJSON must fail")
+	}
+	if err := cfg.SaveYAML(filepath.Join(dir, "a.yaml")); err == nil {
+		t.Fatal("SaveYAML must fail")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "a.json")); err == nil {
+		t.Fatal("nothing must be written for an invalid config")
+	}
+}
+
+func TestStorageAndCronMarshalOmitZeroTimestamps(t *testing.T) {
+	storage, _ := json.Marshal(StorageConfig{Name: "data"})
+	cron, _ := json.Marshal(CronConfig{Name: "nightly", Schedule: "* * * * *"})
+	for _, data := range []string{string(storage), string(cron)} {
+		if strings.Contains(data, "0001-01-01") || strings.Contains(data, "At") {
+			t.Fatalf("zero timestamps must not be written: %s", data)
+		}
+	}
+	if string(storage) != `{"name":"data"}` || !strings.Contains(string(cron), `"schedule":"* * * * *"`) {
+		t.Fatalf("storage = %s, cron = %s", storage, cron)
+	}
+	// a real timestamp is kept, and the value still loads back
+	var loaded CronConfig
+	if err := json.Unmarshal([]byte(`{"name":"n","startedAt":"2026-01-02T03:04:05Z"}`), &loaded); err != nil {
+		t.Fatal(err)
+	}
+	if data, _ := json.Marshal(loaded); !strings.Contains(string(data), "2026-01-02T03:04:05Z") {
+		t.Fatalf("a set timestamp must be kept: %s", data)
+	}
+	if _, err := json.Marshal(StorageConfig{Name: "x"}); err != nil {
+		t.Fatal(err)
+	}
+}

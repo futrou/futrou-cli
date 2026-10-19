@@ -99,14 +99,20 @@ var deployCommand = &cli.Command{
 	},
 }
 
+// refreshDeploymentConfig records the API IDs of the deployed resources in the
+// config's locks, so a later rename is recognized as an update. Only the locks
+// change: the file keeps what the user declared, including things that do not
+// exist in the cloud yet (the records of a DNS zone created by this deploy).
 func refreshDeploymentConfig(client *services.ApiClient, cfg *projectconfig.Config, path string) {
 	if cfg.Project == "" || !projectconfig.CanSave(path) {
 		return
 	}
-	if err := cfg.Pull(client, ""); err != nil {
+	pulled := &projectconfig.Config{Workspace: cfg.Workspace, Project: cfg.Project, Region: cfg.Region}
+	if err := pulled.Pull(client, ""); err != nil {
 		logger.Warn("deployment succeeded but config locks were not refreshed: %v", err)
 		return
 	}
+	cfg.Locks = pulled.Locks
 	if _, err := cfg.Save(".", path); err != nil {
 		logger.Warn("deployment succeeded but config locks were not refreshed: %v", err)
 	}

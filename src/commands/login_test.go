@@ -191,3 +191,19 @@ func TestLogout_json(t *testing.T) {
 	assertNoError(t, err)
 	assertContains(t, out, "logged out")
 }
+
+func TestFormatDurationUsesTheCoarsestUnit(t *testing.T) {
+	for in, want := range map[time.Duration]string{
+		0:                                     "0s",
+		4 * time.Second:                       "4s",
+		59*time.Second + 600*time.Millisecond: "1:00",
+		61 * time.Second:                      "1:01",
+		10 * time.Minute:                      "10:00",
+		time.Hour:                             "1:00:00",
+		90*time.Minute + 5*time.Second:        "1:30:05",
+	} {
+		if got := formatDuration(in); got != want {
+			t.Errorf("formatDuration(%v) = %q, want %q", in, got, want)
+		}
+	}
+}

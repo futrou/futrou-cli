@@ -120,12 +120,14 @@ var perCommandFlags = []cli.Flag{
 // c.Bool/c.String here always resolve to values set at or below this exact
 // context, never a shadowed ancestor value.
 func applyGlobalFlagShorthands(c *cli.Context) error {
-	if c.Bool("local") && !c.IsSet("api-url") {
+	// An empty FUTROU_API_URL counts as set to urfave, but it chooses nothing.
+	urlChosen := func() bool { return c.IsSet("api-url") && c.String("api-url") != "" }
+	if c.Bool("local") && !urlChosen() {
 		if err := c.Set("api-url", constants.LocalApiUrl); err != nil {
 			return err
 		}
 	}
-	if c.Bool("dev") && !c.IsSet("api-url") {
+	if c.Bool("dev") && !urlChosen() {
 		if err := c.Set("api-url", constants.DevApiUrl); err != nil {
 			return err
 		}

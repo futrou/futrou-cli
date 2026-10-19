@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"fmt"
 	"net/http"
 	"os"
 	"os/exec"
@@ -768,4 +769,337 @@ func TestDeployRejectsInvalidProjectNames(t *testing.T) {
 	_, err := runArgs(t, ts, "deploy", "-p", "../etc/passwd", "--yes")
 	assertError(t, err)
 	assertContains(t, err.Error(), "invalid project name")
+}
+
+// lifecycle configs: the same project in every format a user can write it in
+var lifecycleConfigs = map[string]string{
+	"futrou.json": `{
+  "workspace": "acme", "project": "demo", "region": "europe",
+  "networks": [{"name": "backend"}],
+  "storages": [{"name": "data"}],
+  "serverlets": [
+    {"name": "web", "image": "nginx:1", "serverletPlanId": "plan-1", "needs": ["db:healthy"], "networks": ["backend"], "env": {"A": "1"}},
+    {"name": "db", "image": "postgres:17", "serverletPlanId": "plan-1"}
+  ],
+  "proxies": [{"domain": "app.example.com", "target": "web", "port": 8080}],
+  "crons": [{"name": "nightly"}]
+}`,
+	"futrou.yaml": `
+workspace: acme
+project: demo
+region: europe
+networks: [{name: backend}]
+storages: [{name: data}]
+serverlets:
+  - {name: web, image: "nginx:1", serverletPlanId: plan-1, needs: ["db:healthy"], networks: [backend], env: {A: "1"}}
+  - {name: db, image: "postgres:17", serverletPlanId: plan-1}
+proxies: [{domain: app.example.com, target: web, port: 8080}]
+crons: [{name: nightly}]
+`,
+	"keyed|futrou.yaml": `
+workspace: acme
+project: demo
+region: europe
+networks:
+  backend:
+storages:
+  data:
+serverlets:
+  web: {image: "nginx:1", serverletPlanId: plan-1, needs: ["db:healthy"], networks: [backend], env: {A: "1"}}
+  db: {image: "postgres:17", serverletPlanId: plan-1}
+proxies:
+  app.example.com: {target: web, port: 8080}
+crons:
+  nightly:
+`,
+	"futrou.mjs": `export default async () => ({
+  workspace: "acme", project: "demo", region: "europe",
+  networks: [{name: "backend"}],
+  storages: [{name: "data"}],
+  serverlets: [
+    {name: "web", image: "nginx:1", serverletPlanId: "plan-1", needs: ["db:healthy"], networks: ["backend"], env: {A: "1"}},
+    {name: "db", image: "postgres:17", serverletPlanId: "plan-1"},
+  ],
+  proxies: [{domain: "app.example.com", target: "web", port: 8080}],
+  crons: [{name: "nightly"}],
+});`,
+}
+
+func TestDeployLifecycleInEveryConfigFormat(t *testing.T) {
+	for label, content := range lifecycleConfigs {
+		file := label[strings.Index(label, "|")+1:]
+		t.Run(label, func(t *testing.T) {
+			if strings.HasSuffix(file, ".mjs") {
+				if _, err := exec.LookPath("node"); err != nil {
+					t.Skip("node not found")
+				}
+			}
+			dir := t.TempDir()
+			withWorkingDirectory(t, dir)
+			if err := os.WriteFile(filepath.Join(dir, file), []byte(content), 0644); err != nil {
+				t.Fatal(err)
+			}
+			ts, cloud := newCloudServer(t)
+
+			// 1. first deploy creates everything, dependencies first
+			out, err := runArgs(t, ts, "deploy", "--yes")
+			assertNoError(t, err)
+			assertContains(t, out, "Applied 6 change(s).")
+			got := cloud.mutations()
+			if len(got) != 6 || got[0] != "POST /v2/networks" || got[1] != "POST /v2/serverlets" {
+				t.Fatalf("mutations = %v", got)
+			}
+			if names := cloud.named("/v2/serverlets"); strings.Join(names, ",") != "db,web" {
+				t.Fatalf("db must be created before web, which needs it: %v", names)
+			}
+			for _, item := range cloud.items["/v2/serverlets"] {
+				if item["regionId"] != "reg-eu" {
+					t.Errorf("serverlet %v did not get the project region: %v", item["name"], item)
+				}
+			}
+
+			// 2. deploying again changes nothing
+			before := len(cloud.mutations())
+			out, err = runArgs(t, ts, "deploy", "--yes")
+			assertNoError(t, err)
+			assertContains(t, out, "No changes")
+			if len(cloud.mutations()) != before {
+				t.Fatalf("a no-op deploy must not mutate: %v", cloud.mutations()[before:])
+			}
+		})
+	}
+}
+
+func TestDeployUpdatesChangedResourcesAndDeletesRemovedOnes(t *testing.T) {
+	dir := t.TempDir()
+	withWorkingDirectory(t, dir)
+	path := filepath.Join(dir, "futrou.json")
+	if err := os.WriteFile(path, []byte(lifecycleConfigs["futrou.json"]), 0644); err != nil {
+		t.Fatal(err)
+	}
+	ts, cloud := newCloudServer(t)
+	_, err := runArgs(t, ts, "deploy", "--yes")
+	assertNoError(t, err)
+	mark := len(cloud.mutations())
+
+	changed := strings.NewReplacer(`"nginx:1"`, `"nginx:2"`, `, "env": {"A": "1"}`, `, "env": {"A": "2"}`).Replace(lifecycleConfigs["futrou.json"])
+	changed = strings.Replace(changed, `,
+  "crons": [{"name": "nightly"}]`, "", 1) // the cron is removed from the config
+	if err := os.WriteFile(path, []byte(changed), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := runArgs(t, ts, "deploy", "--dry-run")
+	assertNoError(t, err)
+	assertContains(t, out, "Update (1)")
+	assertContains(t, out, "Delete (1)")
+	assertContains(t, out, "nginx:2")
+	if len(cloud.mutations()) != mark {
+		t.Fatalf("--dry-run must not change anything: %v", cloud.mutations()[mark:])
+	}
+
+	out, err = runArgs(t, ts, "deploy", "--yes")
+	assertNoError(t, err)
+	assertContains(t, out, "Applied 2 change(s).")
+	if names := cloud.named("/v2/crons"); len(names) != 0 {
+		t.Fatalf("the removed cron must be deleted: %v", names)
+	}
+	for _, item := range cloud.items["/v2/serverlets"] {
+		if item["name"] == "web" && (item["image"] != "nginx:2" || item["env"].(map[string]any)["A"] != "2") {
+			t.Fatalf("web was not updated: %v", item)
+		}
+	}
+	for _, call := range cloud.mutations()[mark:] {
+		if strings.HasPrefix(call, "POST") {
+			t.Fatalf("nothing must be recreated: %v", cloud.mutations()[mark:])
+		}
+	}
+}
+
+func TestDeployRenameThroughLocksUpdatesInsteadOfRecreating(t *testing.T) {
+	dir := t.TempDir()
+	withWorkingDirectory(t, dir)
+	path := filepath.Join(dir, "futrou.json")
+	if err := os.WriteFile(path, []byte(lifecycleConfigs["futrou.json"]), 0644); err != nil {
+		t.Fatal(err)
+	}
+	ts, cloud := newCloudServer(t)
+	_, err := runArgs(t, ts, "deploy", "--yes")
+	assertNoError(t, err)
+
+	saved, _ := os.ReadFile(path)
+	for _, lock := range []string{`"serverlets.web"`, `"networks.backend"`, `"storages.data"`, `"crons.nightly"`, `"proxies.app.example.com"`} {
+		if !strings.Contains(string(saved), lock) {
+			t.Fatalf("the deployed config must record %s:\n%s", lock, saved)
+		}
+	}
+	if strings.Contains(string(saved), "0001-01-01") {
+		t.Fatalf("zero timestamps leaked into the config:\n%s", saved)
+	}
+	// Rename in the file; the lock stays under the old key until the next
+	// deploy, and the lock hash is what ties the new name to the old resource.
+	renamed := strings.Replace(string(saved), `"name": "web"`, `"name": "frontend"`, 1)
+	renamed = strings.Replace(renamed, `"serverlets.web"`, `"serverlets.frontend"`, 1)
+	renamed = strings.ReplaceAll(renamed, `"web"`, `"frontend"`)
+	if err := os.WriteFile(path, []byte(renamed), 0644); err != nil {
+		t.Fatal(err)
+	}
+	mark := len(cloud.mutations())
+	_, err = runArgs(t, ts, "deploy", "--yes")
+	assertNoError(t, err)
+	for _, call := range cloud.mutations()[mark:] {
+		if strings.HasPrefix(call, "POST") || strings.HasPrefix(call, "DELETE") {
+			t.Fatalf("a rename is a PATCH, got %v", cloud.mutations()[mark:])
+		}
+	}
+	if names := cloud.named("/v2/serverlets"); strings.Join(names, ",") != "db,frontend" {
+		t.Fatalf("serverlets = %v", names)
+	}
+}
+
+func TestDeployThenDestroyAndDown(t *testing.T) {
+	for _, mode := range []string{"destroy", "down"} {
+		t.Run(mode, func(t *testing.T) {
+			dir := t.TempDir()
+			withWorkingDirectory(t, dir)
+			if err := os.WriteFile(filepath.Join(dir, "futrou.json"), []byte(lifecycleConfigs["futrou.json"]), 0644); err != nil {
+				t.Fatal(err)
+			}
+			ts, cloud := newCloudServer(t)
+			// an unrelated serverlet of another project stays
+			cloud.add("/v2/serverlets", map[string]any{"id": "other-1", "name": "other", "projectId": "proj-2"})
+			_, err := runArgs(t, ts, "deploy", "--yes")
+			assertNoError(t, err)
+
+			if mode == "destroy" {
+				out, err := runArgs(t, ts, "deploy", "--destroy", "--yes")
+				assertNoError(t, err)
+				assertContains(t, out, "Delete (6)")
+				if len(cloud.items["/v2/projects"]) != 1 {
+					t.Fatal("--destroy keeps the project")
+				}
+			} else {
+				_, err := runArgs(t, ts, "down", "--yes")
+				assertNoError(t, err)
+				if len(cloud.items["/v2/projects"]) != 0 {
+					t.Fatal("down deletes the project")
+				}
+			}
+			for _, path := range []string{"/v2/networks", "/v2/storages", "/v2/proxies", "/v2/crons"} {
+				if len(cloud.items[path]) != 0 {
+					t.Errorf("%s still holds %v", path, cloud.items[path])
+				}
+			}
+			if names := cloud.named("/v2/serverlets"); mode == "destroy" && strings.Join(names, ",") != "other" {
+				t.Fatalf("only the declared serverlets are destroyed: %v", names)
+			}
+		})
+	}
+}
+
+func TestDeployFailuresStopCleanly(t *testing.T) {
+	for name, tc := range map[string]struct {
+		method, path string
+		status       int
+		wantOut      string
+	}{
+		"creating a network is rejected": {"POST", "/v2/networks", 422, `create network "backend"`},
+		"serverlet creation fails":       {"POST", "/v2/serverlets", 500, `create serverlet`},
+		"listing serverlets fails":       {"GET", "/v2/serverlets", 503, "serverlets"},
+		"regions are down":               {"GET", "/v2/regions", 500, "regions"},
+		"projects are down":              {"GET", "/v2/projects", 500, "projects"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			withWorkingDirectory(t, dir)
+			path := filepath.Join(dir, "futrou.json")
+			if err := os.WriteFile(path, []byte(lifecycleConfigs["futrou.json"]), 0644); err != nil {
+				t.Fatal(err)
+			}
+			ts, cloud := newCloudServer(t)
+			cloud.fail(tc.method, tc.path, tc.status)
+			_, err := runArgs(t, ts, "deploy", "--yes")
+			if err == nil || !strings.Contains(err.Error(), tc.wantOut) {
+				t.Fatalf("error = %v, want %q", err, tc.wantOut)
+			}
+			after, _ := os.ReadFile(path)
+			if string(after) != lifecycleConfigs["futrou.json"] {
+				t.Fatalf("a failed deploy must leave the config untouched:\n%s", after)
+			}
+		})
+	}
+}
+
+func TestDeployWarnsWhenTheConfigRefreshFails(t *testing.T) {
+	dir := t.TempDir()
+	withWorkingDirectory(t, dir)
+	path := filepath.Join(dir, "futrou.json")
+	original := `{"workspace":"acme","project":"demo","serverlets":[{"name":"web","image":"nginx"}]}`
+	if err := os.WriteFile(path, []byte(original), 0644); err != nil {
+		t.Fatal(err)
+	}
+	ts, cloud := newCloudServer(t)
+	// the API breaks right after the serverlet was created, before the refresh
+	ts.on("POST", "/v2/serverlets", func(w http.ResponseWriter, r *http.Request) {
+		ts.fallback(w, r)
+		cloud.fail("GET", "/v2/crons", 500)
+	})
+	out, err := runArgs(t, ts, "deploy", "--yes")
+	assertNoError(t, err)
+	assertContains(t, out, "Applied 1 change(s).")
+	assertContains(t, out, "locks were not refreshed")
+	if after, _ := os.ReadFile(path); string(after) != original {
+		t.Fatalf("a failed refresh must leave the config alone:\n%s", after)
+	}
+}
+
+func TestDeployWithDNSZoneIsATwoStepProcess(t *testing.T) {
+	dir := t.TempDir()
+	withWorkingDirectory(t, dir)
+	config := `{"workspace":"acme","project":"demo","dns":[{"domain":"example.com","name":"example.com","ttl":300,"priority":0,
+	  "records":[{"name":"www","type":"A","value":"192.0.2.1","ttl":300},{"name":"@","type":"MX","value":"mail.example.com","ttl":300,"priority":10}]}]}`
+	if err := os.WriteFile(filepath.Join(dir, "futrou.json"), []byte(config), 0644); err != nil {
+		t.Fatal(err)
+	}
+	ts, cloud := newCloudServer(t)
+
+	out, err := runArgs(t, ts, "deploy", "--yes")
+	assertNoError(t, err)
+	assertContains(t, out, "Applied 1 change(s).") // the zone
+
+	if saved, _ := os.ReadFile(filepath.Join(dir, "futrou.json")); !strings.Contains(string(saved), `"records"`) || !strings.Contains(string(saved), "mail.example.com") {
+		t.Fatalf("the deploy must not drop declared records from the config:\n%s", saved)
+	}
+	out, err = runArgs(t, ts, "deploy", "--yes")
+	assertNoError(t, err)
+	assertContains(t, out, "dns record")
+	assertContains(t, out, "Applied 2 change(s).")
+	zone := cloud.items["/v2/dns"][0]["id"].(string)
+	if len(cloud.records[zone]) != 2 {
+		t.Fatalf("records = %v", cloud.records[zone])
+	}
+
+	// a record changes, one is removed, one is added
+	changed := strings.Replace(config, `"192.0.2.1"`, `"192.0.2.99"`, 1)
+	changed = strings.Replace(changed, `,{"name":"@","type":"MX","value":"mail.example.com","ttl":300,"priority":10}`, `,{"name":"api","type":"A","value":"192.0.2.3","ttl":300}`, 1)
+	if err := os.WriteFile(filepath.Join(dir, "futrou.json"), []byte(changed), 0644); err != nil {
+		t.Fatal(err)
+	}
+	out, err = runArgs(t, ts, "deploy", "--dry-run")
+	assertNoError(t, err)
+	assertContains(t, out, "dns record")
+	assertContains(t, out, "192.0.2.99")
+
+	_, err = runArgs(t, ts, "deploy", "--yes")
+	assertNoError(t, err)
+	var values []string
+	for _, r := range cloud.records[zone] {
+		values = append(values, fmt.Sprint(r["name"], "=", r["value"]))
+	}
+	if strings.Join(values, ",") != "www=192.0.2.99,api=192.0.2.3" {
+		t.Fatalf("records = %v", values)
+	}
+	out, err = runArgs(t, ts, "deploy", "--yes")
+	assertNoError(t, err)
+	assertContains(t, out, "No changes")
 }

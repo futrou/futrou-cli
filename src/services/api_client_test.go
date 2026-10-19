@@ -2,6 +2,7 @@ package services
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -9,6 +10,7 @@ import (
 	"testing"
 
 	"futrou-cli/src/api"
+	"futrou-cli/src/cliconfig"
 )
 
 func TestApiClientRequestInto_AllHTTPMethods(t *testing.T) {
@@ -429,5 +431,74 @@ func TestNormalizeApiUrlAcceptsEverySpelling(t *testing.T) {
 		if got := NormalizeApiUrl(in); got != want {
 			t.Errorf("NormalizeApiUrl(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+func TestNewApiClientResolvesURLAndToken(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("FUTROU_API_TOKEN", "")
+	t.Setenv("FUTROU_API_URL", "")
+
+	client, err := NewApiClient("localhost:4000", "explicit")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if client.ApiToken() != "explicit" || client.ApiUrl() != NormalizeApiUrl("localhost:4000") {
+		t.Fatalf("client = %q %q", client.ApiToken(), client.ApiUrl())
+	}
+
+	// the environment overrides apply on top of an existing config file
+	stored := cliconfig.CliConfig{ApiUrl: NormalizeApiUrl("localhost:4000")}
+	if err := cliconfig.Save(&stored); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("FUTROU_API_TOKEN", "from-env")
+	client, err = NewApiClient("", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if client.ApiToken() != "from-env" {
+		t.Fatalf("the environment token is used when no flag is given: %q", client.ApiToken())
+	}
+	if client, _ = NewApiClient("", "flag"); client.ApiToken() != "flag" {
+		t.Fatalf("an explicit token wins over the environment: %q", client.ApiToken())
+	}
+}
+
+type stubTransport struct {
+	err   error
+	calls int
+}
+
+func (s *stubTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	s.calls++
+	if s.err != nil {
+		return nil, s.err
+	}
+	return &http.Response{StatusCode: 200, Body: http.NoBody, Request: req}, nil
+}
+
+func TestFallbackTransportFallsBackWhenHTTP3Fails(t *testing.T) {
+	https, _ := http.NewRequest("GET", "https://api.example.com/v2", nil)
+	plain, _ := http.NewRequest("GET", "http://localhost/v2", nil)
+
+	primary, fallback := &stubTransport{err: fmt.Errorf("quic unavailable")}, &stubTransport{}
+	tr := &fallbackTransport{primary: primary, fallback: fallback}
+	if resp, err := tr.RoundTrip(https); err != nil || resp.StatusCode != 200 || primary.calls != 1 || fallback.calls != 1 {
+		t.Fatalf("a failing HTTP/3 attempt falls back: %v, primary %d, fallback %d", err, primary.calls, fallback.calls)
+	}
+	primary, fallback = &stubTransport{}, &stubTransport{}
+	tr = &fallbackTransport{primary: primary, fallback: fallback}
+	if _, err := tr.RoundTrip(https); err != nil || fallback.calls != 0 {
+		t.Fatalf("a working HTTP/3 attempt needs no fallback: %v, %d", err, fallback.calls)
+	}
+	primary, fallback = &stubTransport{}, &stubTransport{}
+	tr = &fallbackTransport{primary: primary, fallback: fallback}
+	if _, err := tr.RoundTrip(plain); err != nil || primary.calls != 0 || fallback.calls != 1 {
+		t.Fatalf("plain HTTP never tries QUIC: %v, primary %d, fallback %d", err, primary.calls, fallback.calls)
+	}
+	failing := &fallbackTransport{primary: &stubTransport{err: fmt.Errorf("a")}, fallback: &stubTransport{err: fmt.Errorf("b")}}
+	if _, err := failing.RoundTrip(https); err == nil || err.Error() != "b" {
+		t.Fatalf("the fallback's error is reported: %v", err)
 	}
 }

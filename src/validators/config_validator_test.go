@@ -466,3 +466,106 @@ func TestConfigValidatorNeedsErrorsAreSpecific(t *testing.T) {
 		}
 	}
 }
+
+func TestValidateNeedsIgnoresShapesOtherRulesReport(t *testing.T) {
+	for name, value := range map[string]interface{}{
+		"not an array":       "nope",
+		"items not objects":  []interface{}{"a", 1, nil},
+		"unnamed serverlets": []interface{}{map[string]interface{}{"needs": []interface{}{"x"}}},
+		"non-string needs":   []interface{}{map[string]interface{}{"name": "a", "needs": []interface{}{5}}},
+		"needs not an array": []interface{}{map[string]interface{}{"name": "a", "needs": "b"}},
+		"no needs":           []interface{}{map[string]interface{}{"name": "a"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := validateNeeds(value); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+	}
+	err := validateNeeds([]interface{}{map[string]interface{}{"name": "a", "needs": []interface{}{"b:later"}}})
+	if err == nil || !strings.Contains(err.Error(), `serverlet "a"`) {
+		t.Fatalf("a malformed need must name the serverlet: %v", err)
+	}
+}
+
+func TestListAndMapHelpers(t *testing.T) {
+	for name, tc := range map[string]struct {
+		fn      func(interface{}) error
+		value   interface{}
+		wantErr string
+	}{
+		"list ok":           {stringList, []interface{}{"a", "b"}, ""},
+		"list empty ok":     {stringList, []interface{}{}, ""},
+		"list wrong type":   {stringList, "a", "must be an array"},
+		"list non-string":   {stringList, []interface{}{"a", 2}, "item 1"},
+		"list blank item":   {stringList, []interface{}{"  "}, "item 0"},
+		"string map ok":     {stringMap, map[string]interface{}{"A": "1"}, ""},
+		"string map type":   {stringMap, []interface{}{}, "must be an object"},
+		"string map value":  {stringMap, map[string]interface{}{"PORT": 80}, "PORT must be a string"},
+		"number map ok":     {numberMap, map[string]interface{}{"cpu": 1.5}, ""},
+		"number map type":   {numberMap, "x", "must be an object"},
+		"number map value":  {numberMap, map[string]interface{}{"cpu": "1"}, "cpu must be a number"},
+		"unique non-array":  {uniqueNames("name"), "x", ""},
+		"unique ok":         {uniqueNames("name"), []interface{}{map[string]interface{}{"name": "a"}, map[string]interface{}{"name": "b"}}, ""},
+		"unique duplicate":  {uniqueNames("name"), []interface{}{map[string]interface{}{"name": "a"}, map[string]interface{}{"name": "a"}}, "duplicate"},
+		"unique missing":    {uniqueNames("name"), []interface{}{map[string]interface{}{}}, "name"},
+		"unique skips junk": {uniqueNames("name"), []interface{}{"junk", map[string]interface{}{"name": "a"}}, ""},
+		"unique other key":  {uniqueNames("domain", "name"), []interface{}{map[string]interface{}{"name": "a"}, map[string]interface{}{"domain": "a"}}, "duplicate"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := tc.fn(tc.value)
+			if tc.wantErr == "" && err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if tc.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tc.wantErr)) {
+				t.Fatalf("error = %v, want %q", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestConfigValidatorRejectsWrongShapesPerResource(t *testing.T) {
+	item := func(m map[string]interface{}) []interface{} { return []interface{}{m} }
+	for name, tc := range map[string]struct {
+		config map[string]interface{}
+		field  string
+	}{
+		"serverlets not an array": {map[string]interface{}{"serverlets": "web"}, "serverlets"},
+		"serverlet not an object": {map[string]interface{}{"serverlets": []interface{}{"web"}}, "serverlets"},
+		"networks not an array":   {map[string]interface{}{"networks": map[string]interface{}{"a": 1}}, "networks"},
+		"network name number":     {map[string]interface{}{"networks": item(map[string]interface{}{"name": 5})}, "networks"},
+		"storages not an array":   {map[string]interface{}{"storages": 5}, "storages"},
+		"storage name blank":      {map[string]interface{}{"storages": item(map[string]interface{}{"name": ""})}, "storages"},
+		"crons not an array":      {map[string]interface{}{"crons": "x"}, "crons"},
+		"cron name missing":       {map[string]interface{}{"crons": item(map[string]interface{}{"schedule": "* * * * *"})}, "crons"},
+		"proxies not an array":    {map[string]interface{}{"proxies": true}, "proxies"},
+		"proxy domain missing":    {map[string]interface{}{"proxies": item(map[string]interface{}{"target": "web"})}, "proxies"},
+		"dns not an array":        {map[string]interface{}{"dns": "example.com"}, "dns"},
+		"dns domain missing":      {map[string]interface{}{"dns": item(map[string]interface{}{"records": []interface{}{}})}, "dns"},
+		"dns records not array":   {map[string]interface{}{"dns": item(map[string]interface{}{"domain": "a.com", "name": "a.com", "records": "x"})}, "dns"},
+		"locks not an object":     {map[string]interface{}{"locks": []interface{}{}}, "locks"},
+		"locks value not string":  {map[string]interface{}{"locks": map[string]interface{}{"serverlets.web": 1}}, "locks"},
+		"template not an object":  {map[string]interface{}{"template": "nice"}, "template"},
+		"region not a string":     {map[string]interface{}{"region": []interface{}{}}, "region"},
+		"project not a string":    {map[string]interface{}{"project": 5}, "project"},
+		"workspace not a string":  {map[string]interface{}{"workspace": 5}, "workspace"},
+	} {
+		t.Run(name, func(t *testing.T) { assertConfigFieldError(t, tc.config, tc.field) })
+	}
+}
+
+func TestConfigValidatorAcceptsEveryResourceShape(t *testing.T) {
+	validateConfig(t, map[string]interface{}{
+		"workspace": "acme", "project": "demo", "region": "europe",
+		"networks": []interface{}{map[string]interface{}{"name": "backend", "internal": true, "ipv4": "10.0.0.0/24"}},
+		"storages": []interface{}{map[string]interface{}{"name": "data", "public": false}},
+		"crons":    []interface{}{map[string]interface{}{"name": "nightly", "schedule": "0 3 * * *", "type": "simple", "url": "https://example.com/hook", "method": "POST", "enabled": true}},
+		"proxies":  []interface{}{map[string]interface{}{"domain": "app.example.com", "target": "web", "port": float64(8080)}},
+		"dns":      []interface{}{map[string]interface{}{"domain": "example.com", "name": "example.com", "records": []interface{}{map[string]interface{}{"name": "@", "type": "A", "value": "192.0.2.1", "ttl": float64(300)}}}},
+		"serverlets": []interface{}{
+			map[string]interface{}{"name": "db", "image": "postgres:17"},
+			map[string]interface{}{"name": "web", "image": "nginx", "needs": []interface{}{"db:healthy"}, "ports": []interface{}{map[string]interface{}{"port": float64(80)}}},
+		},
+		"locks": map[string]interface{}{"serverlets.web": "abc"},
+	})
+}

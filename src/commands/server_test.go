@@ -143,3 +143,56 @@ func TestServerCreateWithWorkspaceAndJSON(t *testing.T) {
 		t.Fatalf("unexpected body: %v", received)
 	}
 }
+
+func TestServerCommandsRequireAnID(t *testing.T) {
+	ts := newTestServer(t)
+	for _, args := range [][]string{{"server", "show"}, {"server", "rm"}, {"server", "metrics"}, {"server", "update", "--name", "x"}, {"server", "logs"}} {
+		_, err := runArgs(t, ts, args...)
+		assertError(t, err)
+	}
+}
+
+func TestServerCommandsReportAPIFailures(t *testing.T) {
+	ts := newTestServer(t)
+	for _, route := range []struct{ method, path string }{
+		{"GET", "/v2/servers"}, {"GET", "/v2/servers/srv-1"}, {"POST", "/v2/servers"},
+		{"PATCH", "/v2/servers/srv-1"}, {"DELETE", "/v2/servers/srv-1"}, {"GET", "/v2/servers/srv-1/metrics"},
+	} {
+		ts.on(route.method, route.path, respond(500, map[string]string{"message": "boom"}))
+	}
+	for _, args := range [][]string{
+		{"server", "ls"}, {"server", "show", "srv-1"}, {"server", "create", "--name", "x"},
+		{"server", "update", "--name", "y", "srv-1"}, {"server", "rm", "srv-1"}, {"server", "metrics", "srv-1"},
+	} {
+		_, err := runArgs(t, ts, args...)
+		if err == nil {
+			t.Errorf("%v must fail when the API answers 500", args)
+		}
+	}
+}
+
+func TestServerShowAndMetricsPrintTheResponse(t *testing.T) {
+	ts := newTestServer(t)
+	ts.on("GET", "/v2/servers/srv-1", respond(200, map[string]any{"id": "srv-1", "name": "edge-1"}))
+	ts.on("GET", "/v2/servers/srv-1/metrics", respond(200, map[string]any{"cpu": 12}))
+	out, err := runArgs(t, ts, "server", "show", "srv-1")
+	assertNoError(t, err)
+	assertContains(t, out, "edge-1")
+	out, err = runArgs(t, ts, "server", "metrics", "srv-1")
+	assertNoError(t, err)
+	assertContains(t, out, "cpu")
+}
+
+func TestServerLsFiltersByRegion(t *testing.T) {
+	ts := newTestServer(t)
+	var query string
+	ts.on("GET", "/v2/servers", func(w http.ResponseWriter, r *http.Request) {
+		query = r.URL.RawQuery
+		respond(200, []any{})(w, r)
+	})
+	_, err := runArgs(t, ts, "server", "ls", "--region", "reg-eu")
+	assertNoError(t, err)
+	if !strings.Contains(query, "reg-eu") {
+		t.Fatalf("the region filter must reach the API: %q", query)
+	}
+}

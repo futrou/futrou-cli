@@ -1,10 +1,13 @@
 package commands
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"futrou-cli/src/services"
 )
 
 func initDir(t *testing.T) string {
@@ -170,5 +173,40 @@ func TestSetupIsAHiddenAliasOfInit(t *testing.T) {
 	}
 	if strings.Contains(out, "setup") {
 		t.Fatalf("setup should be hidden:\n%s", out)
+	}
+}
+
+func TestCheckServerletNameSuggestsAFreeName(t *testing.T) {
+	for name, tc := range map[string]struct {
+		response any
+		status   int
+		name     string
+		want     string
+	}{
+		"free name":             {[]any{map[string]any{"name": "other"}}, 200, "web", ""},
+		"taken":                 {[]any{map[string]any{"name": "web"}}, 200, "web", "web-2"},
+		"taken with suffixes":   {[]any{map[string]any{"name": "web"}, map[string]any{"name": "web-2"}, map[string]any{"name": "web-3"}}, 200, "web", "web-4"},
+		"wrapped in data":       {map[string]any{"data": []any{map[string]any{"name": "web"}}}, 200, "web", "web-2"},
+		"unknown shape":         {"oops", 200, "web", ""},
+		"api error":             {map[string]string{"message": "x"}, 500, "web", ""},
+		"rows without names":    {[]any{map[string]any{"id": "1"}}, 200, "web", ""},
+		"every suffix is taken": {nil, 200, "web", ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			response := tc.response
+			if name == "every suffix is taken" {
+				rows := []any{map[string]any{"name": "web"}}
+				for i := 2; i <= 99; i++ {
+					rows = append(rows, map[string]any{"name": fmt.Sprintf("web-%d", i)})
+				}
+				response = rows
+			}
+			ts := newTestServer(t)
+			ts.on("GET", "/v2/serverlets", respond(tc.status, response))
+			client := services.NewApiClientWithToken(ts.URL, "token")
+			if got := checkServerletName(client, tc.name); got != tc.want {
+				t.Fatalf("suggestion = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }

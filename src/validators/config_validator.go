@@ -24,8 +24,8 @@ func initConfigValidator() *Validator {
 	v.Field("proxies").Description("HTTP, TCP, or UDP proxies managed by this project.").Optional().Array(initProxyValidator()).Custom(uniqueNames("domain"))
 	v.Field("storages").Description("Persistent storage volumes available to the project.").Optional().Array(initStorageValidator()).Custom(uniqueNames("name"))
 	v.Field("crons").Description("Scheduled HTTP or code jobs for the project.").Optional().Array(initCronValidator()).Custom(uniqueNames("name"))
-	v.Field("template").Description("Presentation metadata for the Futrou template store (title, description, category, tags, icon, ...). Not used by the CLI.").Optional()
-	v.Field("locks").Description("Internal stable resource identifiers maintained by the CLI.").Optional()
+	v.Field("template").Description("Presentation metadata for the Futrou template store (title, description, category, tags, icon, ...). Not used by the CLI.").Optional().Custom(isObject)
+	v.Field("locks").Description("Internal stable resource identifiers maintained by the CLI.").Optional().Custom(stringMap)
 	return v
 }
 
