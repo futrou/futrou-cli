@@ -16,6 +16,11 @@ permissions:
   contents: write
   id-token: write
 
+# Releases are never cancelled, they wait for the running one to finish.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
   prepare:
     name: Prepare Release
