@@ -27,7 +27,7 @@ generate: build-types
 
 test:
 	@$(SCRIPTS_DIR)/check-test-names.sh
-	@go test ./src/...
+	@$(SCRIPTS_DIR)/test.sh
 
 version:
 	@$(SCRIPTS_DIR)/version.sh $(filter-out version,$(MAKECMDGOALS))
