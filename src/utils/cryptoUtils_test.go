@@ -2,6 +2,7 @@ package utils
 
 import (
 	"bytes"
+	"encoding/base64"
 	"strings"
 	"testing"
 )
@@ -60,14 +61,14 @@ func TestEncryptDecryptWithKey(t *testing.T) {
 
 func TestTamperedCiphertextIsRejected(t *testing.T) {
 	key := DeriveKey("cli", "machine", "1000")
-	sealed := []byte(EncryptWithKey("secret", key))
-	last := len(sealed) - 3
-	if sealed[last] == 'A' {
-		sealed[last] = 'B'
-	} else {
-		sealed[last] = 'A'
+	stored := EncryptWithKey("secret", key)
+	raw, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(stored, EncPrefix))
+	if err != nil {
+		t.Fatal(err)
 	}
-	if _, err := DecryptWithKey(string(sealed), key); err == nil {
+	raw[len(raw)-1] ^= 0xff
+	sealed := EncPrefix + base64.StdEncoding.EncodeToString(raw)
+	if _, err := DecryptWithKey(sealed, key); err == nil {
 		t.Fatal("GCM must detect a modified ciphertext")
 	}
 }
