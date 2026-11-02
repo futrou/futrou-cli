@@ -79,10 +79,7 @@ echo "-------------------------"
 # Copy the installers next to the binaries
 cp install.sh install.ps1 "$DIST_DIR/"
 
-# Generate checksums for all binaries
-echo "Generating checksums..."
-(cd "$DIST_DIR" && sha256sum $DIST_NAME-* > checksums.txt)
-echo "  + checksums.txt"
+# The checksums (SHA256SUMS) are written and signed by scripts/sign.sh (make sign)
 
 echo "✅ Build complete!"
 

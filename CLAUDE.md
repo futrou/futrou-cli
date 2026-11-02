@@ -63,8 +63,8 @@ declarative `futrou.json` model in `src/config/`, its validators in
 
 ## Release signing
 
-- `make sign` (`scripts/sign.sh`, same as in nasua) signs every file in `dist/` (binaries, `checksums.txt`,
-  `install.sh`, `install.ps1`) with a detached `<file>.asc` and writes a signed `SHA256SUMS`. CI
+- `make sign` (`scripts/sign.sh`, same as in nasua) signs every file in `dist/` (binaries,
+  `install.sh`, `install.ps1`) with a detached `<file>.asc` and writes a signed `SHA256SUMS`, the only checksum file (`build.sh` no longer writes `checksums.txt`). CI
   (`release-run.yml`) runs it before uploading `dist/*`, with the secrets `GPG_PRIVATE_KEY_BASE64`
   and `GPG_PASSPHRASE` (optional, empty for a key without one). The public key is not in this repo or
   the binary: it is published at the URL below.
