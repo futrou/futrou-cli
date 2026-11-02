@@ -131,7 +131,11 @@ if (-not (Test-Path $TmpExe)) {
 # ---------------------------------------------------------------------------
 function Fail-Signature([String]$Reason) {
   Remove-Item -Force $TmpExe -ErrorAction SilentlyContinue
-  Write-Fail "Signature verification failed: $Reason`n  Nothing was installed. To install anyway, run the installer again with -IgnoreSignature."
+  $Args2 = if ($Version -eq "latest") { "-IgnoreSignature" } else { "-Version $Version -IgnoreSignature" }
+  Write-Warn "warning: could not verify the signature: $Reason"
+  Write-Info "Nothing was installed. If you trust the download anyway, run the installer again without the check:"
+  Write-Output "  & ([scriptblock]::Create((irm https://futrou.com/install.ps1))) $Args2"
+  exit 1
 }
 
 if ($IgnoreSignature) {
@@ -143,10 +147,10 @@ if ($IgnoreSignature) {
   $GpgHome = Join-Path ([IO.Path]::GetTempPath()) ("futrou-gpg-" + [Guid]::NewGuid())
   $null = New-Item -ItemType Directory -Force -Path $GpgHome
   try {
-    try { Invoke-WebRequest -UseBasicParsing -Uri $GpgKeyURL -OutFile "$GpgHome\pgp-key.txt" } catch { Fail-Signature "could not download the public key from $GpgKeyURL" }
+    try { Invoke-WebRequest -UseBasicParsing -Uri $GpgKeyURL -OutFile "$GpgHome\pgp-key.txt" } catch { Fail-Signature "failed to connect to $GpgKeyURL to download the public key" }
     & gpg --homedir $GpgHome --batch --quiet --import "$GpgHome\pgp-key.txt" 2>$null
     if ($LASTEXITCODE -ne 0) { Fail-Signature "the downloaded public key is not valid" }
-    try { Invoke-WebRequest -UseBasicParsing -Uri "$URL.asc" -OutFile "$GpgHome\futrou.asc" } catch { Fail-Signature "no signature found at $URL.asc" }
+    try { Invoke-WebRequest -UseBasicParsing -Uri "$URL.asc" -OutFile "$GpgHome\futrou.asc" } catch { Fail-Signature "failed to download the signature from $URL.asc" }
     $Status = & gpg --homedir $GpgHome --batch --no-tty --status-fd 1 --verify "$GpgHome\futrou.asc" $TmpExe 2>$null
     if ($LASTEXITCODE -ne 0) { Fail-Signature "the signature does not match the downloaded file" }
     if (-not ($Status -match '^\[GNUPG:\] VALIDSIG ')) { Fail-Signature "no valid signature on the downloaded file" }

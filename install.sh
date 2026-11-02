@@ -174,8 +174,12 @@ fi
 signature_failed() {
   rm -f "$tmp_exe"
   [[ -n "${gpg_home:-}" ]] && rm -rf "$gpg_home"
-  error "Signature verification failed: $1
-  Nothing was installed. To install anyway, run the installer again with --ignore-signature."
+  local rerun="curl -fsSL https://futrou.com/install.sh | bash"
+  [[ $version == "latest" ]] && rerun="$rerun -s -- --ignore-signature" || rerun="$rerun -s -- $version --ignore-signature"
+  warn "warning: could not verify the signature: $1"
+  info "Nothing was installed. If you trust the download anyway, run the installer again without the check:"
+  info_bold "  $rerun"
+  exit 1
 }
 
 if [[ $ignore_signature == 1 ]]; then
@@ -187,9 +191,9 @@ else
   gpg_home=$(mktemp -d)
   chmod 700 "$gpg_home"
   export GNUPGHOME="$gpg_home"
-  do_download "$GPG_KEY_URL" "$gpg_home/pgp-key.txt" || signature_failed "could not download the public key from $GPG_KEY_URL"
+  do_download "$GPG_KEY_URL" "$gpg_home/pgp-key.txt" || signature_failed "failed to connect to $GPG_KEY_URL to download the public key"
   gpg --batch --quiet --import "$gpg_home/pgp-key.txt" 2>/dev/null || signature_failed "the downloaded public key is not valid"
-  do_download "$download_url.asc" "$gpg_home/futrou.asc" || signature_failed "no signature found at $download_url.asc"
+  do_download "$download_url.asc" "$gpg_home/futrou.asc" || signature_failed "failed to download the signature from $download_url.asc"
   status=$(gpg --batch --no-tty --status-fd 1 --verify "$gpg_home/futrou.asc" "$tmp_exe" 2>/dev/null) || signature_failed "the signature does not match the downloaded file"
   grep -q '^\[GNUPG:\] VALIDSIG ' <<<"$status" || signature_failed "no valid signature on the downloaded file"
   grep -qE '^\[GNUPG:\] (EXPKEYSIG|EXPSIG|REVKEYSIG) ' <<<"$status" && signature_failed "the signing key is expired or revoked"
