@@ -92,6 +92,16 @@ jobs:
       - name: Test before release
         run: make test
 
+      # Detached .asc signature for every file in dist/ plus a signed SHA256SUMS.
+      # Needs the secrets GPG_PRIVATE_KEY_BASE64 (gpg --armor --export-secret-keys <id> | base64 -w0)
+      # and GPG_PASSPHRASE (optional: leave it unset or empty for a key without one).
+      - name: Sign release artifacts
+        if: inputs.version_tag == 'latest'
+        run: make sign
+        env:
+          GPG_PRIVATE_KEY_BASE64: ${{ secrets.GPG_PRIVATE_KEY_BASE64 }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+
       - name: Upload release artifacts
         if: inputs.version_tag == 'latest'
         uses: softprops/action-gh-release@v3

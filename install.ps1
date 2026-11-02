@@ -2,6 +2,7 @@
 param(
   [String]$Version = "latest",
   [Switch]$NoPathUpdate = $false,
+  [Switch]$IgnoreSignature = $false,
   [Switch]$DownloadWithoutCurl = $false
 )
 
@@ -39,6 +40,7 @@ $Target = "windows-$GoArch"
 if ($Version -match "^\d+\.\d+\.\d+$")  { $Version = "v$Version" }
 
 $BaseURL  = "https://github.com/futrou/futrou-cli/releases"
+$GpgKeyURL = "https://futrou.com/.well-known/pgp-key.txt"
 $FileName = "futrou-$Target.exe"
 $URL = if ($Version -eq "latest") {
   "$BaseURL/latest/download/$FileName"
@@ -121,6 +123,38 @@ if (-not $downloaded) {
 
 if (-not (Test-Path $TmpExe)) {
   Write-Fail "Download produced no file. Did antivirus delete it?"
+}
+
+# ---------------------------------------------------------------------------
+# Verify the PGP signature (<file>.asc next to the binary). Needs gpg; without
+# it only a warning is shown. A private keyring is used, never the user's.
+# ---------------------------------------------------------------------------
+function Fail-Signature([String]$Reason) {
+  Remove-Item -Force $TmpExe -ErrorAction SilentlyContinue
+  Write-Fail "Signature verification failed: $Reason`n  Nothing was installed. To install anyway, run the installer again with -IgnoreSignature."
+}
+
+if ($IgnoreSignature) {
+  Write-Warn "Skipping signature verification (-IgnoreSignature)"
+} elseif (-not (Get-Command gpg -ErrorAction SilentlyContinue)) {
+  Write-Warn "gpg is not installed, skipping signature verification."
+  Write-Info "Install gnupg and run the installer again to verify releases against $GpgKeyURL"
+} else {
+  $GpgHome = Join-Path ([IO.Path]::GetTempPath()) ("futrou-gpg-" + [Guid]::NewGuid())
+  $null = New-Item -ItemType Directory -Force -Path $GpgHome
+  try {
+    try { Invoke-WebRequest -UseBasicParsing -Uri $GpgKeyURL -OutFile "$GpgHome\pgp-key.txt" } catch { Fail-Signature "could not download the public key from $GpgKeyURL" }
+    & gpg --homedir $GpgHome --batch --quiet --import "$GpgHome\pgp-key.txt" 2>$null
+    if ($LASTEXITCODE -ne 0) { Fail-Signature "the downloaded public key is not valid" }
+    try { Invoke-WebRequest -UseBasicParsing -Uri "$URL.asc" -OutFile "$GpgHome\futrou.asc" } catch { Fail-Signature "no signature found at $URL.asc" }
+    $Status = & gpg --homedir $GpgHome --batch --no-tty --status-fd 1 --verify "$GpgHome\futrou.asc" $TmpExe 2>$null
+    if ($LASTEXITCODE -ne 0) { Fail-Signature "the signature does not match the downloaded file" }
+    if (-not ($Status -match '^\[GNUPG:\] VALIDSIG ')) { Fail-Signature "no valid signature on the downloaded file" }
+    if ($Status -match '^\[GNUPG:\] (EXPKEYSIG|EXPSIG|REVKEYSIG) ') { Fail-Signature "the signing key is expired or revoked" }
+    Write-Info "Signature verified"
+  } finally {
+    Remove-Item -Recurse -Force $GpgHome -ErrorAction SilentlyContinue
+  }
 }
 
 try { Remove-Item -Force $Exe -ErrorAction SilentlyContinue } catch { }

@@ -70,12 +70,16 @@ exe_ext=''
 # ---------------------------------------------------------------------------
 GITHUB=${GITHUB:-"https://github.com"}
 REPO="$GITHUB/futrou/futrou-cli"
+GPG_KEY_URL="https://futrou.com/.well-known/pgp-key.txt"
 
-if [[ $# -eq 0 ]]; then
-  version="latest"
-else
-  version="$1"
-fi
+version="latest"
+ignore_signature=0
+for arg in "$@"; do
+  case $arg in
+    --ignore-signature) ignore_signature=1 ;;
+    *) version="$arg" ;;
+  esac
+done
 
 # Normalise: accept "1.2.3" or "v1.2.3" → "v1.2.3"
 if [[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
@@ -161,6 +165,38 @@ if [[ -n "$spinner_pid" ]]; then
   kill "$spinner_pid" 2>/dev/null
   wait "$spinner_pid" 2>/dev/null || true
   printf "\r\033[K"
+fi
+
+# ---------------------------------------------------------------------------
+# Verify the PGP signature (<file>.asc next to the binary) in a keyring of its
+# own, never the user's. Without gpg it only warns.
+# ---------------------------------------------------------------------------
+signature_failed() {
+  rm -f "$tmp_exe"
+  [[ -n "${gpg_home:-}" ]] && rm -rf "$gpg_home"
+  error "Signature verification failed: $1
+  Nothing was installed. To install anyway, run the installer again with --ignore-signature."
+}
+
+if [[ $ignore_signature == 1 ]]; then
+  warn "Skipping signature verification (--ignore-signature)"
+elif ! command -v gpg >/dev/null 2>&1; then
+  warn "gpg is not installed, skipping signature verification."
+  info "Install gnupg and run the installer again to verify releases against $GPG_KEY_URL"
+else
+  gpg_home=$(mktemp -d)
+  chmod 700 "$gpg_home"
+  export GNUPGHOME="$gpg_home"
+  do_download "$GPG_KEY_URL" "$gpg_home/pgp-key.txt" || signature_failed "could not download the public key from $GPG_KEY_URL"
+  gpg --batch --quiet --import "$gpg_home/pgp-key.txt" 2>/dev/null || signature_failed "the downloaded public key is not valid"
+  do_download "$download_url.asc" "$gpg_home/futrou.asc" || signature_failed "no signature found at $download_url.asc"
+  status=$(gpg --batch --no-tty --status-fd 1 --verify "$gpg_home/futrou.asc" "$tmp_exe" 2>/dev/null) || signature_failed "the signature does not match the downloaded file"
+  grep -q '^\[GNUPG:\] VALIDSIG ' <<<"$status" || signature_failed "no valid signature on the downloaded file"
+  grep -qE '^\[GNUPG:\] (EXPKEYSIG|EXPSIG|REVKEYSIG) ' <<<"$status" && signature_failed "the signing key is expired or revoked"
+  signature_id=$(awk '/^\[GNUPG:\] VALIDSIG /{print $3}' <<<"$status")
+  unset GNUPGHOME
+  rm -rf "$gpg_home"
+  info "Signature verified: $signature_id"
 fi
 
 # Read new version from downloaded binary

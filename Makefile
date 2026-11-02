@@ -1,6 +1,6 @@
 SCRIPTS_DIR := ./scripts
 
-.PHONY: default install dev build build-schema build-types build-docs generate test version start
+.PHONY: default install dev build sign build-schema build-types build-docs generate test version start
 
 default: install dev
 
@@ -12,6 +12,9 @@ dev:
 
 build:
 	@$(SCRIPTS_DIR)/build.sh
+
+sign:
+	@$(SCRIPTS_DIR)/sign.sh
 
 build-schema:
 	@$(SCRIPTS_DIR)/build-schema.sh

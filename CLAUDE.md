@@ -61,6 +61,16 @@ declarative `futrou.json` model in `src/config/`, its validators in
    cancels); `-y/--yes` and `CI=true` apply without asking; `--dry-run` only shows the
    plan. `down` follows the same rules.
 
+## Release signing
+
+- `make sign` (`scripts/sign.sh`, same as in nasua) signs every file in `dist/` (binaries, `checksums.txt`,
+  `install.sh`, `install.ps1`) with a detached `<file>.asc` and writes a signed `SHA256SUMS`. CI
+  (`release-run.yml`) runs it before uploading `dist/*`, with the secrets `GPG_PRIVATE_KEY_BASE64`
+  and `GPG_PASSPHRASE` (optional, empty for a key without one). The public key is not in this repo or
+  the binary: it is published at the URL below.
+- `install.sh [version] [--ignore-signature]` and `install.ps1 -IgnoreSignature` verify the binary against
+  `https://futrou.com/.well-known/pgp-key.txt` in a private keyring; without `gpg` they only warn.
+
 ## Tests
 
 - Every change and every new behavior needs tests, including error and edge cases.
