@@ -21,23 +21,16 @@ func Execute() {
 // A missing scheme is added and a trailing /v2 dropped (services.NormalizeApiUrl),
 // so "localhost:4000", "api.futrou.com" and "https://api.futrou.com/v2" all work.
 func globalApiUrl(c *cli.Context) string {
-	if v := c.String("api-url"); v != "" {
+	if v := lineageString(c, "api-url"); v != "" {
 		return services.NormalizeApiUrl(v)
-	}
-	if c.Lineage() != nil {
-		for _, parent := range c.Lineage() {
-			if v := parent.String("api-url"); v != "" {
-				return services.NormalizeApiUrl(v)
-			}
-		}
 	}
 	return services.NormalizeApiUrl(constants.ApiUrl)
 }
 
 // globalApiKey returns the --api-token value (or its hidden --api-key
-// alias) walking up to the root context.
+// alias), taking the nearest one up the context lineage.
 func globalApiKey(c *cli.Context) string {
-	for _, ctx := range append([]*cli.Context{c}, c.Lineage()...) {
+	for _, ctx := range c.Lineage() {
 		if v := ctx.String("api-token"); v != "" {
 			return v
 		}
@@ -48,13 +41,10 @@ func globalApiKey(c *cli.Context) string {
 	return ""
 }
 
-// appLevelFlags are the flags declared only on the root App, matching prior
-// behavior: they must be given before the subcommand name (e.g.
-// `futrou --api-url http://x serverlets list`). They aren't cloned onto
-// subcommands because several helpers (globalApiUrl, globalApiKey, isJSON)
-// resolve them by walking the context lineage, which requires that only one
-// flagSet in that lineage ever defines them — a leaf-level clone with its
-// own default `Value` would shadow a value set higher up.
+// appLevelFlags are the root App's flags; they carry the defaults and the
+// environment variables. withGlobalFlags also adds default-less hidden copies
+// (leafOverrideFlags) to every command, so they work before or after the
+// command name.
 var appLevelFlags = []cli.Flag{
 	&cli.StringFlag{
 		Name:    "log-format",
@@ -82,6 +72,40 @@ var appLevelFlags = []cli.Flag{
 	},
 }
 
+// leafOverrideFlags returns hidden copies of the app-level flags for every
+// command, so `futrou login --api-url x` works like `futrou --api-url x login`.
+// They have no default and no environment variable: the root flag keeps both,
+// and the helpers below take the nearest non-empty value walking up the
+// context lineage, so an unset copy never shadows a value given earlier.
+func leafOverrideFlags() []cli.Flag {
+	var flags []cli.Flag
+	for _, name := range []string{"api-url", "api-token", "api-key", "log-format"} {
+		flags = append(flags, &cli.StringFlag{Name: name, Hidden: true})
+	}
+	return flags
+}
+
+// lineageString returns the nearest non-empty value of a string flag, from c
+// up to the root, or "" when none is set.
+func lineageString(c *cli.Context, name string) string {
+	for _, ctx := range c.Lineage() {
+		if v := ctx.String(name); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// lineageBool reports whether a bool flag is true on c or any parent context.
+func lineageBool(c *cli.Context, name string) bool {
+	for _, ctx := range c.Lineage() {
+		if ctx.Bool(name) {
+			return true
+		}
+	}
+	return false
+}
+
 // perCommandFlags are cloned onto every command and subcommand (see
 // withGlobalFlags) so they're accepted after the command name too (e.g.
 // `futrou deploy --log-level debug`, not just
@@ -91,7 +115,6 @@ var perCommandFlags = []cli.Flag{
 	&cli.StringFlag{
 		Name:    "log-level",
 		Usage:   "Log level: debug, info, warn, error",
-		Value:   constants.DefaultLogLevel,
 		EnvVars: []string{constants.EnvLogLevel},
 		Hidden:  true,
 	},
@@ -121,24 +144,38 @@ var perCommandFlags = []cli.Flag{
 // context, never a shadowed ancestor value.
 func applyGlobalFlagShorthands(c *cli.Context) error {
 	// An empty FUTROU_API_URL counts as set to urfave, but it chooses nothing.
-	urlChosen := func() bool { return c.IsSet("api-url") && c.String("api-url") != "" }
-	if c.Bool("local") && !urlChosen() {
+	urlChosen := func() bool {
+		for _, ctx := range c.Lineage() {
+			if ctx.IsSet("api-url") && ctx.String("api-url") != "" {
+				return true
+			}
+		}
+		return false
+	}
+	if lineageBool(c, "local") && !urlChosen() {
 		if err := c.Set("api-url", constants.LocalApiUrl); err != nil {
 			return err
 		}
 	}
-	if c.Bool("dev") && !urlChosen() {
+	if lineageBool(c, "dev") && !urlChosen() {
 		if err := c.Set("api-url", constants.DevApiUrl); err != nil {
 			return err
 		}
 	}
 
-	logLevel := c.String("log-level")
-	if c.Bool("debug") {
+	logLevel := lineageString(c, "log-level")
+	if logLevel == "" {
+		logLevel = constants.DefaultLogLevel
+	}
+	if lineageBool(c, "debug") {
 		logLevel = "debug"
 	}
+	logFormat := lineageString(c, "log-format")
+	if logFormat == "" {
+		logFormat = constants.DefaultLogFormat
+	}
 	logger.SetLogLevel(logLevel)
-	logger.SetLogFormat(c.String("log-format"))
+	logger.SetLogFormat(logFormat)
 	return nil
 }
 
@@ -155,7 +192,7 @@ func withGlobalFlags(command *cli.Command) *cli.Command {
 	}
 
 	cloned := *command
-	cloned.Flags = append(append([]cli.Flag{}, perCommandFlags...), cloned.Flags...)
+	cloned.Flags = append(append(append([]cli.Flag{}, perCommandFlags...), leafOverrideFlags()...), cloned.Flags...)
 
 	if len(command.Subcommands) > 0 {
 		cloned.Subcommands = make([]*cli.Command, 0, len(command.Subcommands))

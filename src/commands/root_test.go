@@ -711,3 +711,111 @@ func TestBuildAppPrintsTheVersionAndHelpWithoutACommand(t *testing.T) {
 	assertNoError(t, err)
 	assertContains(t, out, "Commands:")
 }
+
+func TestGlobalFlagsWorkAfterTheCommandName(t *testing.T) {
+	unsetEnv(t, "FUTROU_API_URL")
+	unsetEnv(t, "FUTROU_API_TOKEN")
+	for name, tc := range map[string]struct {
+		args    []string
+		wantURL string
+		wantKey string
+	}{
+		"api-url after":              {[]string{"probe", "--api-url", "localhost:4000"}, "http://localhost:4000", ""},
+		"api-url with https":         {[]string{"probe", "--api-url", "https://localhost:4000"}, "https://localhost:4000", ""},
+		"api-token after":            {[]string{"probe", "--api-token", "t"}, services.NormalizeApiUrl(constants.ApiUrl), "t"},
+		"api-key after":              {[]string{"probe", "--api-key", "k"}, services.NormalizeApiUrl(constants.ApiUrl), "k"},
+		"command flag beats root":    {[]string{"--api-url", "root.example.com", "probe", "--api-url", "leaf.example.com"}, "https://leaf.example.com", ""},
+		"root value survives":        {[]string{"--api-url", "root.example.com", "--api-token", "r", "probe"}, "https://root.example.com", "r"},
+		"--local with root url":      {[]string{"--api-url", "root.example.com", "probe", "--local"}, "https://root.example.com", ""},
+		"--local before the command": {[]string{"--local", "probe"}, services.NormalizeApiUrl(constants.LocalApiUrl), ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			url, key, err := probeApp(t, tc.args...)
+			if err != nil || url != tc.wantURL || key != tc.wantKey {
+				t.Fatalf("got %q %q, %v; want %q %q", url, key, err, tc.wantURL, tc.wantKey)
+			}
+		})
+	}
+}
+
+func TestGlobalFlagsWorkAfterANestedCommandName(t *testing.T) {
+	unsetEnv(t, "FUTROU_API_URL")
+	var got string
+	app := buildApp()
+	app.Commands = []*cli.Command{withGlobalFlags(&cli.Command{Name: "group", Subcommands: []*cli.Command{{Name: "leaf", Action: func(c *cli.Context) error {
+		got = globalApiUrl(c)
+		return nil
+	}}}})}
+	if err := app.Run([]string{"futrou", "group", "--api-url", "a.example.com", "leaf"}); err != nil || got != "https://a.example.com" {
+		t.Fatalf("flag on the group: %q, %v", got, err)
+	}
+	if err := app.Run([]string{"futrou", "group", "leaf", "--api-url", "b.example.com"}); err != nil || got != "https://b.example.com" {
+		t.Fatalf("flag on the leaf: %q, %v", got, err)
+	}
+}
+
+func TestLoginAcceptsTheAPIURLFlagAfterTheCommand(t *testing.T) {
+	unsetEnv(t, "FUTROU_API_URL")
+	if _, err := captureRun([]string{"futrou", "login", "--api-url", "localhost:1", "--help"}); err != nil {
+		t.Fatalf("login --api-url must parse: %v", err)
+	}
+}
+
+// walkCommands calls fn for every command in the tree, with its full name.
+func walkCommands(prefix string, commands []*cli.Command, fn func(name string, c *cli.Command)) {
+	for _, c := range commands {
+		name := strings.TrimSpace(prefix + " " + c.Name)
+		fn(name, c)
+		walkCommands(name, c.Subcommands, fn)
+	}
+}
+
+// Guard: every command and subcommand of the real app, hidden legacy aliases
+// included, must declare every global flag, so none can be rejected with
+// "flag provided but not defined" when given after the command name.
+func TestEveryCommandAcceptsEveryGlobalFlag(t *testing.T) {
+	var globals []string
+	for _, f := range append(append([]cli.Flag{}, appLevelFlags...), perCommandFlags...) {
+		globals = append(globals, f.Names()[0])
+	}
+	globals = append(globals, "api-url", "api-token", "api-key", "log-format", "log-level", "local", "dev", "debug")
+	count := 0
+	walkCommands("", buildApp().Commands, func(name string, c *cli.Command) {
+		count++
+		declared := map[string]bool{}
+		for _, f := range c.Flags {
+			for _, n := range f.Names() {
+				declared[n] = true
+			}
+		}
+		for _, g := range globals {
+			if !declared[g] {
+				t.Errorf("command %q does not accept --%s", name, g)
+			}
+		}
+	})
+	if count < 20 {
+		t.Fatalf("only walked %d commands; the guard is not seeing the app", count)
+	}
+}
+
+func TestShorthandsAfterTheCommandSwitchTheAPI(t *testing.T) {
+	unsetEnv(t, "FUTROU_API_URL")
+	for name, tc := range map[string]struct {
+		args []string
+		want string
+	}{
+		"probe --local":                 {[]string{"probe", "--local"}, constants.LocalApiUrl},
+		"probe --dev":                   {[]string{"probe", "--dev"}, constants.DevApiUrl},
+		"root --dev, leaf --local":      {[]string{"--dev", "probe", "--local"}, constants.DevApiUrl},
+		"explicit leaf url beats --dev": {[]string{"probe", "--dev", "--api-url", "x.example.com"}, "https://x.example.com"},
+		"explicit root url beats --dev": {[]string{"--api-url", "x.example.com", "probe", "--dev"}, "https://x.example.com"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got, _, err := probeApp(t, tc.args...)
+			if want := services.NormalizeApiUrl(tc.want); err != nil || got != want {
+				t.Fatalf("got %q, %v; want %q", got, err, want)
+			}
+		})
+	}
+}
