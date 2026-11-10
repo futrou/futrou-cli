@@ -30,6 +30,8 @@ const (
 	EnvApiToken  = "FUTROU_API_TOKEN"
 	EnvLogLevel  = "FUTROU_LOG_LEVEL"
 	EnvLogFormat = "FUTROU_LOG_FORMAT"
+	// EnvUpgradeDisabled makes `futrou upgrade` refuse and point to npm. The npm wrapper sets it.
+	EnvUpgradeDisabled = "FUTROU_UPGRADE_DISABLED"
 
 	DocsUrl = "https://futrou.com/docs"
 	RepoUrl = "https://github.com/futrou/futrou-cli"
@@ -40,8 +42,8 @@ const (
 	DevApiUrl   = "https://api.dev.futrou.com"
 	LocalApiUrl = "http://localhost:4000"
 
-	UpgradeUnixUrl    = "https://futrou.com/install.sh"
-	UpgradeWindowsUrl = "https://futrou.com/install.ps1"
+	UpgradeUnixUrl    = "https://raw.githubusercontent.com/futrou/futrou-cli/main/install.sh"
+	UpgradeWindowsUrl = "https://raw.githubusercontent.com/futrou/futrou-cli/main/install.ps1"
 
 	ProjectConfigSchemaURL = "https://futrou.com/futrou.schema.json"
 

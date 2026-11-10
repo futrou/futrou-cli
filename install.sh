@@ -4,7 +4,7 @@ set -euo pipefail
 # On Windows under Git Bash / MINGW, delegate to PowerShell
 if [[ ${OS:-} = Windows_NT ]]; then
   if [[ ${MSYSTEM:-} != MINGW64* ]]; then
-    powershell -c "irm https://futrou.com/install.ps1 | iex"
+    powershell -c "irm https://raw.githubusercontent.com/futrou/futrou-cli/main/install.ps1 | iex"
     exit $?
   fi
 fi
@@ -174,7 +174,7 @@ fi
 signature_failed() {
   rm -f "$tmp_exe"
   [[ -n "${gpg_home:-}" ]] && rm -rf "$gpg_home"
-  local rerun="curl -fsSL https://futrou.com/install.sh | bash"
+  local rerun="curl -fsSL https://raw.githubusercontent.com/futrou/futrou-cli/main/install.sh | bash"
   [[ $version == "latest" ]] && rerun="$rerun -s -- --ignore-signature" || rerun="$rerun -s -- $version --ignore-signature"
   warn "warning: could not verify the signature: $1"
   info "Nothing was installed. If you trust the download anyway, run the installer again without the check:"

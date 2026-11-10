@@ -1,10 +1,12 @@
 package commands
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"runtime"
+	"strings"
 
 	"futrou-cli/src/constants"
 
@@ -16,6 +18,9 @@ var upgradeCommand = &cli.Command{
 	Usage:     "Upgrade Futrou CLI to the latest or a specific version",
 	ArgsUsage: "[version]",
 	Action: func(c *cli.Context) error {
+		if upgradeDisabled() {
+			return errUpgradeViaNpm
+		}
 		version := c.Args().First()
 		if version == "" {
 			version = "latest"
@@ -28,6 +33,18 @@ var upgradeCommand = &cli.Command{
 			return runUpgradeUnix(version)
 		}
 	},
+}
+
+var errUpgradeViaNpm = errors.New("this Futrou CLI was installed through npm, so it cannot upgrade itself — run `npm install -g futrou@latest` (or use `npx futrou@latest`) instead")
+
+// upgradeDisabled reports whether FUTROU_UPGRADE_DISABLED is set to a true value
+// (anything but empty, 0 or false), as the npm wrapper does.
+func upgradeDisabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(constants.EnvUpgradeDisabled))) {
+	case "", "0", "false", "no", "off":
+		return false
+	}
+	return true
 }
 
 func runUpgradeUnix(version string) error {

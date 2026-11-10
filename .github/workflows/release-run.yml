@@ -46,12 +46,11 @@ jobs:
 
       # Release-only build cache. The key prefix is unique to this workflow, so it
       # never restores (or is restored by) the caches of test.yml or other runs.
-      - name: Cache Go and garble build caches
+      - name: Cache Go build caches
         uses: actions/cache@v6
         with:
           path: |
             ~/.cache/go-build
-            ~/.cache/garble
             ~/go/pkg/mod
           key: release-${{ runner.os }}-go-${{ env.GO_VERSION }}-${{ hashFiles('go.sum', 'scripts/build.sh') }}
 

@@ -42,7 +42,7 @@ function getBinaryName() {
 const bin = path.join(__dirname, 'bin', getBinaryName());
 
 try {
-  execFileSync(bin, process.argv.slice(2), { stdio: 'inherit' });
+  execFileSync(bin, process.argv.slice(2), { stdio: 'inherit', env: { ...process.env, FUTROU_UPGRADE_DISABLED: '1' } });
 } catch (err) {
   process.exit(err.status ?? 1);
 }

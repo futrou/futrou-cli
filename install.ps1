@@ -134,7 +134,7 @@ function Fail-Signature([String]$Reason) {
   $Args2 = if ($Version -eq "latest") { "-IgnoreSignature" } else { "-Version $Version -IgnoreSignature" }
   Write-Warn "warning: could not verify the signature: $Reason"
   Write-Info "Nothing was installed. If you trust the download anyway, run the installer again without the check:"
-  Write-Output "  & ([scriptblock]::Create((irm https://futrou.com/install.ps1))) $Args2"
+  Write-Output "  & ([scriptblock]::Create((irm https://raw.githubusercontent.com/futrou/futrou-cli/main/install.ps1))) $Args2"
   exit 1
 }
 
