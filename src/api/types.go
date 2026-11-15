@@ -1,5 +1,5 @@
 // Code generated from the Futrou OpenAPI spec. DO NOT EDIT.
-// Generated at: 2026-10-19T10:20:25Z
+// Generated at: 2026-11-15T12:57:34Z
 // Source: https://api.futrou.com/v2/openapi.json
 
 package api
@@ -142,9 +142,6 @@ const (
 	ActivityTypeVariableCreated      ActivityType = "variable_created"
 	ActivityTypeVariableUpdated      ActivityType = "variable_updated"
 	ActivityTypeVariableDeleted      ActivityType = "variable_deleted"
-	ActivityTypeMonitorCreated       ActivityType = "monitor_created"
-	ActivityTypeMonitorUpdated       ActivityType = "monitor_updated"
-	ActivityTypeMonitorDeleted       ActivityType = "monitor_deleted"
 	ActivityTypeNetworkCreated       ActivityType = "network_created"
 	ActivityTypeNetworkUpdated       ActivityType = "network_updated"
 	ActivityTypeNetworkDeleted       ActivityType = "network_deleted"
@@ -488,6 +485,7 @@ type Proxy struct {
 	ProjectId       string         `json:"projectId,omitempty"`
 	ProxyPlan       *ProxyPlan     `json:"proxyPlan,omitempty"`
 	ProxyPlanId     string         `json:"proxyPlanId,omitempty"`
+	RawTarget       string         `json:"rawTarget,omitempty"`
 	Region          *Region        `json:"region,omitempty"`
 	RegionId        string         `json:"regionId,omitempty"`
 	Rules           []Rule         `json:"rules,omitempty"`
@@ -596,8 +594,10 @@ type Server struct {
 	IsPublic    bool       `json:"isPublic,omitempty"`
 	JoinedAt    time.Time  `json:"joinedAt,omitempty"`
 	Kernel      string     `json:"kernel,omitempty"`
+	Latency     float64    `json:"latency,omitempty"`
 	Name        string     `json:"name,omitempty"`
 	Os          string     `json:"os,omitempty"`
+	PublicKey   string     `json:"publicKey,omitempty"`
 	Region      *Region    `json:"region,omitempty"`
 	RegionId    string     `json:"regionId,omitempty"`
 	SeenAt      time.Time  `json:"seenAt,omitempty"`
@@ -798,6 +798,7 @@ type Workspace struct {
 	ApiTokensLimit         float64         `json:"apiTokensLimit,omitempty"`
 	AutoJoinDomain         string          `json:"autoJoinDomain,omitempty"`
 	AutoJoinRole           *WorkspaceRole  `json:"autoJoinRole,omitempty"`
+	BillingDebt            float64         `json:"billingDebt,omitempty"`
 	ChatAiSessionStartedAt time.Time       `json:"chatAiSessionStartedAt,omitempty"`
 	Contact                *Contact        `json:"contact,omitempty"`
 	ContactId              string          `json:"contactId,omitempty"`
@@ -814,6 +815,8 @@ type Workspace struct {
 	Name                   string          `json:"name,omitempty"`
 	Number                 float64         `json:"number,omitempty"`
 	Orders                 []Order         `json:"orders,omitempty"`
+	PauseNotifiedAt        time.Time       `json:"pauseNotifiedAt,omitempty"`
+	PausedAt               time.Time       `json:"pausedAt,omitempty"`
 	Projects               []Project       `json:"projects,omitempty"`
 	ProjectsLimit          float64         `json:"projectsLimit,omitempty"`
 	ProxiesLimit           float64         `json:"proxiesLimit,omitempty"`

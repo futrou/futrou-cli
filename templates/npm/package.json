@@ -34,9 +34,14 @@
     "cli"
   ],
   "homepage": "https://futrou.com",
+  "author": "Futrou <info@futrou.com> (https://futrou.com)",
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/futrou/futrou-cli.git"
+  },
+  "bugs": {
+    "url": "https://github.com/futrou/futrou-cli/issues",
+    "email": "info@futrou.com"
   }
 }

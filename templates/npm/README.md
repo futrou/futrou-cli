@@ -19,27 +19,43 @@ yarn global add futrou
 
 ## Usage
 
-Once installed, you can access the CLI using the `npx futrou` command.
+Once installed, you can access the CLI using the `futrou` command (or `npx futrou` without installing).
+
+```bash
+futrou login                       # sign in (opens the browser)
+futrou deploy                      # apply it after confirming (alias: futrou up)
+futrou serverlet ls                # list serverlets
+futrou init mcp                    # let AI coding agents use Futrou
+futrou init skills
+```
 
 ## Infrastructure as code
 
-The npm package also exports a small JavaScript API for building `futrou.json`:
+Describe your infrastructure in a `futrou.yaml` file and deploy it with `futrou deploy`:
 
-```js
-const { Config } = require('futrou');
+```yaml
+# yaml-language-server: $schema=https://futrou.com/futrou.schema.json
+workspace: acme
+project: website
 
-const config = new Config({ workspace: 'acme', project: 'website' })
-  .serverlet({ name: 'web', image: 'nginx:latest', ram: 128, cpu: 100 });
-
-require('fs').writeFileSync('futrou.json', config.toJson() + '\n');
+proxies:
+  www.example.com: # the key is the domain
+    type: http
+    target: 10.20.0.5:8080
+    enforceHttps: true
 ```
 
-`toJs()` returns an ESM default-export module and `toJsonSchema()` returns the
-generated Futrou JSON Schema bundled with the package.
+```bash
+futrou deploy             # show the plan, then ask before applying
+```
+
+`futrou.json`, `futrou.yml`, JavaScript/TypeScript configs and Docker Compose files
+work too. See the full [example with every option](https://github.com/futrou/futrou-cli/blob/main/examples/futrou.yaml).
+The JSON Schema ships with the package as `futrou/futrou.schema.json`.
 
 ## Documentation
 
-For more detailed guides on how to use the CLI, please visit [futrou.com/docs](https://futrou.com/docs).
+For more detailed guides on how to use the CLI, please visit [futrou.com/docs](https://futrou.com/docs) and [github.com/futrou/futrou-cli](https://github.com/futrou/futrou-cli).
 
 ## License
 [MIT License](LICENSE)
