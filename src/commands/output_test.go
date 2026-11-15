@@ -135,3 +135,21 @@ func TestPrintTableShapes(t *testing.T) {
 		t.Fatalf("table = %q", out)
 	}
 }
+
+func TestUpperFirst(t *testing.T) {
+	for in, want := range map[string]string{"": "", "network": "Network", "DNS zone": "DNS zone", "élan": "Élan"} {
+		if got := upperFirst(in); got != want {
+			t.Errorf("upperFirst(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestPrintTableSeparatorMatchesColumnWidth(t *testing.T) {
+	out := captureStdout(t, func() {
+		printTable([]any{map[string]any{"id": "1", "name": "abcd"}}, []string{"id", "name"})
+	})
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	if len(lines) < 3 || lines[1] != "--  ----" {
+		t.Fatalf("separator = %q in %q", lines[1], out)
+	}
+}

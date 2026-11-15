@@ -19,12 +19,9 @@ var dnsCommand = &cli.Command{
 					return err
 				}
 				var result interface{}
-				status, err := client.RequestInto("GET", "/v2/dns", nil, &result)
+				_, err = client.RequestInto("GET", "/v2/dns", nil, &result)
 				if err != nil {
 					return err
-				}
-				if status >= 400 {
-					return fmt.Errorf("request failed with status %d", status)
 				}
 				if isJSON(c) {
 					return printJSON(result)
@@ -37,25 +34,7 @@ var dnsCommand = &cli.Command{
 			Name:      "show",
 			Usage:     "Show a DNS zone by ID",
 			ArgsUsage: "<id>",
-			Action: func(c *cli.Context) error {
-				id := c.Args().First()
-				if id == "" {
-					return fmt.Errorf("DNS zone ID required")
-				}
-				client, err := requireAuth(c)
-				if err != nil {
-					return err
-				}
-				var result interface{}
-				status, err := client.RequestInto("GET", "/v2/dns/"+id, nil, &result)
-				if err != nil {
-					return err
-				}
-				if status >= 400 {
-					return fmt.Errorf("request failed with status %d", status)
-				}
-				return printJSON(result)
-			},
+			Action:    showAction("DNS zone", "/v2/dns"),
 		},
 		{
 			Name:  "create",
@@ -72,12 +51,9 @@ var dnsCommand = &cli.Command{
 					"name": c.String("name"),
 				}
 				var result interface{}
-				status, err := client.RequestInto("POST", "/v2/dns", body, &result)
+				_, err = client.RequestInto("POST", "/v2/dns", body, &result)
 				if err != nil {
 					return err
-				}
-				if status >= 400 {
-					return fmt.Errorf("request failed with status %d", status)
 				}
 				if isJSON(c) {
 					return printJSON(result)
@@ -111,12 +87,9 @@ var dnsCommand = &cli.Command{
 					return fmt.Errorf("no fields to update")
 				}
 				var result interface{}
-				status, err := client.RequestInto("PATCH", "/v2/dns/"+id, body, &result)
+				_, err = client.RequestInto("PATCH", "/v2/dns/"+id, body, &result)
 				if err != nil {
 					return err
-				}
-				if status >= 400 {
-					return fmt.Errorf("request failed with status %d", status)
 				}
 				if isJSON(c) {
 					return printJSON(result)
@@ -129,28 +102,7 @@ var dnsCommand = &cli.Command{
 			Name:      "rm",
 			Usage:     "Delete a DNS zone",
 			ArgsUsage: "<id>",
-			Action: func(c *cli.Context) error {
-				id := c.Args().First()
-				if id == "" {
-					return fmt.Errorf("DNS zone ID required")
-				}
-				client, err := requireAuth(c)
-				if err != nil {
-					return err
-				}
-				status, err := client.RequestInto("DELETE", "/v2/dns/"+id, nil, nil)
-				if err != nil {
-					return err
-				}
-				if status >= 400 {
-					return fmt.Errorf("request failed with status %d", status)
-				}
-				if isJSON(c) {
-					return printJSON(map[string]string{"status": "deleted"})
-				}
-				fmt.Println("✓ DNS zone deleted")
-				return nil
-			},
+			Action:    rmAction("DNS zone", "/v2/dns"),
 		},
 		{
 			Name:      "metrics",
@@ -192,12 +144,9 @@ var dnsCommand = &cli.Command{
 							return err
 						}
 						var result interface{}
-						status, err := client.RequestInto("GET", "/v2/dns/"+zoneId+"/records", nil, &result)
+						_, err = client.RequestInto("GET", "/v2/dns/"+zoneId+"/records", nil, &result)
 						if err != nil {
 							return err
-						}
-						if status >= 400 {
-							return fmt.Errorf("request failed with status %d", status)
 						}
 						if isJSON(c) {
 							return printJSON(result)
@@ -221,12 +170,9 @@ var dnsCommand = &cli.Command{
 							return err
 						}
 						var result interface{}
-						status, err := client.RequestInto("GET", "/v2/dns/"+zoneId+"/records/"+recordId, nil, &result)
+						_, err = client.RequestInto("GET", "/v2/dns/"+zoneId+"/records/"+recordId, nil, &result)
 						if err != nil {
 							return err
-						}
-						if status >= 400 {
-							return fmt.Errorf("request failed with status %d", status)
 						}
 						return printJSON(result)
 					},
@@ -261,12 +207,9 @@ var dnsCommand = &cli.Command{
 							body["priority"] = c.Int("priority")
 						}
 						var result interface{}
-						status, err := client.RequestInto("POST", "/v2/dns/"+zoneId+"/records", body, &result)
+						_, err = client.RequestInto("POST", "/v2/dns/"+zoneId+"/records", body, &result)
 						if err != nil {
 							return err
-						}
-						if status >= 400 {
-							return fmt.Errorf("request failed with status %d", status)
 						}
 						if isJSON(c) {
 							return printJSON(result)
@@ -317,12 +260,9 @@ var dnsCommand = &cli.Command{
 							return fmt.Errorf("no fields to update")
 						}
 						var result interface{}
-						status, err := client.RequestInto("PATCH", "/v2/dns/"+zoneId+"/records/"+recordId, body, &result)
+						_, err = client.RequestInto("PATCH", "/v2/dns/"+zoneId+"/records/"+recordId, body, &result)
 						if err != nil {
 							return err
-						}
-						if status >= 400 {
-							return fmt.Errorf("request failed with status %d", status)
 						}
 						if isJSON(c) {
 							return printJSON(result)
@@ -345,12 +285,9 @@ var dnsCommand = &cli.Command{
 						if err != nil {
 							return err
 						}
-						status, err := client.RequestInto("DELETE", "/v2/dns/"+zoneId+"/records/"+recordId, nil, nil)
+						_, err = client.RequestInto("DELETE", "/v2/dns/"+zoneId+"/records/"+recordId, nil, nil)
 						if err != nil {
 							return err
-						}
-						if status >= 400 {
-							return fmt.Errorf("request failed with status %d", status)
 						}
 						if isJSON(c) {
 							return printJSON(map[string]string{"status": "deleted"})

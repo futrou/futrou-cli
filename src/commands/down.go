@@ -18,11 +18,8 @@ var downCommand = &cli.Command{
 			Aliases: []string{"f"},
 			Usage:   "Config file (default: auto-detect futrou.json|yaml, then docker-compose.yml)",
 		},
-		&cli.StringFlag{
-			Name:    "project",
-			Aliases: []string{"p"},
-			Usage:   "Project to use: reads futrou.<project>.json|yaml first (e.g. futrou.prod.json), then the default config",
-		},
+		configNameFlag,
+		configNameLegacyFlag,
 		&cli.BoolFlag{
 			Name:    "yes",
 			Aliases: []string{"y"},
@@ -34,7 +31,7 @@ var downCommand = &cli.Command{
 		},
 	},
 	Action: func(c *cli.Context) error {
-		cfg, cfgFile, err := projectconfig.LoadProjectConfig(".", c.String("file"), c.String("project"))
+		cfg, cfgFile, err := projectconfig.LoadProjectConfig(".", c.String("file"), configName(c))
 		if err != nil {
 			return err
 		}

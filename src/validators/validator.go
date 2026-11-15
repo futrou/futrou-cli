@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"futrou-cli/src/utils"
 )
 
 // FieldValidator represents a single field valIdator
@@ -601,11 +603,7 @@ func (r UUIDRule) Validate(value interface{}) error {
 		return fmt.Errorf("must be a string")
 	}
 
-	// UUID v4 format: xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx
-	// Validate format: 8-4-4-4-12 hexadecimal characters
-	uuidRegex := `^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`
-	re := regexp.MustCompile(uuidRegex)
-	if !re.MatchString(s) {
+	if !utils.IsUuid(s) {
 		return fmt.Errorf("must be a valid UUID")
 	}
 	return nil

@@ -10,6 +10,8 @@ export default {
   "$schema": "https://futrou.com/futrou.schema.json",
   "workspace": "acme",
   "project": "website",
+  "installCommand": "npm ci",
+  "buildCommand": "npx astro build",
   "region": region,
   "networks": {
     "backend": {
@@ -22,6 +24,24 @@ export default {
     "uploads": {
       "storagePlanId": "<storage-plan-id>",
       "public": false
+    }
+  },
+  "statico": {
+    "docs": {
+      "regionId": "<region-id>",
+      "public": true,
+      "include": {
+        "./dist": true,
+        "./extra/robots.txt": "./",
+        "./assets": true,
+        "./dist/*.{map,ts}": false,
+        "./dist/drafts": false
+      },
+      "htmlToFolders": true,
+      "defaultFile": "/index.html",
+      "defaultStatus": 200,
+      "fallbackFile": "/404.html",
+      "fallbackStatus": 404
     }
   },
   "serverlets": {

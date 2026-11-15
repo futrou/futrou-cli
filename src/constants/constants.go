@@ -48,10 +48,21 @@ const (
 	ProjectConfigSchemaURL = "https://futrou.com/futrou.schema.json"
 
 	DefaultLogLevel  = "info"
-	DefaultLogFormat = "plain"
+	DefaultLogFormat = "text"
 
-	ConfigDir  = ".futrou"
-	ConfigFile = "cli.json"
+	// CliConfigDir is the CLI's own folder in the user's home directory (~/.futrou),
+	// which holds CliConfigFile.
+	CliConfigDir  = ".futrou"
+	CliConfigFile = "cli.json"
+
+	// The folders a project run keeps files in, relative to the folder of the
+	// project's config file. BuildDir is inside the project (not the CliConfigDir of the
+	// home directory) and holds what a run stages and caches, in the folders below it.
+	BuildDir   = ".futrou"
+	CacheDir   = BuildDir + "/cache"   // survives from run to run: hashes, finished installs
+	StaticoDir = BuildDir + "/statico" // staged files of a statico upload, <name>/<version>
+	TmpDir     = BuildDir + "/tmp"     // scratch files of a run, cleared at the start of the next
+	DebugDir   = BuildDir + "/debug"   // what a run writes for debugging (requests, logs), cleared at the start of the next
 )
 
 // configFileNames lists every base.extension combination (base-major), then the

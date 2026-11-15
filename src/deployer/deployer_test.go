@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -94,7 +95,7 @@ func TestBuildTeardownPlanDeletesDependentsFirstThenProject(t *testing.T) {
 		}
 		order = append(order, action.Resource)
 	}
-	want := []string{"cron", "proxy", "serverlet", "storage", "network", "dns zone", "project"}
+	want := []string{"cron", "proxy", "statico", "serverlet", "storage", "network", "dns zone", "project"}
 	if len(order) != len(want) {
 		t.Fatalf("order = %v, want %v", order, want)
 	}
@@ -329,6 +330,7 @@ func TestBuildPlanMatchesRenamedResourceThroughLocks(t *testing.T) {
 		"/v2/proxies":         []map[string]interface{}{},
 		"/v2/storages":        []map[string]interface{}{},
 		"/v2/crons":           []map[string]interface{}{},
+		"/v2/staticos":        []map[string]interface{}{},
 	})
 	defer ts.Close()
 
@@ -370,7 +372,8 @@ func regionsServer(t *testing.T) *httptest.Server {
 		},
 		"/v2/networks": []map[string]interface{}{}, "/v2/serverlets": []map[string]interface{}{},
 		"/v2/proxies": []map[string]interface{}{}, "/v2/storages": []map[string]interface{}{},
-		"/v2/crons": []map[string]interface{}{}, "/v2/dns": []map[string]interface{}{},
+		"/v2/crons":    []map[string]interface{}{},
+		"/v2/staticos": []map[string]interface{}{}, "/v2/dns": []map[string]interface{}{},
 	})
 }
 
@@ -472,7 +475,7 @@ func TestBuildPlanFallsBackToUnscopedListing(t *testing.T) {
 		// the endpoint ignores projectId, so the existing serverlet shows up.
 		"/v2/serverlets": []map[string]interface{}{{"id": "sl-1", "name": "web", "image": "nginx"}, {"id": "sl-2", "name": "other", "image": "x"}},
 		"/v2/dns":        []map[string]interface{}{}, "/v2/proxies": []map[string]interface{}{},
-		"/v2/storages": []map[string]interface{}{}, "/v2/crons": []map[string]interface{}{},
+		"/v2/storages": []map[string]interface{}{}, "/v2/crons": []map[string]interface{}{}, "/v2/staticos": []map[string]interface{}{},
 	})
 	defer ts.Close()
 	cfg := &config.Config{Workspace: "acme", Project: "demo", Serverlets: []config.ServerletConfig{{Serverlet: api.Serverlet{Name: "web", Image: "nginx"}}}}
@@ -622,7 +625,7 @@ type fakeAPI struct {
 	*httptest.Server
 }
 
-var fakeCollections = []string{"/v2/networks", "/v2/serverlets", "/v2/dns", "/v2/proxies", "/v2/storages", "/v2/crons", "/v2/regions", "/v2/workspaces", "/v2/projects"}
+var fakeCollections = []string{"/v2/networks", "/v2/serverlets", "/v2/dns", "/v2/proxies", "/v2/storages", "/v2/crons", "/v2/staticos", "/v2/regions", "/v2/workspaces", "/v2/projects"}
 
 func newFakeAPI(t *testing.T) *fakeAPI {
 	f := &fakeAPI{t: t, collections: map[string][]map[string]interface{}{}, records: map[string][]map[string]interface{}{}, failOn: map[string]int{}}
@@ -1502,5 +1505,38 @@ func TestBuildTeardownPlanWithFakeAPI(t *testing.T) {
 	h := projectFake(t)
 	if _, err := BuildTeardownPlan(h.client(), &config.Config{Workspace: "acme", Project: "ghost"}); err == nil {
 		t.Fatal("an unknown project must fail")
+	}
+}
+
+func TestOnlyKeysKeepsTheFieldsOfTheWebsiteNotItsVersionSettings(t *testing.T) {
+	payload := onlyKeys(map[string]interface{}{
+		"name": "docs", "public": true, "regionId": "r", "projectId": "p", "workspaceId": "w",
+		"include": map[string]interface{}{"x": true}, "htmlToFolders": false, "defaultFile": "/i", "defaultStatus": 200,
+		"fallbackFile": "/f", "fallbackStatus": 404, "redirects": []interface{}{},
+	}, staticoWebsiteKeys)
+	want := map[string]interface{}{"name": "docs", "public": true, "regionId": "r", "projectId": "p", "workspaceId": "w"}
+	if !reflect.DeepEqual(payload, want) {
+		t.Fatalf("payload = %v", payload)
+	}
+	if got := onlyKeys(map[string]interface{}{"include": 1}, staticoWebsiteKeys); len(got) != 0 {
+		t.Fatalf("payload = %v", got)
+	}
+}
+
+func TestStaticoIsADeployedResourceTornDownBeforeServerlets(t *testing.T) {
+	found := false
+	for _, spec := range resources {
+		if spec.resource == "statico" {
+			found = true
+			if spec.path != "/v2/staticos" || spec.nameKey != "name" || !spec.regional {
+				t.Fatalf("spec = %+v", spec)
+			}
+		}
+	}
+	if !found || lockGroup("statico") != "statico" {
+		t.Fatal("statico is not a deployed resource")
+	}
+	if order := strings.Join(teardownOrder, ","); !strings.Contains(order, "proxy,statico,serverlet") {
+		t.Fatalf("teardown order = %s", order)
 	}
 }

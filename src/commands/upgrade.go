@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"regexp"
 	"runtime"
 	"strings"
 
@@ -24,6 +25,9 @@ var upgradeCommand = &cli.Command{
 		version := c.Args().First()
 		if version == "" {
 			version = "latest"
+		}
+		if err := checkUpgradeVersion(version); err != nil {
+			return err
 		}
 
 		switch runtime.GOOS {
@@ -47,54 +51,74 @@ func upgradeDisabled() bool {
 	return true
 }
 
-func runUpgradeUnix(version string) error {
-	script := constants.UpgradeUnixUrl
+// versionPattern is what a version argument may look like: "1.2.3", "v1.2.3",
+// "1.2.3-rc.1". It keeps anything a shell would read as syntax out of the
+// install script's command line.
+var versionPattern = regexp.MustCompile(`^v?[0-9A-Za-z][0-9A-Za-z.+_-]*$`)
 
-	// Check for curl or wget
-	var cmd *exec.Cmd
-	if path, err := exec.LookPath("curl"); err == nil {
-		if version == "latest" {
-			cmd = exec.Command("bash", "-c", fmt.Sprintf(`curl -fsSL %s | bash`, script))
-		} else {
-			cmd = exec.Command("bash", "-c", fmt.Sprintf(`curl -fsSL %s | bash -s %s`, script, version))
-		}
-		_ = path
-	} else if path, err := exec.LookPath("wget"); err == nil {
-		if version == "latest" {
-			cmd = exec.Command("bash", "-c", fmt.Sprintf(`wget -qO- %s | bash`, script))
-		} else {
-			cmd = exec.Command("bash", "-c", fmt.Sprintf(`wget -qO- %s | bash -s %s`, script, version))
-		}
-		_ = path
-	} else {
+// checkUpgradeVersion accepts "latest" or a version number.
+func checkUpgradeVersion(version string) error {
+	if version == "latest" || versionPattern.MatchString(version) {
+		return nil
+	}
+	return fmt.Errorf("%q is not a version: use latest or a number such as 1.2.3", version)
+}
+
+// unixUpgradeArgs is the bash command that downloads the install script with
+// downloader (curl or wget) and runs it. The script is downloaded whole before
+// bash sees it, so a connection that drops halfway never runs half a script,
+// and the address and the version are passed as arguments, never put into the
+// command text.
+func unixUpgradeArgs(downloader, script, version string) []string {
+	fetch := `curl -fsSL "$1"`
+	if downloader == "wget" {
+		fetch = `wget -qO- "$1"`
+	}
+	run := `printf '%s\n' "$body" | bash`
+	args := []string{"-c", `body=$(` + fetch + `) && ` + run, "futrou-upgrade", script}
+	if version != "latest" {
+		args[1] = `body=$(` + fetch + `) && printf '%s\n' "$body" | bash -s -- "$2"`
+		args = append(args, version)
+	}
+	return args
+}
+
+func runUpgradeUnix(version string) error {
+	downloader := ""
+	switch {
+	case hasCommand("curl"):
+		downloader = "curl"
+	case hasCommand("wget"):
+		downloader = "wget"
+	default:
 		return fmt.Errorf("curl or wget is required to upgrade — install one and try again")
 	}
+	return runUpgradeCommand(exec.Command("bash", unixUpgradeArgs(downloader, constants.UpgradeUnixUrl, version)...))
+}
 
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	cmd.Stdin = os.Stdin
+func hasCommand(name string) bool {
+	_, err := exec.LookPath(name)
+	return err == nil
+}
 
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("upgrade failed: %w", err)
+// windowsUpgradeScript is the PowerShell the Windows upgrade runs; version has
+// passed checkUpgradeVersion.
+func windowsUpgradeScript(script, version string) string {
+	if version == "latest" {
+		return fmt.Sprintf(`irm %s | iex`, script)
 	}
-	return nil
+	return fmt.Sprintf(`& ([scriptblock]::Create((irm %s))) -Version %s`, script, version)
 }
 
 func runUpgradeWindows(version string) error {
-	script := constants.UpgradeWindowsUrl
+	return runUpgradeCommand(exec.Command("powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", windowsUpgradeScript(constants.UpgradeWindowsUrl, version)))
+}
 
-	var psCmd string
-	if version == "latest" {
-		psCmd = fmt.Sprintf(`irm %s | iex`, script)
-	} else {
-		psCmd = fmt.Sprintf(`& ([scriptblock]::Create((irm %s))) -Version %s`, script, version)
-	}
-
-	cmd := exec.Command("powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", psCmd)
+// runUpgradeCommand runs the install script's command on the terminal; tests replace it.
+var runUpgradeCommand = func(cmd *exec.Cmd) error {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
-
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("upgrade failed: %w", err)
 	}

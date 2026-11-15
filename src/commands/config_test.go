@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/urfave/cli/v2"
 )
 
 func TestConfigCommandPrintsEmptyObjectWhenNoConfigExists(t *testing.T) {
@@ -132,6 +134,7 @@ func TestConfigPullWritesCloudProjectResources(t *testing.T) {
 	ts.on("GET", "/v2/networks", respond(http.StatusOK, []any{map[string]any{"id": "net-1", "name": "backend", "ipv4": "10.0.0.0/24"}}))
 	ts.on("GET", "/v2/storages", respond(http.StatusOK, []any{map[string]any{"id": "storage-1", "name": "data", "storagePlanId": "storage-plan-1"}}))
 	ts.on("GET", "/v2/crons", respond(http.StatusOK, []any{map[string]any{"id": "cron-1", "name": "hourly", "schedule": "0 * * * *", "url": "https://example.com/job"}}))
+	ts.on("GET", "/v2/staticos", respond(http.StatusOK, []any{map[string]any{"id": "site-1", "name": "docs", "regionId": "reg-1", "public": true, "storage": "statico-site-1", "activeVersion": "v1", "maxSize": 1000}}))
 
 	out, err := runArgs(t, ts, "config", "pull", "--project", "demo")
 	assertNoError(t, err)
@@ -177,6 +180,7 @@ func TestConfigPullUsesLocalProjectWithoutProjectFlag(t *testing.T) {
 	ts.on("GET", "/v2/networks", respond(http.StatusOK, []any{}))
 	ts.on("GET", "/v2/storages", respond(http.StatusOK, []any{}))
 	ts.on("GET", "/v2/crons", respond(http.StatusOK, []any{}))
+	ts.on("GET", "/v2/staticos", respond(http.StatusOK, []any{}))
 	_, err := runArgs(t, ts, "config", "pull")
 	assertNoError(t, err)
 }
@@ -188,7 +192,53 @@ func TestConfigShowsTheSelectedProjectFile(t *testing.T) {
 	out, err := captureRun([]string{"futrou", "config", "--project", "prod"})
 	assertNoError(t, err)
 	assertContains(t, out, "prod-project")
+	for _, args := range [][]string{{"--project-name", "prod"}, {"-p", "prod"}} {
+		out, err = captureRun(append([]string{"futrou", "config"}, args...))
+		assertNoError(t, err)
+		assertContains(t, out, "prod-project")
+	}
 	out, err = captureRun([]string{"futrou", "config"})
 	assertNoError(t, err)
 	assertContains(t, out, "main")
+}
+
+// --project selects the Futrou Cloud project in every command; deploy, down and
+// config choose their config file with --project-name, and --project there is
+// only the old, hidden spelling of that.
+func TestProjectFlagMeansTheCloudProjectExceptWhereItIsTheOldConfigName(t *testing.T) {
+	for _, cmd := range []*cli.Command{deployCommand, downCommand, configCommand} {
+		visible := map[string]bool{}
+		hidden := map[string]bool{}
+		for _, flag := range cmd.Flags {
+			for _, name := range flag.Names() {
+				if v, ok := flag.(cli.VisibleFlag); ok && !v.IsVisible() {
+					hidden[name] = true
+				} else {
+					visible[name] = true
+				}
+			}
+		}
+		if !visible["project-name"] || !visible["p"] || visible["project"] || !hidden["project"] {
+			t.Errorf("%s: visible %v, hidden %v: want --project-name and -p visible and --project hidden", cmd.Name, visible, hidden)
+		}
+	}
+	if !staticoCommandHasVisibleFlag("project") {
+		t.Error("the statico commands select the cloud project with --project")
+	}
+}
+
+func staticoCommandHasVisibleFlag(name string) bool {
+	for _, cmd := range staticoCommand.Subcommands {
+		if cmd.Name != "ls" {
+			continue
+		}
+		for _, flag := range cmd.Flags {
+			for _, n := range flag.Names() {
+				if n == name {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }

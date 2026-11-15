@@ -13,7 +13,7 @@ import (
 	"github.com/urfave/cli/v2"
 )
 
-var storagesCommand = &cli.Command{
+var storageCommand = &cli.Command{
 	Name:  "storage",
 	Usage: "Manage persistent storage",
 	Subcommands: []*cli.Command{
@@ -25,11 +25,7 @@ var storagesCommand = &cli.Command{
 				projectFlag,
 			},
 			Action: func(c *cli.Context) error {
-				workspaceID, err := resolveWorkspaceID(c)
-				if err != nil {
-					return err
-				}
-				projectID, err := resolveProjectID(c, workspaceID)
+				workspaceID, projectID, err := resolveScope(c)
 				if err != nil {
 					return err
 				}
@@ -52,25 +48,7 @@ var storagesCommand = &cli.Command{
 			Name:      "show",
 			Usage:     "Show a storage by ID",
 			ArgsUsage: "<id>",
-			Action: func(c *cli.Context) error {
-				id := c.Args().First()
-				if id == "" {
-					return fmt.Errorf("storage ID required")
-				}
-				client, err := requireAuth(c)
-				if err != nil {
-					return err
-				}
-				var result interface{}
-				status, err := client.RequestInto("GET", "/v2/storages/"+id, nil, &result)
-				if err != nil {
-					return err
-				}
-				if status >= 400 {
-					return fmt.Errorf("request failed with status %d", status)
-				}
-				return printJSON(result)
-			},
+			Action:    showAction("storage", "/v2/storages"),
 		},
 		{
 			Name:  "create",
@@ -82,11 +60,7 @@ var storagesCommand = &cli.Command{
 				projectFlag,
 			},
 			Action: func(c *cli.Context) error {
-				workspaceID, err := resolveWorkspaceID(c)
-				if err != nil {
-					return err
-				}
-				projectID, err := resolveProjectID(c, workspaceID)
+				workspaceID, projectID, err := resolveScope(c)
 				if err != nil {
 					return err
 				}
@@ -101,12 +75,9 @@ var storagesCommand = &cli.Command{
 					"projectId":     projectID,
 				}
 				var result interface{}
-				status, err := client.RequestInto("POST", "/v2/storages", body, &result)
+				_, err = client.RequestInto("POST", "/v2/storages", body, &result)
 				if err != nil {
 					return err
-				}
-				if status >= 400 {
-					return fmt.Errorf("request failed with status %d", status)
 				}
 				if isJSON(c) {
 					return printJSON(result)
@@ -144,12 +115,9 @@ var storagesCommand = &cli.Command{
 					return fmt.Errorf("no fields to update")
 				}
 				var result interface{}
-				status, err := client.RequestInto("PATCH", "/v2/storages/"+id, body, &result)
+				_, err = client.RequestInto("PATCH", "/v2/storages/"+id, body, &result)
 				if err != nil {
 					return err
-				}
-				if status >= 400 {
-					return fmt.Errorf("request failed with status %d", status)
 				}
 				if isJSON(c) {
 					return printJSON(result)
@@ -162,28 +130,7 @@ var storagesCommand = &cli.Command{
 			Name:      "rm",
 			Usage:     "Delete a storage",
 			ArgsUsage: "<id>",
-			Action: func(c *cli.Context) error {
-				id := c.Args().First()
-				if id == "" {
-					return fmt.Errorf("storage ID required")
-				}
-				client, err := requireAuth(c)
-				if err != nil {
-					return err
-				}
-				status, err := client.RequestInto("DELETE", "/v2/storages/"+id, nil, nil)
-				if err != nil {
-					return err
-				}
-				if status >= 400 {
-					return fmt.Errorf("request failed with status %d", status)
-				}
-				if isJSON(c) {
-					return printJSON(map[string]string{"status": "deleted"})
-				}
-				fmt.Println("✓ Storage deleted")
-				return nil
-			},
+			Action:    rmAction("storage", "/v2/storages"),
 		},
 		{
 			Name:  "instance",
@@ -232,12 +179,9 @@ var storagePlansCommand = &cli.Command{
 					return err
 				}
 				var result interface{}
-				status, err := client.RequestInto("GET", "/v2/storages/plans", nil, &result)
+				_, err = client.RequestInto("GET", "/v2/storages/plans", nil, &result)
 				if err != nil {
 					return err
-				}
-				if status >= 400 {
-					return fmt.Errorf("request failed with status %d", status)
 				}
 				if isJSON(c) {
 					return printJSON(result)
@@ -260,12 +204,9 @@ var storagePlansCommand = &cli.Command{
 					return err
 				}
 				var result interface{}
-				status, err := client.RequestInto("GET", "/v2/storages/plans/"+id, nil, &result)
+				_, err = client.RequestInto("GET", "/v2/storages/plans/"+id, nil, &result)
 				if err != nil {
 					return err
-				}
-				if status >= 400 {
-					return fmt.Errorf("request failed with status %d", status)
 				}
 				return printJSON(result)
 			},
@@ -278,12 +219,9 @@ var storagePlansCommand = &cli.Command{
 // to be given, unlike most other list endpoints.
 func listStoragesForProject(client *services.ApiClient, workspaceID, projectID string) ([]interface{}, error) {
 	var result []interface{}
-	status, err := client.RequestInto("GET", "/v2/storages?workspaceId="+workspaceID+"&projectId="+projectID, nil, &result)
+	_, err := client.RequestInto("GET", "/v2/storages?workspaceId="+workspaceID+"&projectId="+projectID, nil, &result)
 	if err != nil {
 		return nil, err
-	}
-	if status >= 400 {
-		return nil, fmt.Errorf("request failed with status %d", status)
 	}
 	return result, nil
 }
@@ -370,7 +308,7 @@ func listStorageFilesRecursive(client *services.ApiClient, id, remotePath string
 // to have already handled the non-glob (exact path) case themselves.
 func resolveStorageTargets(client *services.ApiClient, id, target string) ([]storageFileEntry, error) {
 	target = strings.TrimPrefix(target, "/")
-	root := globRoot(target)
+	root := utils.GlobRoot(target)
 	all, err := listStorageFilesRecursive(client, id, root)
 	if err != nil {
 		return nil, err
@@ -382,27 +320,6 @@ func resolveStorageTargets(client *services.ApiClient, id, target string) ([]sto
 		}
 	}
 	return matched, nil
-}
-
-// globRoot returns the longest path prefix of pattern that contains no glob
-// metacharacters, used to scope a remote listing before client-side
-// filtering instead of always walking the whole storage. A leading '/' is
-// preserved so absolute local paths stay absolute.
-func globRoot(pattern string) string {
-	absolute := strings.HasPrefix(pattern, "/")
-	segments := strings.Split(strings.Trim(pattern, "/"), "/")
-	root := make([]string, 0, len(segments))
-	for _, segment := range segments {
-		if utils.HasGlobMeta(segment) {
-			break
-		}
-		root = append(root, segment)
-	}
-	joined := strings.Join(root, "/")
-	if absolute {
-		return "/" + joined
-	}
-	return joined
 }
 
 // localFile describes one local file discovered by resolveLocalTargets,
@@ -426,10 +343,10 @@ func resolveLocalTargets(target string) ([]localFile, error) {
 		if !info.IsDir() {
 			return []localFile{{AbsPath: target, RelPath: filepath.Base(target), Info: info}}, nil
 		}
-		return walkLocalDir(target, "")
+		return walkLocalDir(target)
 	}
 
-	root := globRoot(filepath.ToSlash(target))
+	root := utils.GlobRoot(filepath.ToSlash(target))
 	if root == "" {
 		root = "."
 	}
@@ -457,7 +374,10 @@ func resolveLocalTargets(target string) ([]localFile, error) {
 	return matched, nil
 }
 
-func walkLocalDir(root, _ string) ([]localFile, error) {
+// walkLocalDir lists every regular and special file below root, links and
+// hidden files included: a storage sync copies the folder as it is, unlike a
+// statico deploy, which leaves hidden files and links out of a website.
+func walkLocalDir(root string) ([]localFile, error) {
 	var files []localFile
 	err := filepath.Walk(root, func(walkPath string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -556,7 +476,7 @@ var storageSyncCommand = &cli.Command{
 			return fmt.Errorf("%s is not a directory", localDir)
 		}
 
-		localFiles, err := walkLocalDir(localDir, "")
+		localFiles, err := walkLocalDir(localDir)
 		if err != nil {
 			return fmt.Errorf("walking %s: %w", localDir, err)
 		}
@@ -670,12 +590,9 @@ var storageFilesCommand = &cli.Command{
 				if q := c.String("query"); q != "" {
 					requestPath := storagePath("files", id, target) + "?query=" + q
 					var result interface{}
-					status, err := client.RequestInto("GET", requestPath, nil, &result)
+					_, err := client.RequestInto("GET", requestPath, nil, &result)
 					if err != nil {
 						return err
-					}
-					if status >= 400 {
-						return fmt.Errorf("request failed with status %d", status)
 					}
 					if isJSON(c) {
 						return printJSON(result)
@@ -687,12 +604,9 @@ var storageFilesCommand = &cli.Command{
 				if target == "" || !utils.HasGlobMeta(target) {
 					requestPath := storagePath("files", id, target)
 					var result interface{}
-					status, err := client.RequestInto("GET", requestPath, nil, &result)
+					_, err := client.RequestInto("GET", requestPath, nil, &result)
 					if err != nil {
 						return err
-					}
-					if status >= 400 {
-						return fmt.Errorf("request failed with status %d", status)
 					}
 					if isJSON(c) {
 						return printJSON(result)
@@ -727,12 +641,9 @@ var storageFilesCommand = &cli.Command{
 					return err
 				}
 				var result interface{}
-				status, err := client.RequestInto("GET", storagePath("files", id, filePath)+"?info=true", nil, &result)
+				_, err = client.RequestInto("GET", storagePath("files", id, filePath)+"?info=true", nil, &result)
 				if err != nil {
 					return err
-				}
-				if status >= 400 {
-					return fmt.Errorf("request failed with status %d", status)
 				}
 				return printJSON(result)
 			},
@@ -755,12 +666,9 @@ var storageFilesCommand = &cli.Command{
 
 				if !utils.HasGlobMeta(remoteTarget) {
 					var info storageFileEntry
-					status, err := client.RequestInto("GET", storagePath("files", id, remoteTarget)+"?info=true", nil, &info)
+					_, err := client.RequestInto("GET", storagePath("files", id, remoteTarget)+"?info=true", nil, &info)
 					if err != nil {
 						return err
-					}
-					if status >= 400 {
-						return fmt.Errorf("request failed with status %d", status)
 					}
 					if !info.IsDir {
 						if err := downloadOneFile(client, id, remoteTarget, localPath); err != nil {
@@ -779,7 +687,7 @@ var storageFilesCommand = &cli.Command{
 				if len(matches) == 0 {
 					return fmt.Errorf("no files matched %q", remoteTarget)
 				}
-				root := globRoot(strings.TrimPrefix(remoteTarget, "/"))
+				root := utils.GlobRoot(strings.TrimPrefix(remoteTarget, "/"))
 				count := 0
 				for _, entry := range matches {
 					rel := strings.TrimPrefix(strings.TrimPrefix(entry.Path, root), "/")
@@ -849,12 +757,9 @@ var storageFilesCommand = &cli.Command{
 				if err != nil {
 					return err
 				}
-				status, err := client.RequestInto("POST", storagePath("files/mkdir", id, dirPath), nil, nil)
+				_, err = client.RequestInto("POST", storagePath("files/mkdir", id, dirPath), nil, nil)
 				if err != nil {
 					return err
-				}
-				if status >= 400 {
-					return fmt.Errorf("request failed with status %d", status)
 				}
 				fmt.Println("✓ Folder created")
 				return nil
@@ -876,12 +781,9 @@ var storageFilesCommand = &cli.Command{
 					return err
 				}
 				body := map[string]interface{}{"dest": dest}
-				status, err := client.RequestInto("POST", storagePath("files/move", id, srcPath), body, nil)
+				_, err = client.RequestInto("POST", storagePath("files/move", id, srcPath), body, nil)
 				if err != nil {
 					return err
-				}
-				if status >= 400 {
-					return fmt.Errorf("request failed with status %d", status)
 				}
 				fmt.Println("✓ Moved")
 				return nil
@@ -910,12 +812,9 @@ var storageFilesCommand = &cli.Command{
 					if c.Bool("recursive") {
 						requestPath += "?recursive=true"
 					}
-					status, err := client.RequestInto("DELETE", requestPath, nil, nil)
+					_, err := client.RequestInto("DELETE", requestPath, nil, nil)
 					if err != nil {
 						return err
-					}
-					if status >= 400 {
-						return fmt.Errorf("request failed with status %d", status)
 					}
 					fmt.Println("✓ Deleted")
 					return nil
@@ -954,12 +853,9 @@ var storageInstancesAction = func(c *cli.Context) error {
 		return err
 	}
 	var result interface{}
-	status, err := client.RequestInto("GET", "/v2/storages/"+id+"/instances", nil, &result)
+	_, err = client.RequestInto("GET", "/v2/storages/"+id+"/instances", nil, &result)
 	if err != nil {
 		return err
-	}
-	if status >= 400 {
-		return fmt.Errorf("request failed with status %d", status)
 	}
 	if isJSON(c) {
 		return printJSON(result)

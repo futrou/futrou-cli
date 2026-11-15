@@ -11,6 +11,7 @@ var legacyNames = map[string][]string{
 	"project":   {"projects"},
 	"workspace": {"workspaces"},
 	"storage":   {"storages"},
+	"statico":   {"staticos"},
 	"network":   {"networks"},
 	"server":    {"servers"},
 	"init":      {"setup"},
@@ -21,6 +22,7 @@ var legacyNames = map[string][]string{
 	"file":      {"files"},
 	"limit":     {"limits"},
 	"instance":  {"instances"},
+	"version":   {"versions"},
 	"ls":        {"list"},
 	"rm":        {"delete", "remove"},
 	"show":      {"get", "inspect"},
@@ -56,6 +58,7 @@ func expandLegacy(commands []*cli.Command) []*cli.Command {
 			taken[old] = true
 			hidden := *canonical
 			hidden.Name = old
+			hidden.Aliases = nil // the canonical command keeps its aliases; a copy would clash with them
 			hidden.Hidden = true
 			out = append(out, &hidden)
 		}

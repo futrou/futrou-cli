@@ -3,27 +3,29 @@ package commands
 import (
 	"fmt"
 	"net/url"
-	"regexp"
 
 	"futrou-cli/src/cliconfig"
 	projectconfig "futrou-cli/src/config"
-	"futrou-cli/src/services"
+	"futrou-cli/src/utils"
 
 	"github.com/urfave/cli/v2"
 )
+
+// firstSet is the value of the first of the string flags that is set: the
+// current name of a flag, then its older, hidden spellings.
+func firstSet(c *cli.Context, names ...string) string {
+	for _, name := range names {
+		if v := c.String(name); v != "" {
+			return v
+		}
+	}
+	return ""
+}
 
 // workspaceFlag and projectFlag are shared by every command that needs to
 // resolve a workspace (and, where relevant, a project within it).
 var workspaceFlag = &cli.StringFlag{Name: "workspace", Usage: "Workspace name or ID (defaults to futrou.json|yaml, then the workspace selected at login)"}
 var projectFlag = &cli.StringFlag{Name: "project", Usage: "Project name or ID within the workspace (defaults to futrou.json|yaml, then \"default\")"}
-
-var uuidRe = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
-
-// looksLikeUUID reports whether s is formatted like a UUID, so callers can
-// skip a name-lookup round trip and use it directly as a resource ID.
-func looksLikeUUID(s string) bool {
-	return uuidRe.MatchString(s)
-}
 
 // resolveWorkspaceID resolves --workspace to a workspace ID. A UUID is used
 // directly; a name is looked up. If the flag is empty, it falls back to the
@@ -37,15 +39,15 @@ func resolveWorkspaceID(c *cli.Context) (string, error) {
 		}
 	}
 	if name == "" {
-		apiUrl := services.NormalizeApiUrl(globalApiUrl(c))
+		apiUrl := utils.NormalizeApiUrl(globalApiUrl(c))
 		if cfg, err := cliconfig.Load(); err == nil {
 			name = cfg.DefaultWorkspaceFor(apiUrl)
 		}
 		if name == "" {
-			return "", fmt.Errorf("no workspace specified — pass --workspace, add \"workspace\" to futrou.json, or run 'futrou login' to select a default")
+			return defaultWorkspaceFromAccount(c)
 		}
 	}
-	if looksLikeUUID(name) {
+	if utils.IsUuid(name) {
 		return name, nil
 	}
 
@@ -56,12 +58,9 @@ func resolveWorkspaceID(c *cli.Context) (string, error) {
 
 	path := "/v2/workspaces?" + url.Values{"name": {name}}.Encode()
 	var workspaces []map[string]interface{}
-	status, err := client.RequestInto("GET", path, nil, &workspaces)
+	_, err = client.RequestInto("GET", path, nil, &workspaces)
 	if err != nil {
 		return "", err
-	}
-	if status >= 400 {
-		return "", fmt.Errorf("listing workspaces failed with status %d", status)
 	}
 	if len(workspaces) == 0 {
 		return "", fmt.Errorf("no workspace named %q found", name)
@@ -88,7 +87,7 @@ func resolveProjectID(c *cli.Context, workspaceID string) (string, error) {
 	if name == "" {
 		name = "default"
 	}
-	if looksLikeUUID(name) {
+	if utils.IsUuid(name) {
 		return name, nil
 	}
 
@@ -99,12 +98,9 @@ func resolveProjectID(c *cli.Context, workspaceID string) (string, error) {
 
 	path := "/v2/workspaces/" + workspaceID + "/projects?" + url.Values{"name": {name}}.Encode()
 	var projects []map[string]interface{}
-	status, err := client.RequestInto("GET", path, nil, &projects)
+	_, err = client.RequestInto("GET", path, nil, &projects)
 	if err != nil {
 		return "", err
-	}
-	if status >= 400 {
-		return "", fmt.Errorf("listing projects failed with status %d", status)
 	}
 	if len(projects) == 0 {
 		return "", fmt.Errorf("no project named %q found in this workspace", name)
@@ -117,7 +113,7 @@ func resolveProjectID(c *cli.Context, workspaceID string) (string, error) {
 	return id, nil
 }
 
-var workspacesCommand = &cli.Command{
+var workspaceCommand = &cli.Command{
 	Name:  "workspace",
 	Usage: "Manage workspaces",
 	Subcommands: []*cli.Command{
@@ -130,12 +126,9 @@ var workspacesCommand = &cli.Command{
 					return err
 				}
 				var result interface{}
-				status, err := client.RequestInto("GET", "/v2/workspaces", nil, &result)
+				_, err = client.RequestInto("GET", "/v2/workspaces", nil, &result)
 				if err != nil {
 					return err
-				}
-				if status >= 400 {
-					return fmt.Errorf("request failed with status %d", status)
 				}
 				if isJSON(c) {
 					return printJSON(result)
@@ -148,25 +141,7 @@ var workspacesCommand = &cli.Command{
 			Name:      "show",
 			Usage:     "Show a workspace by ID",
 			ArgsUsage: "<id>",
-			Action: func(c *cli.Context) error {
-				id := c.Args().First()
-				if id == "" {
-					return fmt.Errorf("workspace ID required")
-				}
-				client, err := requireAuth(c)
-				if err != nil {
-					return err
-				}
-				var result interface{}
-				status, err := client.RequestInto("GET", "/v2/workspaces/"+id, nil, &result)
-				if err != nil {
-					return err
-				}
-				if status >= 400 {
-					return fmt.Errorf("request failed with status %d", status)
-				}
-				return printJSON(result)
-			},
+			Action:    showAction("workspace", "/v2/workspaces"),
 		},
 		{
 			Name:      "update",
@@ -196,12 +171,9 @@ var workspacesCommand = &cli.Command{
 					return fmt.Errorf("no fields to update")
 				}
 				var result interface{}
-				status, err := client.RequestInto("PATCH", "/v2/workspaces/"+id, body, &result)
+				_, err = client.RequestInto("PATCH", "/v2/workspaces/"+id, body, &result)
 				if err != nil {
 					return err
-				}
-				if status >= 400 {
-					return fmt.Errorf("request failed with status %d", status)
 				}
 				if isJSON(c) {
 					return printJSON(result)
@@ -214,28 +186,7 @@ var workspacesCommand = &cli.Command{
 			Name:      "rm",
 			Usage:     "Delete a workspace",
 			ArgsUsage: "<id>",
-			Action: func(c *cli.Context) error {
-				id := c.Args().First()
-				if id == "" {
-					return fmt.Errorf("workspace ID required")
-				}
-				client, err := requireAuth(c)
-				if err != nil {
-					return err
-				}
-				status, err := client.RequestInto("DELETE", "/v2/workspaces/"+id, nil, nil)
-				if err != nil {
-					return err
-				}
-				if status >= 400 {
-					return fmt.Errorf("request failed with status %d", status)
-				}
-				if isJSON(c) {
-					return printJSON(map[string]string{"status": "deleted"})
-				}
-				fmt.Println("✓ Workspace deleted")
-				return nil
-			},
+			Action:    rmAction("workspace", "/v2/workspaces"),
 		},
 		{
 			Name:  "limit",
@@ -251,12 +202,9 @@ var workspacesCommand = &cli.Command{
 					return err
 				}
 				var result interface{}
-				status, err := client.RequestInto("GET", "/v2/workspaces/"+workspaceID+"/limits", nil, &result)
+				_, err = client.RequestInto("GET", "/v2/workspaces/"+workspaceID+"/limits", nil, &result)
 				if err != nil {
 					return err
-				}
-				if status >= 400 {
-					return fmt.Errorf("request failed with status %d", status)
 				}
 				return printJSON(result)
 			},
@@ -279,12 +227,9 @@ var workspacesCommand = &cli.Command{
 							return err
 						}
 						var result interface{}
-						status, err := client.RequestInto("GET", "/v2/workspaces/"+workspaceID+"/contact", nil, &result)
+						_, err = client.RequestInto("GET", "/v2/workspaces/"+workspaceID+"/contact", nil, &result)
 						if err != nil {
 							return err
-						}
-						if status >= 400 {
-							return fmt.Errorf("request failed with status %d", status)
 						}
 						return printJSON(result)
 					},
@@ -294,8 +239,10 @@ var workspacesCommand = &cli.Command{
 					Usage: "Update the workspace billing contact",
 					Flags: []cli.Flag{
 						workspaceFlag,
-						&cli.StringFlag{Name: "firstname", Usage: "First name"},
-						&cli.StringFlag{Name: "lastname", Usage: "Last name"},
+						&cli.StringFlag{Name: "first-name", Usage: "First name"},
+						&cli.StringFlag{Name: "last-name", Usage: "Last name"},
+						&cli.StringFlag{Name: "firstname", Hidden: true, Usage: "Same as --first-name"},
+						&cli.StringFlag{Name: "lastname", Hidden: true, Usage: "Same as --last-name"},
 						&cli.StringFlag{Name: "company", Usage: "Company name"},
 						&cli.StringFlag{Name: "email", Usage: "Contact email"},
 						&cli.StringFlag{Name: "phone", Usage: "Phone number"},
@@ -314,10 +261,10 @@ var workspacesCommand = &cli.Command{
 							return err
 						}
 						body := map[string]interface{}{}
-						if v := c.String("firstname"); v != "" {
+						if v := firstSet(c, "first-name", "firstname"); v != "" {
 							body["firstname"] = v
 						}
-						if v := c.String("lastname"); v != "" {
+						if v := firstSet(c, "last-name", "lastname"); v != "" {
 							body["lastname"] = v
 						}
 						if v := c.String("company"); v != "" {
@@ -345,12 +292,9 @@ var workspacesCommand = &cli.Command{
 							return fmt.Errorf("no fields to update")
 						}
 						var result interface{}
-						status, err := client.RequestInto("PATCH", "/v2/workspaces/"+workspaceID+"/contact", body, &result)
+						_, err = client.RequestInto("PATCH", "/v2/workspaces/"+workspaceID+"/contact", body, &result)
 						if err != nil {
 							return err
-						}
-						if status >= 400 {
-							return fmt.Errorf("request failed with status %d", status)
 						}
 						if isJSON(c) {
 							return printJSON(result)
@@ -379,12 +323,9 @@ var workspacesCommand = &cli.Command{
 							return err
 						}
 						var result interface{}
-						status, err := client.RequestInto("GET", "/v2/workspaces/"+workspaceID+"/users", nil, &result)
+						_, err = client.RequestInto("GET", "/v2/workspaces/"+workspaceID+"/users", nil, &result)
 						if err != nil {
 							return err
-						}
-						if status >= 400 {
-							return fmt.Errorf("request failed with status %d", status)
 						}
 						if isJSON(c) {
 							return printJSON(result)
@@ -412,12 +353,9 @@ var workspacesCommand = &cli.Command{
 							return err
 						}
 						var result interface{}
-						status, err := client.RequestInto("GET", "/v2/workspaces/"+workspaceID+"/users/"+workspaceUserID, nil, &result)
+						_, err = client.RequestInto("GET", "/v2/workspaces/"+workspaceID+"/users/"+workspaceUserID, nil, &result)
 						if err != nil {
 							return err
-						}
-						if status >= 400 {
-							return fmt.Errorf("request failed with status %d", status)
 						}
 						return printJSON(result)
 					},
@@ -444,12 +382,9 @@ var workspacesCommand = &cli.Command{
 							"role":   c.String("role"),
 						}
 						var result interface{}
-						status, err := client.RequestInto("POST", "/v2/workspaces/"+workspaceID+"/users", body, &result)
+						_, err = client.RequestInto("POST", "/v2/workspaces/"+workspaceID+"/users", body, &result)
 						if err != nil {
 							return err
-						}
-						if status >= 400 {
-							return fmt.Errorf("request failed with status %d", status)
 						}
 						if isJSON(c) {
 							return printJSON(result)
@@ -482,12 +417,9 @@ var workspacesCommand = &cli.Command{
 						}
 						body := map[string]interface{}{"role": c.String("role")}
 						var result interface{}
-						status, err := client.RequestInto("PATCH", "/v2/workspaces/"+workspaceID+"/users/"+workspaceUserID, body, &result)
+						_, err = client.RequestInto("PATCH", "/v2/workspaces/"+workspaceID+"/users/"+workspaceUserID, body, &result)
 						if err != nil {
 							return err
-						}
-						if status >= 400 {
-							return fmt.Errorf("request failed with status %d", status)
 						}
 						if isJSON(c) {
 							return printJSON(result)
@@ -514,12 +446,9 @@ var workspacesCommand = &cli.Command{
 						if err != nil {
 							return err
 						}
-						status, err := client.RequestInto("DELETE", "/v2/workspaces/"+workspaceID+"/users/"+workspaceUserID, nil, nil)
+						_, err = client.RequestInto("DELETE", "/v2/workspaces/"+workspaceID+"/users/"+workspaceUserID, nil, nil)
 						if err != nil {
 							return err
-						}
-						if status >= 400 {
-							return fmt.Errorf("request failed with status %d", status)
 						}
 						if isJSON(c) {
 							return printJSON(map[string]string{"status": "removed"})
@@ -531,4 +460,44 @@ var workspacesCommand = &cli.Command{
 			},
 		},
 	},
+}
+
+// defaultWorkspaceFromAccount is the workspace to use when nothing names one and
+// no default is stored (a login from before defaults, or an API token): the
+// oldest workspace of the account, else the one the token belongs to. It is
+// remembered as the default for the next command.
+func defaultWorkspaceFromAccount(c *cli.Context) (string, error) {
+	client, err := requireAuth(c)
+	if err != nil {
+		return "", err
+	}
+	cfg, err := cliconfig.Load()
+	if err != nil {
+		return "", err
+	}
+	apiUrl := utils.NormalizeApiUrl(globalApiUrl(c))
+	id, err := cfg.EnsureDefaultWorkspace(apiUrl, client.ApiToken())
+	if id == "" {
+		if err != nil {
+			return "", fmt.Errorf("no workspace specified and none could be found (%w) — pass --workspace or add \"workspace\" to futrou.json", err)
+		}
+		return "", fmt.Errorf("no workspace specified — pass --workspace, add \"workspace\" to futrou.json, or run 'futrou login'")
+	}
+	if globalApiToken(c) == "" { // a login's default is kept; a token given for one command is not
+		_ = cliconfig.Save(cfg)
+	}
+	return id, nil
+}
+
+// resolveScope is the workspace and project a project-scoped command works in:
+// --workspace/--project, else futrou.json, else the login's default workspace and
+// its "default" project.
+func resolveScope(c *cli.Context) (workspaceID, projectID string, err error) {
+	if workspaceID, err = resolveWorkspaceID(c); err != nil {
+		return "", "", err
+	}
+	if projectID, err = resolveProjectID(c, workspaceID); err != nil {
+		return "", "", err
+	}
+	return workspaceID, projectID, nil
 }

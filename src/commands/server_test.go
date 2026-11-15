@@ -89,6 +89,25 @@ func TestServerLogsTypeIDAndInstanceParams(t *testing.T) {
 	assertContains(t, out, "srv-line")
 }
 
+func TestServerLogsInstanceFlagAndItsOlderName(t *testing.T) {
+	for _, flag := range []string{"--instance", "--instance-id"} {
+		ts := newTestServer(t)
+		ts.on("GET", "/v2/servers/srv-1/logs", func(w http.ResponseWriter, r *http.Request) {
+			if got := r.URL.Query().Get("instanceId"); got != "i-7" {
+				t.Errorf("%s: instanceId = %q, query %q", flag, got, r.URL.RawQuery)
+			}
+			respond(200, []any{map[string]any{"message": "srv-line"}})(w, r)
+		})
+		out, err := runArgs(t, ts, "server", "logs", "--live=false", flag, "i-7", "srv-1")
+		assertNoError(t, err)
+		assertContains(t, out, "srv-line")
+	}
+	help, _ := runArgs(t, newTestServer(t), "server", "logs", "--help")
+	if strings.Contains(help, "--instance-id") || !strings.Contains(help, "--instance") {
+		t.Errorf("the help shows the old name:\n%s", help)
+	}
+}
+
 func TestServerShowAndRemovedSubcommands(t *testing.T) {
 	ts := newTestServer(t)
 	ts.on("GET", "/v2/servers/srv-1", respond(200, map[string]any{"id": "srv-1", "name": "edge-detail"}))

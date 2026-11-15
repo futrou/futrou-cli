@@ -139,6 +139,7 @@ func TestLogout(t *testing.T) {
 	t.Setenv("FUTROU_API_TOKEN", "")
 
 	ts := newTestServer(t)
+	ts.on("POST", "/v2/auth/oauth2/revoke", respond(201, map[string]any{}))
 
 	cfgDir := filepath.Join(tmpHome, ".futrou")
 	os.MkdirAll(cfgDir, 0700)
@@ -181,6 +182,7 @@ func TestLogout_json(t *testing.T) {
 	t.Setenv("FUTROU_API_TOKEN", "")
 
 	ts := newTestServer(t)
+	ts.on("POST", "/v2/auth/oauth2/revoke", respond(201, map[string]any{}))
 
 	cfgDir := filepath.Join(tmpHome, ".futrou")
 	os.MkdirAll(cfgDir, 0700)
@@ -204,6 +206,19 @@ func TestFormatDurationUsesTheCoarsestUnit(t *testing.T) {
 	} {
 		if got := formatDuration(in); got != want {
 			t.Errorf("formatDuration(%v) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestLoggedInTextShowsTheWorkspaceByName(t *testing.T) {
+	for name, tc := range map[string]struct{ email, id, workspaceName, want string }{
+		"email and name": {"ada@example.com", "ws-1", "futrou", "✓ Logged in as ada@example.com\n✓ Default workspace set to futrou\n"},
+		"no email":       {"", "ws-1", "futrou", "✓ Logged in successfully\n✓ Default workspace set to futrou\n"},
+		"name unknown":   {"", "ws-1", "", "✓ Logged in successfully\n✓ Default workspace set to ws-1\n"},
+		"no default":     {"ada@example.com", "", "", "✓ Logged in as ada@example.com\n"},
+	} {
+		if got := loggedInText(tc.email, tc.id, tc.workspaceName); got != tc.want {
+			t.Errorf("%s: got %q, want %q", name, got, tc.want)
 		}
 	}
 }

@@ -26,8 +26,8 @@ var (
 	errorLogger = log.New(currentStderr, "", 0)
 	fatalLogger = log.New(currentStderr, "", 0)
 
-	logLevel  = INFO
-	logFormat = FORMAT_TEXT
+	logLevel  = LevelInfo
+	logFormat = FormatText
 	useColors = true
 )
 
@@ -51,16 +51,16 @@ var (
 )
 
 const (
-	DEBUG = iota
-	INFO
-	WARN
-	ERROR
-	FATAL
+	LevelDebug = iota
+	LevelInfo
+	LevelWarn
+	LevelError
+	LevelFatal
 )
 
 const (
-	FORMAT_TEXT = "text"
-	FORMAT_JSON = "json"
+	FormatText = "text"
+	FormatJSON = "json"
 )
 
 type LogEntry struct {
@@ -83,26 +83,26 @@ func SetOutput(stdout, stderr io.Writer) {
 func SetLogLevel(level string) {
 	switch strings.ToLower(level) {
 	case "debug":
-		logLevel = DEBUG
+		logLevel = LevelDebug
 	case "info":
-		logLevel = INFO
+		logLevel = LevelInfo
 	case "warn":
-		logLevel = WARN
+		logLevel = LevelWarn
 	case "error":
-		logLevel = ERROR
+		logLevel = LevelError
 	case "fatal":
-		logLevel = FATAL
+		logLevel = LevelFatal
 	default:
-		logLevel = INFO
+		logLevel = LevelInfo
 	}
 }
 
 func SetLogFormat(format string) {
 	switch strings.ToLower(format) {
 	case "json":
-		logFormat = FORMAT_JSON
+		logFormat = FormatJSON
 	default:
-		logFormat = FORMAT_TEXT
+		logFormat = FormatText
 	}
 }
 
@@ -132,7 +132,7 @@ func Log(l *log.Logger, level, color, format string, args ...interface{}) {
 	stopLoader()
 	ts := time.Now().Format("2006-01-02 15:04:05")
 	msg := fmt.Sprintf(format, args...)
-	if logFormat == FORMAT_JSON {
+	if logFormat == FormatJSON {
 		entry := LogEntry{Level: strings.ToLower(level), Time: time.Now(), Message: msg}
 		data, _ := json.Marshal(entry)
 		l.Printf("%s\n", data)
@@ -144,31 +144,31 @@ func Log(l *log.Logger, level, color, format string, args ...interface{}) {
 }
 
 func Trace(format string, args ...interface{}) {
-	if logLevel <= DEBUG {
+	if logLevel <= LevelDebug {
 		Log(traceLogger, "TRACE", colorGray, format, args...)
 	}
 }
 
 func Debug(format string, args ...interface{}) {
-	if logLevel <= DEBUG {
+	if logLevel <= LevelDebug {
 		Log(debugLogger, "DEBUG", colorGray, format, args...)
 	}
 }
 
 func Info(format string, args ...interface{}) {
-	if logLevel <= INFO {
+	if logLevel <= LevelInfo {
 		Log(infoLogger, "INFO", colorWhite, format, args...)
 	}
 }
 
 func Warn(format string, args ...interface{}) {
-	if logLevel <= WARN {
+	if logLevel <= LevelWarn {
 		Log(warnLogger, "WARN", colorYellow, format, args...)
 	}
 }
 
 func Error(format string, args ...interface{}) {
-	if logLevel <= ERROR {
+	if logLevel <= LevelError {
 		Log(errorLogger, "ERROR", colorRed, format, args...)
 	}
 }

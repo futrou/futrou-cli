@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"futrou-cli/src/utils"
 	"io"
 	"net/url"
 	"os"
@@ -20,6 +21,7 @@ import (
 	"futrou-cli/src/api"
 	"futrou-cli/src/constants"
 	"futrou-cli/src/logger"
+	"futrou-cli/src/statico"
 	"futrou-cli/src/validators"
 
 	"gopkg.in/yaml.v3"
@@ -33,6 +35,11 @@ type Config struct {
 	Schema    string `json:"$schema,omitempty"`
 	Workspace string `json:"workspace,omitempty"`
 	Project   string `json:"project,omitempty"`
+	// InstallCommand runs once on a device, before a deploy, until it has run
+	// there (again when the command changes). BuildCommand runs before every
+	// deploy. Both run in the folder of the config file.
+	InstallCommand string `json:"installCommand,omitempty"`
+	BuildCommand   string `json:"buildCommand,omitempty"`
 	// Region (a region name or ID) is the default region of every resource in
 	// the project; a resource's own regionId takes precedence.
 	Region     string            `json:"region,omitempty"`
@@ -42,11 +49,71 @@ type Config struct {
 	Proxies    []ProxyConfig     `json:"proxies,omitempty"`
 	Storages   []StorageConfig   `json:"storages,omitempty"`
 	Crons      []CronConfig      `json:"crons,omitempty"`
+	// Staticos are static websites; `futrou deploy` uploads their files.
+	Staticos []StaticoConfig `json:"statico,omitempty"`
 	// Template holds presentation metadata for the Futrou template store
 	// (title, description, category, icon, ...). The CLI does not use it; it
 	// is declared so a template's futrou.json validates without warnings.
 	Template map[string]interface{} `json:"template,omitempty"`
 	Locks    map[string]string      `json:"locks,omitempty"`
+	// File is the path the config was loaded from; relative paths in it (a
+	// statico website's include) are resolved against its folder. Not part of the file.
+	File string `json:"-"`
+}
+
+// StaticoConfig is a static website (statico) and the files that are uploaded
+// to it. Name, RegionId and Public are the website itself; the rest describes
+// its next StaticoVersion and is never sent to the API as part of the website.
+type StaticoConfig struct {
+	Name        string `json:"name,omitempty"`
+	WorkspaceId string `json:"workspaceId,omitempty"`
+	ProjectId   string `json:"projectId,omitempty"`
+	RegionId    string `json:"regionId,omitempty"`
+	Public      *bool  `json:"public,omitempty"`
+	// Include selects the files, as an object whose keys run in order: a file,
+	// folder or glob (relative to the config file, or absolute) with true (keep
+	// its path), a destination in the website, or false (exclude what it matches).
+	// Without it the whole folder of the config is uploaded to the root.
+	Include utils.GlobRules `json:"include,omitempty"`
+	// HtmlToFolders (default true) also copies every page.html as page/index.html.
+	HtmlToFolders *bool `json:"htmlToFolders,omitempty"`
+	// How the website answers: the file of a folder, and the file for a path that is not found.
+	DefaultFile    string `json:"defaultFile,omitempty"`
+	DefaultStatus  int    `json:"defaultStatus,omitempty"`
+	FallbackFile   string `json:"fallbackFile,omitempty"`
+	FallbackStatus int    `json:"fallbackStatus,omitempty"`
+	// Redirects come before those of a _redirects file in the uploaded folder.
+	Redirects []statico.Redirect `json:"redirects,omitempty"`
+}
+
+// StaticoSelection is the files a website uploads. The config file itself is never uploaded.
+func (cfg *Config) StaticoSelection(site StaticoConfig) statico.Selection {
+	sel := statico.Selection{Rules: site.Include, NoHTMLToFolders: site.HtmlToFolders != nil && !*site.HtmlToFolders}
+	if cfg.File != "" {
+		sel.Ignore = []string{cfg.File}
+	}
+	return sel
+}
+
+// BaseDir is the folder include paths are relative to: the one holding the config file.
+func (cfg *Config) BaseDir() string {
+	if cfg.File == "" {
+		return "."
+	}
+	return filepath.Dir(cfg.File)
+}
+
+// VersionOptions is how the uploaded StaticoVersion answers.
+func (s StaticoConfig) VersionOptions() (statico.VersionOptions, error) {
+	rules, err := statico.RedirectRules(s.Redirects)
+	if err != nil {
+		return statico.VersionOptions{}, fmt.Errorf("statico %q: %w", s.Name, err)
+	}
+	return statico.VersionOptions{
+		DefaultFile: s.DefaultFile, DefaultStatus: s.DefaultStatus,
+		FallbackFile: s.FallbackFile, FallbackStatus: s.FallbackStatus,
+		Redirects: rules,
+	}, nil
 }
 
 // ServerletConfig exposes the Serverlet API model plus creation/deployment
@@ -374,13 +441,22 @@ func (cfg *Config) Pull(client APIRequester, selector string) error {
 	if err != nil {
 		return err
 	}
+	staticos, err := pullOptionalCollection(client, "/v2/staticos"+q)
+	if err != nil {
+		return err
+	}
 	locks := resourceLocks(project, workspace, networks, serverlets, dns, proxies, storages, crons)
-	data, _ := json.Marshal(map[string]interface{}{"$schema": constants.ProjectConfigSchemaURL, "workspace": workspace, "project": project.Name, "networks": portableItems(networks), "serverlets": portableItems(serverlets), "dns": portableItems(dns), "proxies": portableItems(proxies), "storages": portableItems(storages), "crons": portableItems(crons), "locks": locks})
+	for _, item := range staticos {
+		if id, _ := item["id"].(string); id != "" && stringValue(item["name"]) != "" {
+			locks["statico."+stringValue(item["name"])] = LockHash(id)
+		}
+	}
+	data, _ := json.Marshal(map[string]interface{}{"$schema": constants.ProjectConfigSchemaURL, "workspace": workspace, "project": project.Name, "networks": portableItems(networks), "serverlets": portableItems(serverlets), "dns": portableItems(dns), "proxies": portableItems(proxies), "storages": portableItems(storages), "crons": portableItems(crons), "statico": staticoWebsites(staticos), "locks": locks})
 	// JSON unmarshalling merges maps into an existing struct. Clear it first so
 	// locks and resources are a complete snapshot, never a partial merge.
-	region := cfg.Region
+	region, install, build := cfg.Region, cfg.InstallCommand, cfg.BuildCommand
 	*cfg = Config{}
-	cfg.Region = region
+	cfg.Region, cfg.InstallCommand, cfg.BuildCommand = region, install, build
 	if err := json.Unmarshal(data, cfg); err != nil {
 		return fmt.Errorf("reading pulled configuration: %w", err)
 	}
@@ -493,6 +569,14 @@ func pullWorkspaceName(client APIRequester, project *api.Project) (string, error
 	return name, nil
 }
 
+// ResolveWorkspaceID is the ID of the workspace cfg.Workspace names (a name or an ID).
+func (cfg *Config) ResolveWorkspaceID(client APIRequester) (string, error) {
+	if cfg == nil {
+		return "", fmt.Errorf("workspace name or ID is required")
+	}
+	return resolveCloudWorkspaceID(client, cfg.Workspace)
+}
+
 // ResolveProject finds the cloud project selected by cfg.Project in the
 // workspace selected by cfg.Workspace.
 func (cfg *Config) ResolveProject(client APIRequester) (*api.Project, error) {
@@ -529,6 +613,20 @@ func pullCollection(client APIRequester, path string) ([]map[string]interface{},
 	}
 	return items, nil
 }
+
+// pullOptionalCollection is pullCollection for a resource older API servers do
+// not have: a 404 means none.
+func pullOptionalCollection(client APIRequester, path string) ([]map[string]interface{}, error) {
+	var items []map[string]interface{}
+	status, err := client.RequestInto("GET", path, nil, &items)
+	if status == 404 {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("fetching %s: %w", path, err)
+	}
+	return items, nil
+}
 func pullDNS(client APIRequester, query string) ([]map[string]interface{}, error) {
 	var zones []map[string]interface{}
 	if _, err := client.RequestInto("GET", "/v2/dns"+query, nil, &zones); err != nil {
@@ -544,6 +642,22 @@ func pullDNS(client APIRequester, query string) ([]map[string]interface{}, error
 		}
 	}
 	return zones, nil
+}
+
+// staticoWebsites keeps what a pulled website declares: its name, region and
+// visibility. Limits, the storage and the served version are the cloud's own.
+func staticoWebsites(items []map[string]interface{}) []map[string]interface{} {
+	out := make([]map[string]interface{}, 0, len(items))
+	for _, item := range items {
+		site := map[string]interface{}{}
+		for _, key := range []string{"name", "regionId", "public"} {
+			if value, ok := item[key]; ok && value != nil {
+				site[key] = value
+			}
+		}
+		out = append(out, site)
+	}
+	return out
 }
 
 func portableItems(items []map[string]interface{}) []map[string]interface{} {
@@ -683,6 +797,7 @@ var keyedCollections = map[string]string{
 	"storages":   "name",
 	"serverlets": "name",
 	"crons":      "name",
+	"statico":    "name",
 	"proxies":    "domain",
 	"dns":        "domain",
 }
@@ -743,6 +858,7 @@ func (cfg *Config) loadDocument(path string, raw []byte) error {
 	if err := decoder.Decode(&object); err != nil {
 		return fmt.Errorf("parsing %s: %w", path, err)
 	}
+	normalizeStaticoInclude(object, includeOrders(path, raw))
 	normalizeKeyedCollections(object)
 	// Validators work with float64; normalize JSON numbers after preserving the
 	// strict decode above, so 1.2 cannot silently become an integer.
@@ -764,6 +880,147 @@ func (cfg *Config) loadDocument(path string, raw []byte) error {
 	}
 	*cfg = loaded
 	return nil
+}
+
+// includeOrders reads the order of the keys of every statico "include" object
+// straight from the file: decoding into a map forgets it, and the order is what
+// the rules mean. A website is identified by its key (keyed form) or "#<index>"
+// (list form). YAML is read from the file itself, JSON and JS from raw.
+func includeOrders(path string, raw []byte) map[string][]string {
+	if ext := strings.ToLower(filepath.Ext(path)); ext == ".yaml" || ext == ".yml" {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil
+		}
+		return yamlIncludeOrders(data)
+	}
+	return jsonIncludeOrders(raw)
+}
+
+func jsonIncludeOrders(raw []byte) map[string][]string {
+	orders := map[string][]string{}
+	var top map[string]json.RawMessage
+	if json.Unmarshal(raw, &top) != nil {
+		return orders
+	}
+	section := bytes.TrimSpace(top["statico"])
+	includeKeys := func(item json.RawMessage) []string {
+		var fields map[string]json.RawMessage
+		if json.Unmarshal(item, &fields) != nil {
+			return nil
+		}
+		keys, _ := utils.OrderedKeys(bytes.TrimSpace(fields["include"]))
+		return keys
+	}
+	switch {
+	case len(section) > 0 && section[0] == '{':
+		var items map[string]json.RawMessage
+		if json.Unmarshal(section, &items) == nil {
+			for key, item := range items {
+				orders[key] = includeKeys(item)
+			}
+		}
+	case len(section) > 0 && section[0] == '[':
+		var items []json.RawMessage
+		if json.Unmarshal(section, &items) == nil {
+			for i, item := range items {
+				orders[fmt.Sprintf("#%d", i)] = includeKeys(item)
+			}
+		}
+	}
+	return orders
+}
+
+func yamlIncludeOrders(data []byte) map[string][]string {
+	orders := map[string][]string{}
+	var document yaml.Node
+	if yaml.Unmarshal(data, &document) != nil || len(document.Content) == 0 {
+		return orders
+	}
+	field := func(mapping *yaml.Node, name string) *yaml.Node {
+		if mapping == nil || mapping.Kind != yaml.MappingNode {
+			return nil
+		}
+		for i := 0; i+1 < len(mapping.Content); i += 2 {
+			if mapping.Content[i].Value == name {
+				return mapping.Content[i+1]
+			}
+		}
+		return nil
+	}
+	includeKeys := func(item *yaml.Node) []string {
+		include := field(item, "include")
+		if include == nil || include.Kind != yaml.MappingNode {
+			return nil
+		}
+		var keys []string
+		for i := 0; i+1 < len(include.Content); i += 2 {
+			keys = append(keys, include.Content[i].Value)
+		}
+		return keys
+	}
+	section := field(document.Content[0], "statico")
+	if section == nil {
+		return orders
+	}
+	switch section.Kind {
+	case yaml.MappingNode:
+		for i := 0; i+1 < len(section.Content); i += 2 {
+			orders[section.Content[i].Value] = includeKeys(section.Content[i+1])
+		}
+	case yaml.SequenceNode:
+		for i, item := range section.Content {
+			orders[fmt.Sprintf("#%d", i)] = includeKeys(item)
+		}
+	}
+	return orders
+}
+
+// normalizeStaticoInclude turns every include written as an object into the
+// equivalent array of one-key objects, in the order of the file, so the order
+// survives the unordered maps the document goes through. A key the order lacks
+// (it should not happen) goes last, sorted.
+func normalizeStaticoInclude(object map[string]interface{}, orders map[string][]string) {
+	convert := func(id string, item interface{}) {
+		site, ok := item.(map[string]interface{})
+		if !ok {
+			return
+		}
+		include, ok := site["include"].(map[string]interface{})
+		if !ok {
+			return
+		}
+		var keys []string
+		seen := map[string]bool{}
+		for _, key := range orders[id] {
+			if _, present := include[key]; present && !seen[key] {
+				keys = append(keys, key)
+				seen[key] = true
+			}
+		}
+		var rest []string
+		for key := range include {
+			if !seen[key] {
+				rest = append(rest, key)
+			}
+		}
+		sort.Strings(rest)
+		rules := make([]interface{}, 0, len(include))
+		for _, key := range append(keys, rest...) {
+			rules = append(rules, map[string]interface{}{key: include[key]})
+		}
+		site["include"] = rules
+	}
+	switch section := object["statico"].(type) {
+	case map[string]interface{}:
+		for key, item := range section {
+			convert(key, item)
+		}
+	case []interface{}:
+		for i, item := range section {
+			convert(fmt.Sprintf("#%d", i), item)
+		}
+	}
 }
 
 // Save writes cfg back to dir/file in the format of the file: JSON for
@@ -907,6 +1164,10 @@ func LoadProjectConfig(dir, file, project string) (*Config, string, error) {
 	path, err := cfg.LoadProject(dir, file, project)
 	if err != nil {
 		return nil, "", err
+	}
+	// the commands resolve relative paths in the config (include) against its folder
+	if abs, err := filepath.Abs(path); err == nil {
+		cfg.File = abs
 	}
 	return cfg, path, nil
 }

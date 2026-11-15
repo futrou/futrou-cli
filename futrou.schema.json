@@ -9,6 +9,9 @@
       "format": "uri",
       "type": "string"
     },
+    "buildCommand": {
+      "description": "Shell command that builds the project (for example `npm run build`). It runs in the folder of this file before every `futrou deploy` and `futrou statico up`, and a failure stops the deploy."
+    },
     "crons": {
       "description": "Scheduled HTTP or code jobs for the project.",
       "oneOf": [
@@ -412,6 +415,9 @@
           "type": "object"
         }
       ]
+    },
+    "installCommand": {
+      "description": "Shell command that installs what the build needs (for example `npm ci`). It runs in the folder of this file, once on a device before the first `futrou deploy` or `futrou statico up`, and again only when the command changes."
     },
     "locks": {
       "additionalProperties": {
@@ -1157,6 +1163,218 @@
               },
               "user": {
                 "description": "User the entrypoint runs as.",
+                "type": "string"
+              },
+              "workspaceId": {
+                "maxLength": 255,
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "description": "The same items as an object whose keys are the names.",
+          "type": "object"
+        }
+      ]
+    },
+    "statico": {
+      "description": "Static websites. `futrou deploy` creates each one and uploads its files as a new version, which it activates when something changed.",
+      "oneOf": [
+        {
+          "items": {
+            "additionalProperties": true,
+            "description": "Common Futrou API resource fields.",
+            "properties": {
+              "defaultFile": {
+                "description": "File served for a folder (default /index.html).",
+                "maxLength": 255,
+                "minLength": 1,
+                "type": "string"
+              },
+              "defaultStatus": {
+                "description": "Status of a default file answer (default 200)."
+              },
+              "displayName": {
+                "description": "Human-readable resource name.",
+                "maxLength": 255,
+                "minLength": 1,
+                "type": "string"
+              },
+              "domain": {
+                "description": "Domain name assigned to the resource.",
+                "maxLength": 255,
+                "minLength": 1,
+                "type": "string"
+              },
+              "fallbackFile": {
+                "description": "File served for a path that is not found (default /404.html); with fallbackStatus 200 and /index.html it serves a single page app.",
+                "maxLength": 255,
+                "minLength": 1,
+                "type": "string"
+              },
+              "fallbackStatus": {
+                "description": "Status of a fallback answer (default 404)."
+              },
+              "htmlToFolders": {
+                "description": "Also copy every page.html as page/index.html (and index.htm as index.html) unless that path exists, so a proxy serves /page (default true).",
+                "type": "boolean"
+              },
+              "id": {
+                "description": "Futrou resource identifier.",
+                "maxLength": 255,
+                "minLength": 1,
+                "type": "string"
+              },
+              "include": {
+                "description": "The files of the website, as an object whose keys run in order. A key is a file, a folder or a glob (relative to this config file, or absolute; {a,b} and ** work). Its value is true (include: a folder's files land at the root of the website, a file or glob keeps its path relative to this file), a destination in the website (\"./\" is the root; a folder's files land below it, a file with a name as destination is renamed), or false (exclude what it matches from the files selected so far). Default: the folder of this file at the root. Hidden files and folders (such as .env and .git) and .map files found in a folder or glob are never uploaded; naming one as a source includes it. A _redirects file at the root of the website configures the redirects of the version and is not uploaded."
+              },
+              "name": {
+                "description": "Resource name.",
+                "maxLength": 255,
+                "minLength": 1,
+                "type": "string"
+              },
+              "projectId": {
+                "maxLength": 255,
+                "minLength": 1,
+                "type": "string"
+              },
+              "public": {
+                "description": "Anybody can read the website (default true); false makes it answer only to a request with an API token.",
+                "type": "boolean"
+              },
+              "redirects": {
+                "description": "Redirects, in order, before those of a _redirects file.",
+                "items": {
+                  "additionalProperties": true,
+                  "description": "A redirect of the website.",
+                  "properties": {
+                    "from": {
+                      "description": "Path to match, with :name placeholders and a * splat as in a _redirects file (default: every path). A URL with a host also matches the host.",
+                      "type": "string"
+                    },
+                    "statusCode": {
+                      "description": "Redirect status (default 302)."
+                    },
+                    "to": {
+                      "description": "Where to redirect to; :name and :splat from the source can be used.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "to"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "regionId": {
+                "maxLength": 255,
+                "minLength": 1,
+                "type": "string"
+              },
+              "workspaceId": {
+                "maxLength": 255,
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "type": "array"
+        },
+        {
+          "additionalProperties": {
+            "additionalProperties": true,
+            "description": "Common Futrou API resource fields.",
+            "properties": {
+              "defaultFile": {
+                "description": "File served for a folder (default /index.html).",
+                "maxLength": 255,
+                "minLength": 1,
+                "type": "string"
+              },
+              "defaultStatus": {
+                "description": "Status of a default file answer (default 200)."
+              },
+              "displayName": {
+                "description": "Human-readable resource name.",
+                "maxLength": 255,
+                "minLength": 1,
+                "type": "string"
+              },
+              "domain": {
+                "description": "Domain name assigned to the resource.",
+                "maxLength": 255,
+                "minLength": 1,
+                "type": "string"
+              },
+              "fallbackFile": {
+                "description": "File served for a path that is not found (default /404.html); with fallbackStatus 200 and /index.html it serves a single page app.",
+                "maxLength": 255,
+                "minLength": 1,
+                "type": "string"
+              },
+              "fallbackStatus": {
+                "description": "Status of a fallback answer (default 404)."
+              },
+              "htmlToFolders": {
+                "description": "Also copy every page.html as page/index.html (and index.htm as index.html) unless that path exists, so a proxy serves /page (default true).",
+                "type": "boolean"
+              },
+              "id": {
+                "description": "Futrou resource identifier.",
+                "maxLength": 255,
+                "minLength": 1,
+                "type": "string"
+              },
+              "include": {
+                "description": "The files of the website, as an object whose keys run in order. A key is a file, a folder or a glob (relative to this config file, or absolute; {a,b} and ** work). Its value is true (include: a folder's files land at the root of the website, a file or glob keeps its path relative to this file), a destination in the website (\"./\" is the root; a folder's files land below it, a file with a name as destination is renamed), or false (exclude what it matches from the files selected so far). Default: the folder of this file at the root. Hidden files and folders (such as .env and .git) and .map files found in a folder or glob are never uploaded; naming one as a source includes it. A _redirects file at the root of the website configures the redirects of the version and is not uploaded."
+              },
+              "name": {
+                "description": "Resource name.",
+                "maxLength": 255,
+                "minLength": 1,
+                "type": "string"
+              },
+              "projectId": {
+                "maxLength": 255,
+                "minLength": 1,
+                "type": "string"
+              },
+              "public": {
+                "description": "Anybody can read the website (default true); false makes it answer only to a request with an API token.",
+                "type": "boolean"
+              },
+              "redirects": {
+                "description": "Redirects, in order, before those of a _redirects file.",
+                "items": {
+                  "additionalProperties": true,
+                  "description": "A redirect of the website.",
+                  "properties": {
+                    "from": {
+                      "description": "Path to match, with :name placeholders and a * splat as in a _redirects file (default: every path). A URL with a host also matches the host.",
+                      "type": "string"
+                    },
+                    "statusCode": {
+                      "description": "Redirect status (default 302)."
+                    },
+                    "to": {
+                      "description": "Where to redirect to; :name and :splat from the source can be used.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "to"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "regionId": {
+                "maxLength": 255,
+                "minLength": 1,
                 "type": "string"
               },
               "workspaceId": {

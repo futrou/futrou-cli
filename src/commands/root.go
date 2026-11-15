@@ -5,7 +5,7 @@ import (
 
 	"futrou-cli/src/constants"
 	"futrou-cli/src/logger"
-	"futrou-cli/src/services"
+	"futrou-cli/src/utils"
 
 	"github.com/urfave/cli/v2"
 )
@@ -13,29 +13,33 @@ import (
 func Execute() {
 	app := newApp()
 	if err := app.Run(os.Args); err != nil {
-		logger.Fatal("%v", err)
+		logger.Fatal("%v", explainAuthError(err))
 	}
 }
 
 // globalApiUrl returns the --api-url value walking up to the root context.
-// A missing scheme is added and a trailing /v2 dropped (services.NormalizeApiUrl),
+// A missing scheme is added and a trailing /v2 dropped (utils.NormalizeApiUrl),
 // so "localhost:4000", "api.futrou.com" and "https://api.futrou.com/v2" all work.
 func globalApiUrl(c *cli.Context) string {
 	if v := lineageString(c, "api-url"); v != "" {
-		return services.NormalizeApiUrl(v)
+		return utils.NormalizeApiUrl(v)
 	}
-	return services.NormalizeApiUrl(constants.ApiUrl)
+	return utils.NormalizeApiUrl(constants.ApiUrl)
 }
 
-// globalApiKey returns the --api-token value (or its hidden --api-key
-// alias), taking the nearest one up the context lineage.
-func globalApiKey(c *cli.Context) string {
+// apiTokenFlagNames are the names of the token flag: --api-token, and the
+// hidden --api-key, which older versions and scripts use.
+var apiTokenFlagNames = []string{"api-token", "api-key"}
+
+// globalApiToken returns the API token given with --api-token (or its hidden
+// --api-key name) or FUTROU_API_TOKEN, taking the nearest one up the context
+// lineage, or "" when none was given.
+func globalApiToken(c *cli.Context) string {
 	for _, ctx := range c.Lineage() {
-		if v := ctx.String("api-token"); v != "" {
-			return v
-		}
-		if v := ctx.String("api-key"); v != "" {
-			return v
+		for _, name := range apiTokenFlagNames {
+			if v := ctx.String(name); v != "" {
+				return v
+			}
 		}
 	}
 	return ""
@@ -79,7 +83,7 @@ var appLevelFlags = []cli.Flag{
 // context lineage, so an unset copy never shadows a value given earlier.
 func leafOverrideFlags() []cli.Flag {
 	var flags []cli.Flag
-	for _, name := range []string{"api-url", "api-token", "api-key", "log-format"} {
+	for _, name := range append([]string{"api-url", "log-format"}, apiTokenFlagNames...) {
 		flags = append(flags, &cli.StringFlag{Name: name, Hidden: true})
 	}
 	return flags
@@ -228,6 +232,8 @@ func buildApp() *cli.App {
 		Usage:                constants.Description,
 		EnableBashCompletion: true,
 		HideVersion:          true,
+		// a repeatable flag takes one value each: --exclude './src/*.{js,css}' holds a comma
+		DisableSliceFlagSeparator: true,
 		Flags: append(append(append([]cli.Flag{}, appLevelFlags...), perCommandFlags...), &cli.BoolFlag{
 			Name:   "version",
 			Hidden: true,
@@ -276,15 +282,16 @@ func appCommands() []*cli.Command {
 
 		initCommand,
 
-		workspacesCommand,
-		projectsCommand,
+		workspaceCommand,
+		projectCommand,
 		serverCommand,
 
-		serverletsCommand,
+		serverletCommand,
 		networkCommand,
-		proxiesCommand,
+		proxyCommand,
 		dnsCommand,
-		storagesCommand,
+		storageCommand,
+		staticoCommand,
 		logsCommand,
 
 		upgradeCommand,

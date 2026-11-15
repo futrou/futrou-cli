@@ -5,12 +5,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"os"
 	"reflect"
 	"sort"
 	"strings"
 
+	"futrou-cli/src/cliconfig"
 	"futrou-cli/src/config"
 	"futrou-cli/src/services"
+	"futrou-cli/src/statico"
+	"futrou-cli/src/utils"
 	"futrou-cli/src/validators"
 )
 
@@ -33,6 +37,12 @@ type Action struct {
 	Changes    map[string]interface{} `json:"changes,omitempty"`
 	Previous   map[string]interface{} `json:"previous,omitempty"`
 	Path       string                 `json:"-"`
+	// Query narrows the listing that finds the ID of an existing resource.
+	Query string `json:"-"`
+	// Details are extra lines the plan shows below the action.
+	Details []string `json:"details,omitempty"`
+	// after runs once the action was applied (a statico website uploads its files).
+	after func(client *services.ApiClient) error
 }
 
 type Plan struct {
@@ -55,12 +65,41 @@ var resources = []resourceSpec{
 	{"proxy", "/v2/proxies", "domain", func(c *config.Config) interface{} { return c.Proxies }, true},
 	{"storage", "/v2/storages", "name", func(c *config.Config) interface{} { return c.Storages }, true},
 	{"cron", "/v2/crons", "name", func(c *config.Config) interface{} { return c.Crons }, true},
+	{"statico", "/v2/staticos", "name", func(c *config.Config) interface{} { return c.Staticos }, true},
 }
 
 // BuildPlan compares every resource declared in cfg with the API. destroy
 // plans deletion of only the resources declared in cfg; it never prunes
 // unrelated remote infrastructure.
+// planWorkspace is the workspace statico websites are listed in: the one of the
+// config, else the default chosen at login. It is resolved once per plan.
+type planWorkspace struct {
+	client *services.ApiClient
+	cfg    *config.Config
+	id     string
+	done   bool
+}
+
+// get returns the workspace ID, or "" when there is none.
+func (w *planWorkspace) get() (string, error) {
+	if w.done {
+		return w.id, nil
+	}
+	if w.cfg.Workspace != "" {
+		id, err := w.cfg.ResolveWorkspaceID(w.client)
+		if err != nil {
+			return "", err
+		}
+		w.id = id
+	} else if stored, err := cliconfig.Load(); err == nil {
+		w.id = stored.DefaultWorkspaceFor(w.client.ApiUrl())
+	}
+	w.done = true
+	return w.id, nil
+}
+
 func BuildPlan(client *services.ApiClient, cfg *config.Config, destroy bool) (*Plan, error) {
+	workspace := &planWorkspace{client: client, cfg: cfg}
 	var remoteConfig *config.Config
 	if cfg.Project != "" {
 		remoteConfig = &config.Config{Workspace: cfg.Workspace, Project: cfg.Project}
@@ -102,7 +141,18 @@ func BuildPlan(client *services.ApiClient, cfg *config.Config, destroy bool) (*P
 			// mistaken for creates.
 			if len(remote) == 0 {
 				var unscoped []map[string]interface{}
-				if _, err := client.RequestInto("GET", spec.path, nil, &unscoped); err != nil {
+				path := spec.path
+				if spec.resource == "statico" {
+					// The API refuses to list websites without a workspace.
+					id, err := workspace.get()
+					if err != nil {
+						return nil, err
+					}
+					if id != "" {
+						path += "?workspaceId=" + url.QueryEscape(id)
+					}
+				}
+				if _, err := client.RequestInto("GET", path, nil, &unscoped); err != nil {
 					return nil, fmt.Errorf("listing %ss: %w", spec.resource, err)
 				}
 				remote = matchingResources(unscoped, desired, spec.nameKey)
@@ -129,11 +179,30 @@ func BuildPlan(client *services.ApiClient, cfg *config.Config, destroy bool) (*P
 				continue
 			}
 			payload := writablePayload(item)
+			if spec.resource == "statico" {
+				payload = onlyKeys(payload, staticoWebsiteKeys)
+			}
 			if match == nil {
-				plan.Actions = append(plan.Actions, Action{Type: Create, Resource: spec.resource, Name: name, Payload: payload, Path: spec.path})
+				action := Action{Type: Create, Resource: spec.resource, Name: name, Payload: payload, Path: spec.path}
+				if spec.resource == "statico" {
+					if err := planStatico(client, cfg, workspace, item, false, &action); err != nil {
+						return nil, err
+					}
+				}
+				plan.Actions = append(plan.Actions, action)
 				continue
 			}
 			changes := changedFields(payload, match)
+			if spec.resource == "statico" {
+				action := Action{Type: Update, Resource: spec.resource, Name: name, RemoteName: itemName(match, spec.nameKey), ID: stringValue(match["id"]), Changes: changes, Previous: previousFields(changes, match), Path: spec.path}
+				if err := planStatico(client, cfg, workspace, item, true, &action); err != nil {
+					return nil, err
+				}
+				if len(changes) > 0 || action.after != nil {
+					plan.Actions = append(plan.Actions, action)
+				}
+				continue
+			}
 			if len(changes) > 0 {
 				plan.Actions = append(plan.Actions, Action{Type: Update, Resource: spec.resource, Name: name, RemoteName: itemName(match, spec.nameKey), ID: stringValue(match["id"]), Changes: changes, Previous: previousFields(changes, match), Path: spec.path})
 			}
@@ -165,7 +234,120 @@ func BuildPlan(client *services.ApiClient, cfg *config.Config, destroy bool) (*P
 			}
 		}
 	}
+	// The API refuses to list websites without a workspace.
+	for i := range plan.Actions {
+		if plan.Actions[i].Resource == "statico" && plan.Actions[i].ID == "" && plan.Actions[i].Type != Create {
+			id, err := workspace.get()
+			if err != nil {
+				return nil, err
+			}
+			if id != "" {
+				plan.Actions[i].Query = "?workspaceId=" + url.QueryEscape(id)
+			}
+		}
+	}
 	return plan, nil
+}
+
+// staticoWebsiteKeys are the fields of a statico website; the rest of its config
+// describes its next StaticoVersion and is not sent with the website.
+var staticoWebsiteKeys = []string{"name", "workspaceId", "projectId", "regionId", "public"}
+
+func onlyKeys(payload map[string]interface{}, keys []string) map[string]interface{} {
+	out := make(map[string]interface{}, len(keys))
+	for _, key := range keys {
+		if value, ok := payload[key]; ok {
+			out[key] = value
+		}
+	}
+	return out
+}
+
+// Progress shows the uploads of a deploy; nil prints to the standard output (live
+// on a terminal). A command that prints JSON sets statico.Silent().
+var Progress statico.Progress
+
+// planStatico adds what the website's files change to its action, using the
+// same functions as `futrou statico upload`: statico.Check compares the
+// selection with the served version (reading only what could be unchanged) and
+// statico.Sync, run after the website itself was created or updated, uploads.
+// Nothing is added when the served version already has these files and
+// answers. A missing file or an include that matches nothing fails the plan,
+// before the API is touched.
+func planStatico(client *services.ApiClient, cfg *config.Config, workspace *planWorkspace, item map[string]interface{}, exists bool, action *Action) error {
+	var site config.StaticoConfig
+	data, err := json.Marshal(item)
+	if err != nil {
+		return err
+	}
+	if err := json.Unmarshal(data, &site); err != nil {
+		return fmt.Errorf("statico %q: %w", itemName(item, "name"), err)
+	}
+	answers, err := site.VersionOptions()
+	if err != nil {
+		return err
+	}
+	scope := statico.Scope{WorkspaceID: site.WorkspaceId, ProjectID: site.ProjectId}
+	if scope.ProjectID == "" && cfg.Project != "" {
+		project, err := cfg.ResolveProject(client)
+		if err != nil {
+			return err
+		}
+		scope.ProjectID = project.Id
+	}
+	if scope.WorkspaceID == "" {
+		// The API refuses to list websites without a workspace.
+		id, err := workspace.get()
+		if err != nil {
+			return err
+		}
+		scope.WorkspaceID = id
+	}
+	if !exists && action.Payload["projectId"] == nil && action.Payload["workspaceId"] == nil && scope.ProjectID != "" {
+		action.Payload["projectId"] = scope.ProjectID // the API needs to know where to create it
+	}
+
+	client.SetAfterMutation(nil)
+	var found *statico.Statico
+	if exists {
+		if st, err := statico.FindStatico(client, site.Name, scope); err == nil {
+			found = st
+		}
+	}
+	sel, base, opts := cfg.StaticoSelection(site), cfg.BaseDir(), statico.UploadOptions{VersionOptions: answers}
+	diff, err := statico.Check(client, found, base, sel, opts)
+	if err != nil {
+		return fmt.Errorf("statico %q: %w", site.Name, err)
+	}
+	if !diff.Changed() {
+		return nil
+	}
+	action.Details = append(action.Details, diff.Describe())
+	if n := len(diff.Options.Redirects); n > 0 {
+		action.Details = append(action.Details, fmt.Sprintf("%d redirect(s)", n))
+	}
+	for _, warning := range diff.Resolved.Warnings {
+		action.Details = append(action.Details, "warning: "+warning)
+	}
+	action.after = func(client *services.ApiClient) error {
+		client.SetAfterMutation(nil)
+		st, err := statico.FindStatico(client, site.Name, scope)
+		if err != nil {
+			return fmt.Errorf("upload statico %q: %w", site.Name, err)
+		}
+		if Progress != nil {
+			opts.Progress = Progress
+		} else {
+			opts.Progress = utils.NewTransferProgress(os.Stdout, utils.IsTerminal(os.Stdout))
+		}
+		result, err := statico.Sync(client, *st, base, sel, opts)
+		if err != nil {
+			return fmt.Errorf("upload statico %q: %w", site.Name, err)
+		}
+		fmt.Println(result.Message(site.Name))
+		return nil
+	}
+	return nil
 }
 
 // orderByNeeds sorts serverlets so that every serverlet comes after the ones
@@ -274,6 +456,8 @@ func lockGroup(resource string) string {
 		return "storages"
 	case "cron":
 		return "crons"
+	case "statico":
+		return "statico"
 	}
 	return ""
 }
@@ -446,7 +630,7 @@ func findDNSRecord(remote, desiredRecords []map[string]interface{}, index int, d
 
 // teardownOrder lists the resources removed by BuildTeardownPlan, dependents
 // first: workloads before the storages and networks they use.
-var teardownOrder = []string{"cron", "proxy", "serverlet", "storage", "network", "dns zone"}
+var teardownOrder = []string{"cron", "proxy", "statico", "serverlet", "storage", "network", "dns zone"}
 
 // BuildTeardownPlan plans the deletion of every resource in the project
 // selected by cfg, followed by the project itself.
@@ -462,7 +646,11 @@ func BuildTeardownPlan(client *services.ApiClient, cfg *config.Config) (*Plan, e
 				continue
 			}
 			var remote []map[string]interface{}
-			if _, err := client.RequestInto("GET", spec.path+"?projectId="+url.QueryEscape(project.Id), nil, &remote); err != nil {
+			status, err := client.RequestInto("GET", spec.path+"?projectId="+url.QueryEscape(project.Id), nil, &remote)
+			if status == 404 && spec.resource == "statico" {
+				continue // an API server without statico has none to delete
+			}
+			if err != nil {
 				return nil, fmt.Errorf("listing %ss: %w", spec.resource, err)
 			}
 			if spec.resource == "serverlet" {
@@ -480,6 +668,13 @@ func BuildTeardownPlan(client *services.ApiClient, cfg *config.Config) (*Plan, e
 // Apply executes every action in order.
 func Apply(client *services.ApiClient, plan *Plan) error {
 	for _, action := range plan.Actions {
+		// a website whose files changed but not its settings has nothing to send to the API itself
+		if action.Type == Update && len(action.Changes) == 0 && action.after != nil {
+			if err := action.after(client); err != nil {
+				return err
+			}
+			continue
+		}
 		var body interface{}
 		path := action.Path
 		method := "POST"
@@ -513,13 +708,18 @@ func Apply(client *services.ApiClient, plan *Plan) error {
 		if status >= 400 {
 			return fmt.Errorf("%s %s %q failed with status %d", action.Type, action.Resource, action.Name, status)
 		}
+		if action.after != nil {
+			if err := action.after(client); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }
 
 func resolveActionID(client *services.ApiClient, action Action) (string, error) {
 	var resources []map[string]interface{}
-	if _, err := client.RequestInto("GET", action.Path, nil, &resources); err != nil {
+	if _, err := client.RequestInto("GET", action.Path+action.Query, nil, &resources); err != nil {
 		return "", fmt.Errorf("resolving %s %q: %w", action.Resource, action.Name, err)
 	}
 	name := action.Name

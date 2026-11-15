@@ -18,8 +18,14 @@ declarative `futrou.json` model in `src/config/`, its validators in
   Logs print once by default; `--live` keeps following and `--tail` keeps the recent entries (as in the
   nasua CLI). Every resource's `logs`
   command must expose exactly the query parameters its API endpoint accepts.
-- `--api-url` / `FUTROU_API_URL` take any spelling `services.NormalizeApiUrl` accepts (`host`, `host:port`,
-  `https://host/v2`; https is added, http for loopback), as in the nasua CLI.
+- `--api-url` / `FUTROU_API_URL` accept `host`, `host:port` or `https://host/v2` (https added, http for loopback), as in nasua.
+  Use `utils.NormalizeApiUrl` and `utils.IsUuid`; a test fails when a package defines its own copy.
+- Go variables of commands are named after the command, singular (`serverletCommand`); a test checks it.
+  A renamed flag keeps its old name as a **hidden** flag (see `firstSet`), as for aliases.
+- `--project` is always the Cloud project. `deploy`/`down`/`config` pick a config file with `--project-name` (`-p`).
+- CLI login and credentials (`~/.futrou/cli.json`) are in `src/cliconfig`; the `futrou.json` model is in `src/config`.
+- Project run folders are constants (`constants.BuildDir`, `CacheDir`, `StaticoDir`, `TmpDir`, `DebugDir`) with helpers
+  such as `utils.BuildDir(base)`; never write the names as string literals (a test checks it).
 - API types in `src/api/types.go` are generated from `https://api.futrou.com/v2/openapi.json`
   (`make build-types`). Do not edit them by hand.
 
@@ -47,19 +53,57 @@ declarative `futrou.json` model in `src/config/`, its validators in
    `ConvertCompose`/`Config.LoadCompose` (`src/config/compose.go`), warn about every option they
    cannot convert, take Futrou-only settings from `x-futrou`, and are never saved. Support a new
    Compose option there and in `examples/docker-compose.yml`.
-   `deploy`/`down`/`config -p <name>` load `futrou.<name>.*` first (`Config.LoadProject`), else the
+   `deploy`/`down`/`config --project-name <name>` (`-p`; the old `--project` is hidden, because `--project` is the Cloud project everywhere else) load `futrou.<name>.*` first (`Config.LoadProject`), else the
    default config renamed to the project; `-f` always wins.
-   Collections (`networks`, `storages`, `serverlets`, `proxies`, `dns`, `crons`) may be a list or
+   Collections (`networks`, `storages`, `statico`, `serverlets`, `proxies`, `dns`, `crons`) may be a list or
    an object keyed by name (domain for proxies/dns); `normalizeKeyedCollections` converts the
    object form to a list before validation, `ToJSONSchema` allows both, and saving writes lists.
 6. **Region:** top-level `region` (name or ID) defaults `regionId` of networks, serverlets,
-   proxies, storages and crons (not DNS); a resource's own `regionId` wins.
+   proxies, storages, statico websites and crons (not DNS); a resource's own `regionId` wins.
    `entrypoint` is one string; an array is joined with spaces (`config.Entrypoint`).
    `needs` entries are `name`, `name:started` or `name:healthy`; they are validated together
    (declared, no self-need, no cycles) and the deployer orders serverlets by them.
 7. **Deploy behavior:** `deploy` prints a plan and asks `[y/N]` (`y`/`yes` apply, Enter
    cancels); `-y/--yes` and `CI=true` apply without asking; `--dry-run` only shows the
    plan. `down` follows the same rules.
+
+## Pitfalls (found in review)
+
+- HTTP handlers that send on a channel use a non-blocking send and ignore requests that carry no result (browsers ask for `/favicon.ico`).
+- Only a 401 means "log in again"; never clear a token or advise `futrou login` for a 403 or a permission error.
+- A cancelled or timed-out request is not a transport failure (do not mark a host as no-QUIC); a `RoundTripper` never changes its request.
+- Names turned into folder names must stay unique (`folderName` adds a hash when it changes a name).
+- Resolve the workspace once per plan (`planWorkspace`): config value, else the login default.
+- A doc comment goes directly above its function; check this when inserting code between them.
+
+## Statico (static websites)
+
+- Types: `Statico` is a website and `StaticoVersion` one deploy that can be activated (`src/statico`).
+- Config key `statico` (list or keyed object, `StaticoConfig`). `name`, `regionId`, `public` are the website;
+  `include`, `htmlToFolders`, `defaultFile/Status`, `fallbackFile/Status`, `redirects` describe its next version and are
+  never sent with the website (`deployer.staticoPayload`). `include` is an **ordered** object (`statico.Rules`, `glob.go`):
+  key = file/folder/glob relative to the config (`Config.File`/`BaseDir`) or absolute, value = `true` (keep the path),
+  a destination, or `false` (exclude). Key order must survive loading: JSON/YAML/JS go through unordered maps, so
+  `includeOrders` reads it from the file and `normalizeStaticoInclude` makes an array of one-key objects first.
+  Redirects in the config are `{from?, to, statusCode?}`; a `_redirects` file (Cloudflare Pages syntax, `redirects.go`)
+  is converted to the node's `if`/`then` rules, with named regex groups that the node fills into `to` (`PathMatcher.Expand`
+  in nasua), and is set on the version after it is created, not uploaded.
+- `Resolve` (`files.go`) runs the rules (hidden files/folders and `.map` files found below an include are skipped by default, `defaultExcluded`; a source that names one takes it), adds `page/index.html` copies (HTML to folders), reads `_redirects`; `Stage` copies the
+  result to `.futrou/statico/<name>/<version>`; `Sync`/`Check` (`upload.go`) are used by both `futrou statico deploy`
+  and `futrou deploy` (the deployer has no upload action: a changed website is a normal create/update with `Details`
+  lines and an `after` step). `.futrou` is cleared at the start of every deploy and upload except `.futrou/cache` (hash cache, install record: `utils.CacheDir(base)`); `.futrou` and `cache` are created only when something is written, with a self-ignoring `.gitignore`. A failed upload keeps its
+  staged files. Progress is `statico.Progress` (`terminal.go`: live batch on a terminal, lines otherwise).
+- Files live in the storage `statico-<id>`, one folder per version; every request uses the CLI's normal API token (Cloud
+  authorises it and forwards to the node), the CLI never holds a node credential. Tests use `src/statico/mock`, a fake of
+  those endpoints. The flags of repeatable options hold commas (`DisableSliceFlagSeparator`).
+
+## Install and build commands
+
+- Top-level `installCommand` / `buildCommand` (strings, `Config`). `runProjectCommands` (`commands/build.go`) runs them with
+  `utils.RunShell` (sh -c, cmd /C on Windows) in `Config.BaseDir()`, streaming stdout/stderr, in `deploy` (after validation,
+  before login) and `statico deploy` (before anything). The install is remembered in `<config folder>/.futrou/cache/done-commands.json`
+  (`utils.CommandDone`), keyed by the command, only after it succeeded; the build runs every time, also with
+  `--dry-run`. A failure stops the deploy before any API request. JSON mode sends their output to stderr.
 
 ## Release signing
 
@@ -78,6 +122,8 @@ declarative `futrou.json` model in `src/config/`, its validators in
   `storage_test.go`. An optional category suffix is allowed (`storage_logs_test.go`),
   but the prefix must match an existing source file in the same directory.
   `scripts/check-test-names.sh` (run by `make test`) enforces this.
+- Every source file has a test file named after it (`storage.go` has `storage_test.go`). This is a rule for you,
+  not a script: when you add a source file, add its test file in the same change.
 - Commands are tested through `runArgs` against the mock server in `root_test.go`.
   Flags must come before positional arguments in test invocations.
 

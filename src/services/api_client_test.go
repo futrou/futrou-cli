@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -8,9 +9,11 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"futrou-cli/src/api"
 	"futrou-cli/src/cliconfig"
+	"futrou-cli/src/utils"
 )
 
 func TestApiClientRequestInto_AllHTTPMethods(t *testing.T) {
@@ -222,8 +225,8 @@ func TestApiClientToJSONSchemaAndNormalizeURL(t *testing.T) {
 	if err != nil || string(schema) != `{"openapi":"3.0.0"}` {
 		t.Errorf("ToJSONSchema() = %q, %v", schema, err)
 	}
-	if got := NormalizeApiUrl("https://example.test/v2/"); got != "https://example.test" {
-		t.Errorf("NormalizeApiUrl() = %q", got)
+	if got := utils.NormalizeApiUrl("https://example.test/v2/"); got != "https://example.test" {
+		t.Errorf("utils.NormalizeApiUrl() = %q", got)
 	}
 }
 
@@ -408,32 +411,6 @@ func TestApiClientDownloadFile_NonJSONErrorBody(t *testing.T) {
 	}
 }
 
-func TestNormalizeApiUrlAcceptsEverySpelling(t *testing.T) {
-	for in, want := range map[string]string{
-		"":                              "",
-		"api.futrou.com":                "https://api.futrou.com",
-		"api.futrou.com/":               "https://api.futrou.com",
-		"api.futrou.com/v2":             "https://api.futrou.com",
-		"https://api.futrou.com":        "https://api.futrou.com",
-		"https://api.futrou.com/v2/":    "https://api.futrou.com",
-		"HTTPS://api.futrou.com":        "HTTPS://api.futrou.com",
-		"api.futrou.com:8443":           "https://api.futrou.com:8443",
-		"10.0.0.5:8585":                 "https://10.0.0.5:8585",
-		"localhost:4000":                "http://localhost:4000",
-		"127.0.0.1:4000":                "http://127.0.0.1:4000",
-		"[::1]:4000":                    "http://[::1]:4000",
-		"http://localhost:4000/v2":      "http://localhost:4000",
-		"wss://api.futrou.com":          "https://api.futrou.com",
-		"ws://localhost:4000":           "http://localhost:4000",
-		"  https://api.futrou.com/v2  ": "https://api.futrou.com",
-		"[2001:db8::1]:8443":            "https://[2001:db8::1]:8443",
-	} {
-		if got := NormalizeApiUrl(in); got != want {
-			t.Errorf("NormalizeApiUrl(%q) = %q, want %q", in, got, want)
-		}
-	}
-}
-
 func TestNewApiClientResolvesURLAndToken(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("FUTROU_API_TOKEN", "")
@@ -443,12 +420,12 @@ func TestNewApiClientResolvesURLAndToken(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if client.ApiToken() != "explicit" || client.ApiUrl() != NormalizeApiUrl("localhost:4000") {
+	if client.ApiToken() != "explicit" || client.ApiUrl() != utils.NormalizeApiUrl("localhost:4000") {
 		t.Fatalf("client = %q %q", client.ApiToken(), client.ApiUrl())
 	}
 
 	// the environment overrides apply on top of an existing config file
-	stored := cliconfig.CliConfig{ApiUrl: NormalizeApiUrl("localhost:4000")}
+	stored := cliconfig.CliConfig{ApiUrl: utils.NormalizeApiUrl("localhost:4000")}
 	if err := cliconfig.Save(&stored); err != nil {
 		t.Fatal(err)
 	}
@@ -500,5 +477,200 @@ func TestFallbackTransportFallsBackWhenHTTP3Fails(t *testing.T) {
 	failing := &fallbackTransport{primary: &stubTransport{err: fmt.Errorf("a")}, fallback: &stubTransport{err: fmt.Errorf("b")}}
 	if _, err := failing.RoundTrip(https); err == nil || err.Error() != "b" {
 		t.Fatalf("the fallback's error is reported: %v", err)
+	}
+}
+
+// A slow transfer must not be cut off by the limit of a JSON request: the
+// Timeout of an http.Client covers reading the body too.
+func TestTransfersAreNotLimitedByTheRequestTimeout(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(200)
+		w.(http.Flusher).Flush()
+		time.Sleep(300 * time.Millisecond) // the body arrives long after the limit below
+		_, _ = w.Write([]byte("late body"))
+	}))
+	defer server.Close()
+
+	client := NewApiClientWithToken(server.URL, "t")
+	client.client.Timeout = 50 * time.Millisecond
+
+	if _, _, err := client.Request("GET", "/x", nil); err == nil {
+		t.Fatal("a JSON request is still limited by the request timeout")
+	}
+	var out strings.Builder
+	if status, err := client.Stream("/x", &out); err != nil || status != 200 || out.String() != "late body" {
+		t.Fatalf("Stream = %d %q %v, want the whole slow body", status, out.String(), err)
+	}
+	if data, _, status, err := client.DownloadFile("/x"); err != nil || status != 200 || string(data) != "late body" {
+		t.Fatalf("DownloadFile = %d %q %v, want the whole slow body", status, data, err)
+	}
+	if body, status, err := client.SendBody("PUT", "/x", "", strings.NewReader("data")); err != nil || status != 200 || body != "late body" {
+		t.Fatalf("SendBody = %v %d %v, want the whole slow answer", body, status, err)
+	}
+}
+
+func TestClientTimeouts(t *testing.T) {
+	for name, client := range map[string]*ApiClient{
+		"with token": NewApiClientWithToken("https://api.example.com", "t"),
+	} {
+		if client.client.Timeout != requestTimeout {
+			t.Errorf("%s: JSON timeout = %v, want %v", name, client.client.Timeout, requestTimeout)
+		}
+		if client.transfer.Timeout != 0 {
+			t.Errorf("%s: transfer timeout = %v, want none", name, client.transfer.Timeout)
+		}
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	loaded, err := NewApiClient("https://api.example.com", "t")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.client.Timeout != requestTimeout || loaded.transfer == nil || loaded.transfer.Timeout != 0 {
+		t.Errorf("NewApiClient timeouts = %v / %v", loaded.client.Timeout, loaded.transfer)
+	}
+	// a server that never answers is still given up on
+	transport := newTransferClient().Transport.(*fallbackTransport).fallback.(*http.Transport)
+	if transport.ResponseHeaderTimeout <= 0 || transport.TLSHandshakeTimeout <= 0 || transport.DialContext == nil {
+		t.Errorf("the transfer transport has no dial, TLS or response header timeout: %+v", transport)
+	}
+}
+
+// bodyTransport records the body of every request it gets.
+type bodyTransport struct {
+	err    error
+	calls  int
+	bodies []string
+}
+
+func (b *bodyTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	b.calls++
+	body := ""
+	if req.Body != nil {
+		data, _ := io.ReadAll(req.Body)
+		body = string(data)
+	}
+	b.bodies = append(b.bodies, body)
+	if b.err != nil {
+		return nil, b.err
+	}
+	return &http.Response{StatusCode: 200, Body: http.NoBody, Request: req}, nil
+}
+
+func TestFallbackTransportNeverRepeatsAnUnsafeRequest(t *testing.T) {
+	cases := map[string]struct {
+		method string
+		body   io.Reader
+	}{
+		"POST with a body":  {"POST", strings.NewReader("{}")},
+		"PATCH with a body": {"PATCH", strings.NewReader("{}")},
+		"POST without body": {"POST", nil},
+		"PUT of a file":     {"PUT", io.NopCloser(strings.NewReader("file"))}, // no GetBody: cannot be replayed
+		"POST of a pipe":    {"POST", io.NopCloser(strings.NewReader("pipe"))},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			req, _ := http.NewRequest(tc.method, "https://api.example.com/v2/x", tc.body)
+			primary, fallback := &bodyTransport{err: fmt.Errorf("quic")}, &bodyTransport{}
+			tr := &fallbackTransport{primary: primary, fallback: fallback}
+			if _, err := tr.RoundTrip(req); err != nil {
+				t.Fatal(err)
+			}
+			if primary.calls != 0 || fallback.calls != 1 {
+				t.Errorf("HTTP/3 was tried (%d) or the fallback not used once (%d)", primary.calls, fallback.calls)
+			}
+		})
+	}
+}
+
+func TestFallbackTransportGivesTheFallbackAFreshBody(t *testing.T) {
+	req, _ := http.NewRequest("PUT", "https://api.example.com/v2/x", strings.NewReader("whole body"))
+	primary, fallback := &bodyTransport{err: fmt.Errorf("quic")}, &bodyTransport{}
+	tr := &fallbackTransport{primary: primary, fallback: fallback}
+	if _, err := tr.RoundTrip(req); err != nil {
+		t.Fatal(err)
+	}
+	if primary.calls != 1 || fallback.calls != 1 {
+		t.Fatalf("calls: primary %d, fallback %d", primary.calls, fallback.calls)
+	}
+	if primary.bodies[0] != "whole body" || fallback.bodies[0] != "whole body" {
+		t.Errorf("bodies: primary %q, fallback %q; the fallback must get the whole body again", primary.bodies[0], fallback.bodies[0])
+	}
+}
+
+func TestFallbackTransportRemembersAHostWithoutQUIC(t *testing.T) {
+	primary, fallback := &bodyTransport{err: fmt.Errorf("quic")}, &bodyTransport{}
+	tr := &fallbackTransport{primary: primary, fallback: fallback}
+	for i := 0; i < 3; i++ {
+		req, _ := http.NewRequest("GET", "https://api.example.com/v2/x", nil)
+		if _, err := tr.RoundTrip(req); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if primary.calls != 1 || fallback.calls != 3 {
+		t.Errorf("primary %d (want 1), fallback %d (want 3): a host QUIC failed for goes straight to TCP", primary.calls, fallback.calls)
+	}
+	other, _ := http.NewRequest("GET", "https://other.example.com/v2/x", nil)
+	if _, err := tr.RoundTrip(other); err != nil || primary.calls != 2 {
+		t.Errorf("another host still tries QUIC: %v, primary %d", err, primary.calls)
+	}
+}
+
+// A response cut off in the middle is an error, never an answer.
+func TestCutOffResponsesAreErrors(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", "100")
+		w.WriteHeader(200)
+		_, _ = w.Write([]byte(`{"id":`))
+		w.(http.Flusher).Flush()
+		panic(http.ErrAbortHandler) // drops the connection after 6 of 100 bytes
+	}))
+	defer server.Close()
+
+	mutations := 0
+	client := NewApiClientWithToken(server.URL, "t")
+	client.SetAfterMutation(func() error { mutations++; return nil })
+
+	if _, status, err := client.Request("POST", "/x", map[string]string{}); err == nil || !strings.Contains(err.Error(), "reading response from POST /x") || status != 200 {
+		t.Errorf("Request: status %d, err %v", status, err)
+	}
+	var out map[string]interface{}
+	if status, err := client.RequestInto("POST", "/x", map[string]string{}, &out); err == nil || !strings.Contains(err.Error(), "reading response from POST /x") || status != 200 {
+		t.Errorf("RequestInto: status %d, err %v", status, err)
+	}
+	if _, status, err := client.SendBody("PUT", "/x", "", strings.NewReader("data")); err == nil || !strings.Contains(err.Error(), "reading response from PUT /x") || status != 200 {
+		t.Errorf("SendBody: status %d, err %v", status, err)
+	}
+	if mutations != 0 {
+		t.Errorf("the after-mutation callback ran %d times for answers that never arrived", mutations)
+	}
+}
+
+func TestFallbackTransportKeepsQUICAfterACancelledRequest(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	req, _ := http.NewRequestWithContext(ctx, "GET", "https://api.example.com/v2", nil)
+	primary, fallback := &stubTransport{err: context.Canceled}, &stubTransport{}
+	tr := &fallbackTransport{primary: primary, fallback: fallback}
+	if _, err := tr.RoundTrip(req); err == nil || fallback.calls != 0 {
+		t.Fatalf("a cancelled request is not retried: %v, fallback %d", err, fallback.calls)
+	}
+	if _, failed := tr.noQUIC.Load("api.example.com"); failed {
+		t.Error("a cancelled request must not disable QUIC for the host")
+	}
+}
+
+func TestFallbackTransportDoesNotChangeTheCallersRequest(t *testing.T) {
+	req, _ := http.NewRequest("PUT", "https://api.example.com/v2/x", strings.NewReader("body"))
+	original := req.Body
+	tr := &fallbackTransport{primary: &bodyTransport{err: fmt.Errorf("quic")}, fallback: &bodyTransport{}}
+	if _, err := tr.RoundTrip(req); err != nil {
+		t.Fatal(err)
+	}
+	if req.Body != original {
+		t.Error("RoundTrip replaced req.Body")
 	}
 }

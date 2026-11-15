@@ -22,7 +22,7 @@ var schemaCommand = &cli.Command{
 		},
 	},
 	Action: func(c *cli.Context) error {
-		client := services.NewApiClientWithToken(globalApiUrl(c), globalApiKey(c))
+		client := services.NewApiClientWithToken(globalApiUrl(c), globalApiToken(c))
 		switch c.String("format") {
 		case "go":
 			schema, err := client.ToJSONSchema()

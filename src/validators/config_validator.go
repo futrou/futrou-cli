@@ -17,6 +17,8 @@ func initConfigValidator() *Validator {
 	v.Field("$schema").Description("URL of the Futrou JSON Schema used by editors for validation and completion.").Optional().String().URL()
 	v.Field("workspace").Description("Workspace name or ID that owns this project.").Optional().String().MinLength(1).MaxLength(255)
 	v.Field("project").Description("Project name or ID used as the deployment target.").Optional().String().MinLength(1).MaxLength(255)
+	v.Field("installCommand").Description("Shell command that installs what the build needs (for example `npm ci`). It runs in the folder of this file, once on a device before the first `futrou deploy` or `futrou statico up`, and again only when the command changes.").Optional().Custom(shellCommand)
+	v.Field("buildCommand").Description("Shell command that builds the project (for example `npm run build`). It runs in the folder of this file before every `futrou deploy` and `futrou statico up`, and a failure stops the deploy.").Optional().Custom(shellCommand)
 	v.Field("region").Description("Region name or ID applied to every resource in the project that does not set its own regionId.").Optional().String().MinLength(1).MaxLength(255)
 	v.Field("networks").Description("Private networks managed by this project; serverlets join them by name.").Optional().Array(initNetworkValidator()).Custom(uniqueNames("name"))
 	v.Field("serverlets").Description("Serverlets to create or update in this project.").Optional().Array(initServerletValidator()).Custom(uniqueNames("name")).Custom(validateNeeds)
@@ -24,6 +26,7 @@ func initConfigValidator() *Validator {
 	v.Field("proxies").Description("HTTP, TCP, or UDP proxies managed by this project.").Optional().Array(initProxyValidator()).Custom(uniqueNames("domain"))
 	v.Field("storages").Description("Persistent storage volumes available to the project.").Optional().Array(initStorageValidator()).Custom(uniqueNames("name"))
 	v.Field("crons").Description("Scheduled HTTP or code jobs for the project.").Optional().Array(initCronValidator()).Custom(uniqueNames("name"))
+	v.Field("statico").Description("Static websites. `futrou deploy` creates each one and uploads its files as a new version, which it activates when something changed.").Optional().Array(initStaticoValidator()).Custom(uniqueNames("name"))
 	v.Field("template").Description("Presentation metadata for the Futrou template store (title, description, category, tags, icon, ...). Not used by the CLI.").Optional().Custom(isObject)
 	v.Field("locks").Description("Internal stable resource identifiers maintained by the CLI.").Optional().Custom(stringMap)
 	return v
@@ -58,6 +61,22 @@ func commandString(value interface{}) error {
 		return stringList(value)
 	}
 	return fmt.Errorf("must be a string or an array of strings")
+}
+
+// shellCommand accepts a non-blank string without a null character, up to 4096 characters.
+func shellCommand(value interface{}) error {
+	text, ok := value.(string)
+	switch {
+	case !ok:
+		return fmt.Errorf("must be a string")
+	case strings.TrimSpace(text) == "":
+		return fmt.Errorf("must not be empty")
+	case len(text) > 4096:
+		return fmt.Errorf("must be at most 4096 characters")
+	case strings.ContainsRune(text, 0):
+		return fmt.Errorf("must not contain a null character")
+	}
+	return nil
 }
 
 // isObject accepts any JSON object.
@@ -376,5 +395,153 @@ func initCronValidator() *Validator {
 	v.Field("project").Optional()
 	v.Field("region").Optional()
 	v.Field("workspace").Optional()
+	return v
+}
+
+// includeRule checks one include entry: its value is true (keep the path),
+// false (exclude) or a destination in the website.
+func includeRule(source string, value interface{}) error {
+	if strings.TrimSpace(source) == "" {
+		return fmt.Errorf("an include needs a source")
+	}
+	if strings.ContainsRune(source, 0) {
+		return fmt.Errorf("include %q must not contain a null character", source)
+	}
+	switch v := value.(type) {
+	case bool:
+		return nil
+	case string:
+		if strings.TrimSpace(v) == "" {
+			return fmt.Errorf("include %q: the destination must not be empty (use true to keep the path)", source)
+		}
+		if strings.ContainsRune(v, 0) {
+			return fmt.Errorf("include %q: the destination must not contain a null character", source)
+		}
+		clean := strings.TrimPrefix(strings.ReplaceAll(v, "\\", "/"), "./")
+		if clean == ".." || strings.HasPrefix(clean, "../") || strings.Contains(clean, "/../") {
+			return fmt.Errorf("include %q: the destination %q leaves the website", source, v)
+		}
+		return nil
+	}
+	return fmt.Errorf("include %q must be true, false or a destination path", source)
+}
+
+// includeRules accepts the ordered selection of a website's files: an object of
+// source to true, false or a destination, or an array of sources and one-key
+// objects of that kind (which is what the loader makes of an object, to keep
+// its order).
+func includeRules(value interface{}) error {
+	switch v := value.(type) {
+	case map[string]interface{}:
+		for source, rule := range v {
+			if err := includeRule(source, rule); err != nil {
+				return err
+			}
+		}
+		return nil
+	case []interface{}:
+		for i, item := range v {
+			switch entry := item.(type) {
+			case string:
+				if err := includeRule(entry, true); err != nil {
+					return err
+				}
+			case map[string]interface{}:
+				if len(entry) != 1 {
+					return fmt.Errorf("item %d must have exactly one source", i)
+				}
+				for source, rule := range entry {
+					if err := includeRule(source, rule); err != nil {
+						return err
+					}
+				}
+			default:
+				return fmt.Errorf("item %d must be a source or an object with one source", i)
+			}
+		}
+		return nil
+	}
+	return fmt.Errorf("must be an object or an array")
+}
+
+// answerStatus accepts the HTTP statuses a website can answer with: 200-500
+// except 204, 205 and 304, which have no body.
+func answerStatus(value interface{}) error {
+	number, ok := value.(float64)
+	if !ok || number != math.Trunc(number) {
+		return fmt.Errorf("must be an integer")
+	}
+	switch int(number) {
+	case 204, 205, 304:
+		return fmt.Errorf("must not be 204, 205 or 304")
+	}
+	if number < 200 || number > 500 {
+		return fmt.Errorf("must be between 200 and 500")
+	}
+	return nil
+}
+
+// redirectStatus accepts the statuses of a redirect.
+func redirectStatus(value interface{}) error {
+	number, ok := value.(float64)
+	if !ok {
+		return fmt.Errorf("must be an integer")
+	}
+	switch int(number) {
+	case 301, 302, 303, 307, 308:
+		if number == math.Trunc(number) {
+			return nil
+		}
+	}
+	return fmt.Errorf("must be 301, 302, 303, 307 or 308")
+}
+
+// redirectFrom accepts a redirect source: a path, or a URL with a host.
+func redirectFrom(value interface{}) error {
+	from, _ := value.(string)
+	if !strings.HasPrefix(from, "/") && !strings.Contains(from, "://") {
+		return fmt.Errorf("must start with a slash, or be a URL")
+	}
+	if strings.ContainsAny(from, "? \t\r\n") || strings.Contains(from, "#") {
+		return fmt.Errorf("must not hold spaces, a query string or a fragment")
+	}
+	return nil
+}
+
+// redirectTo accepts a redirect destination: no spaces or control characters.
+func redirectTo(value interface{}) error {
+	to, _ := value.(string)
+	if strings.TrimSpace(to) == "" {
+		return fmt.Errorf("must not be empty")
+	}
+	for _, r := range to {
+		if r <= 0x20 || r == 0x7f {
+			return fmt.Errorf("must not hold spaces, line breaks or control characters")
+		}
+	}
+	return nil
+}
+
+func initStaticoRedirectValidator() *Validator {
+	v := NewValidator().Description("A redirect of the website.")
+	v.Field("from").Description("Path to match, with :name placeholders and a * splat as in a _redirects file (default: every path). A URL with a host also matches the host.").Optional().String().Custom(redirectFrom)
+	v.Field("to").Description("Where to redirect to; :name and :splat from the source can be used.").Required().String().Custom(redirectTo)
+	v.Field("statusCode").Description("Redirect status (default 302).").Optional().Custom(redirectStatus)
+	return v
+}
+
+func initStaticoValidator() *Validator {
+	v := initResourceValidator()
+	v.Field("workspaceId").Optional().String().MinLength(1).MaxLength(255)
+	v.Field("projectId").Optional().String().MinLength(1).MaxLength(255)
+	v.Field("regionId").Optional().String().MinLength(1).MaxLength(255)
+	v.Field("public").Description("Anybody can read the website (default true); false makes it answer only to a request with an API token.").Optional().Bool()
+	v.Field("include").Description("The files of the website, as an object whose keys run in order. A key is a file, a folder or a glob (relative to this config file, or absolute; {a,b} and ** work). Its value is true (include: a folder's files land at the root of the website, a file or glob keeps its path relative to this file), a destination in the website (\"./\" is the root; a folder's files land below it, a file with a name as destination is renamed), or false (exclude what it matches from the files selected so far). Default: the folder of this file at the root. Hidden files and folders (such as .env and .git) and .map files found in a folder or glob are never uploaded; naming one as a source includes it. A _redirects file at the root of the website configures the redirects of the version and is not uploaded.").Optional().Custom(includeRules)
+	v.Field("htmlToFolders").Description("Also copy every page.html as page/index.html (and index.htm as index.html) unless that path exists, so a proxy serves /page (default true).").Optional().Bool()
+	v.Field("defaultFile").Description("File served for a folder (default /index.html).").Optional().String().MinLength(1).MaxLength(255)
+	v.Field("defaultStatus").Description("Status of a default file answer (default 200).").Optional().Custom(answerStatus)
+	v.Field("fallbackFile").Description("File served for a path that is not found (default /404.html); with fallbackStatus 200 and /index.html it serves a single page app.").Optional().String().MinLength(1).MaxLength(255)
+	v.Field("fallbackStatus").Description("Status of a fallback answer (default 404).").Optional().Custom(answerStatus)
+	v.Field("redirects").Description("Redirects, in order, before those of a _redirects file.").Optional().Array(initStaticoRedirectValidator())
 	return v
 }

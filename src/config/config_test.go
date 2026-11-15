@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"futrou-cli/src/statico"
+	"futrou-cli/src/utils"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -330,6 +332,7 @@ func TestPullIncludesNetworksAndLocks(t *testing.T) {
 		"/v2/proxies":         []map[string]interface{}{},
 		"/v2/storages":        []map[string]interface{}{},
 		"/v2/crons":           []map[string]interface{}{},
+		"/v2/staticos":        []map[string]interface{}{},
 	}
 	cfg := &Config{Workspace: "acme", Project: "demo"}
 	if err := cfg.Pull(client, ""); err != nil {
@@ -574,6 +577,7 @@ func TestEntrypointFromAPIArrayIsStoredAsOneString(t *testing.T) {
 		"/v2/proxies":         []map[string]interface{}{},
 		"/v2/storages":        []map[string]interface{}{},
 		"/v2/crons":           []map[string]interface{}{},
+		"/v2/staticos":        []map[string]interface{}{},
 	}
 	cfg := &Config{Workspace: "acme", Project: "demo"}
 	if err := cfg.Pull(client, ""); err != nil {
@@ -809,6 +813,7 @@ func TestPullKeepsTheConfiguredRegion(t *testing.T) {
 		"/v2/proxies":         []map[string]interface{}{},
 		"/v2/storages":        []map[string]interface{}{},
 		"/v2/crons":           []map[string]interface{}{},
+		"/v2/staticos":        []map[string]interface{}{},
 	}
 	cfg := &Config{Workspace: "acme", Project: "demo", Region: "europe"}
 	if err := cfg.Pull(client, ""); err != nil {
@@ -1235,6 +1240,7 @@ func pullFixture() fakeAPI {
 		"/v2/proxies":  []map[string]interface{}{{"id": "px-1", "domain": "app.example.com", "target": "web", "port": 8080}},
 		"/v2/storages": []map[string]interface{}{{"id": "st-1", "name": "data"}},
 		"/v2/crons":    []map[string]interface{}{{"id": "cr-1", "name": "nightly"}},
+		"/v2/staticos": []map[string]interface{}{{"id": "sc-1", "name": "docs", "regionId": "reg-1", "public": true, "storage": "statico-sc-1", "activeVersion": "v1", "maxSize": 1000}},
 	}
 }
 
@@ -1267,6 +1273,10 @@ func TestPullBuildsAPortableSnapshotWithLocksForEveryResource(t *testing.T) {
 		"proxies.app.example.com":           LockHash("px-1"),
 		"storages.data":                     LockHash("st-1"),
 		"crons.nightly":                     LockHash("cr-1"),
+		"statico.docs":                      LockHash("sc-1"),
+	}
+	if len(cfg.Staticos) != 1 || cfg.Staticos[0].Name != "docs" || cfg.Staticos[0].RegionId != "reg-1" || cfg.Staticos[0].Public == nil || !*cfg.Staticos[0].Public {
+		t.Fatalf("a pulled website keeps only its name, region and visibility: %#v", cfg.Staticos)
 	}
 	if !reflect.DeepEqual(cfg.Locks, wantLocks) {
 		t.Fatalf("locks = %v\nwant %v", cfg.Locks, wantLocks)
@@ -1316,7 +1326,7 @@ func TestPullErrors(t *testing.T) {
 	if err := (&Config{Workspace: "nobody", Project: "demo"}).Pull(pullFixture(), ""); err == nil || !strings.Contains(err.Error(), `workspace "nobody" not found`) {
 		t.Fatalf("unknown workspace: %v", err)
 	}
-	for _, path := range []string{"/v2/workspaces", "/v2/projects", "/v2/workspaces/ws-1", "/v2/networks", "/v2/serverlets", "/v2/dns", "/v2/dns/dz-1/records", "/v2/proxies", "/v2/storages", "/v2/crons"} {
+	for _, path := range []string{"/v2/workspaces", "/v2/projects", "/v2/workspaces/ws-1", "/v2/networks", "/v2/serverlets", "/v2/dns", "/v2/dns/dz-1/records", "/v2/proxies", "/v2/storages", "/v2/crons", "/v2/staticos"} {
 		t.Run("fails on "+path, func(t *testing.T) {
 			cfg := &Config{Workspace: "acme", Project: "demo"}
 			err := cfg.Pull(failingAPI{pullFixture(), map[string]bool{path: true}}, "")
@@ -1456,5 +1466,278 @@ func TestStorageAndCronMarshalOmitZeroTimestamps(t *testing.T) {
 	}
 	if _, err := json.Marshal(StorageConfig{Name: "x"}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func includeSources(rules []utils.GlobRule) []string {
+	var out []string
+	for _, r := range rules {
+		out = append(out, r.Source)
+	}
+	return out
+}
+
+func loadStaticoDoc(t *testing.T, name, content string) *Config {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &Config{}
+	if _, err := cfg.Load(dir, name); err != nil {
+		t.Fatalf("%s: %v", name, err)
+	}
+	return cfg
+}
+
+func TestStaticoIncludeKeepsTheOrderOfItsKeysInEveryFormat(t *testing.T) {
+	want := []string{"./z", "./a/*.{js,css}", "./m", "./b/images/*.{jpg,webp}", "./a"}
+	for name, doc := range map[string]string{
+		"keyed.json": `{"statico": {"docs": {"include": {"./z": true, "./a/*.{js,css}": false, "./m": "./", "./b/images/*.{jpg,webp}": true, "./a": "static/"}}}}`,
+		"list.json":  `{"statico": [{"name": "docs", "include": {"./z": true, "./a/*.{js,css}": false, "./m": "./", "./b/images/*.{jpg,webp}": true, "./a": "static/"}}]}`,
+		"keyed.yaml": "statico:\n  docs:\n    include:\n      ./z: true\n      ./a/*.{js,css}: false\n      ./m: ./\n      ./b/images/*.{jpg,webp}: true\n      ./a: static/\n",
+		"list.yaml":  "statico:\n  - name: docs\n    include:\n      ./z: true\n      ./a/*.{js,css}: false\n      ./m: ./\n      ./b/images/*.{jpg,webp}: true\n      ./a: static/\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg := loadStaticoDoc(t, name, doc)
+			if len(cfg.Staticos) != 1 {
+				t.Fatalf("staticos = %#v", cfg.Staticos)
+			}
+			rules := cfg.Staticos[0].Include
+			if got := includeSources(rules); !reflect.DeepEqual(got, want) {
+				t.Fatalf("order = %v, want %v", got, want)
+			}
+			if !rules[1].Exclude || rules[2].Dest != "./" || rules[0].Dest != "" || rules[0].Exclude || rules[4].Dest != "static/" {
+				t.Fatalf("rules = %#v", rules)
+			}
+		})
+	}
+}
+
+func TestStaticoIncludeOrderIsNotTheAlphabeticalOrder(t *testing.T) {
+	// keys that would sort differently from how they are written, in several websites
+	cfg := loadStaticoDoc(t, "futrou.json", `{"statico": {
+		"b": {"include": {"z": true, "y": false, "x": "./", "a": true}},
+		"a": {"include": {"3": true, "2": false, "1": true}}}}`)
+	got := map[string][]string{}
+	for _, site := range cfg.Staticos {
+		got[site.Name] = includeSources(site.Include)
+	}
+	if !reflect.DeepEqual(got["b"], []string{"z", "y", "x", "a"}) || !reflect.DeepEqual(got["a"], []string{"3", "2", "1"}) {
+		t.Fatalf("orders = %v", got)
+	}
+}
+
+func TestStaticoIncludeArrayFormAndDuplicateSources(t *testing.T) {
+	cfg := loadStaticoDoc(t, "futrou.json", `{"statico": {"docs": {"include": ["./dist", {"./dist/*.map": false}, {"./extra": "x/"}, "./dist"]}}}`)
+	rules := cfg.Staticos[0].Include
+	if len(rules) != 4 || rules[0].Source != "./dist" || !rules[1].Exclude || rules[2].Dest != "x/" || rules[3].Source != "./dist" {
+		t.Fatalf("rules = %#v", rules)
+	}
+}
+
+func TestStaticoConfigFileSavedAndLoadedAgainKeepsTheOrder(t *testing.T) {
+	cfg := &Config{Workspace: "acme", Project: "demo", Staticos: []StaticoConfig{{
+		Name:    "docs",
+		Include: utils.GlobRules{{Source: "./z"}, {Source: "./a/*.map", Exclude: true}, {Source: "./m", Dest: "./"}, {Source: "./b"}},
+	}}}
+	for _, name := range []string{"futrou.json", "futrou.yaml"} {
+		dir := t.TempDir()
+		if _, err := cfg.Save(dir, name); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		loaded := &Config{}
+		if _, err := loaded.Load(dir, name); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if got := includeSources(loaded.Staticos[0].Include); !reflect.DeepEqual(got, []string{"./z", "./a/*.map", "./m", "./b"}) {
+			t.Fatalf("%s: order = %v", name, got)
+		}
+		if !loaded.Staticos[0].Include[1].Exclude || loaded.Staticos[0].Include[2].Dest != "./" {
+			t.Fatalf("%s: rules = %#v", name, loaded.Staticos[0].Include)
+		}
+	}
+}
+
+func TestStaticoConfigWithRepeatedSourcesIsSavedAsAnArray(t *testing.T) {
+	cfg := &Config{Project: "demo", Staticos: []StaticoConfig{{Name: "docs", Include: utils.GlobRules{{Source: "./dist"}, {Source: "./dist/*.map", Exclude: true}, {Source: "./dist/*.map"}}}}}
+	dir := t.TempDir()
+	if _, err := cfg.Save(dir, "futrou.yaml"); err != nil {
+		t.Fatal(err)
+	}
+	loaded := &Config{}
+	if _, err := loaded.Load(dir, "futrou.yaml"); err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded.Staticos[0].Include) != 3 || !loaded.Staticos[0].Include[1].Exclude || loaded.Staticos[0].Include[2].Exclude {
+		t.Fatalf("rules = %#v", loaded.Staticos[0].Include)
+	}
+}
+
+func TestStaticoConfigOtherOptionsAndTheConfigFilePath(t *testing.T) {
+	dir := t.TempDir()
+	content := `{"statico": {"docs": {"public": false, "regionId": "r", "htmlToFolders": false, "defaultFile": "/d.html", "defaultStatus": 200,
+		"fallbackFile": "/index.html", "fallbackStatus": 200,
+		"redirects": [{"from": "/old", "to": "/new", "statusCode": 301}, {"to": "https://example.com/:splat"}]}}}`
+	if err := os.WriteFile(filepath.Join(dir, "futrou.json"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, path, err := LoadConfig(dir, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	site := cfg.Staticos[0]
+	if site.Public == nil || *site.Public || site.HtmlToFolders == nil || *site.HtmlToFolders || site.FallbackFile != "/index.html" || len(site.Redirects) != 2 {
+		t.Fatalf("site = %#v", site)
+	}
+	if abs, _ := filepath.Abs(path); cfg.File != abs || cfg.BaseDir() != filepath.Dir(abs) {
+		t.Fatalf("File = %q BaseDir = %q, want the folder of %q", cfg.File, cfg.BaseDir(), abs)
+	}
+	sel := cfg.StaticoSelection(site)
+	if !sel.NoHTMLToFolders || len(sel.Ignore) != 1 || sel.Ignore[0] != cfg.File {
+		t.Fatalf("selection = %#v", sel)
+	}
+	options, err := site.VersionOptions()
+	if err != nil || options.DefaultFile != "/d.html" || options.FallbackStatus != 200 || len(options.Redirects) != 2 {
+		t.Fatalf("options = %#v err = %v", options, err)
+	}
+	if (&Config{}).BaseDir() != "." {
+		t.Fatal("a config that was not loaded from a file is relative to the current folder")
+	}
+}
+
+func TestStaticoConfigHtmlToFoldersDefaultsToOn(t *testing.T) {
+	cfg := &Config{}
+	if cfg.StaticoSelection(StaticoConfig{}).NoHTMLToFolders {
+		t.Fatal("htmlToFolders is on by default")
+	}
+	yes := true
+	if cfg.StaticoSelection(StaticoConfig{HtmlToFolders: &yes}).NoHTMLToFolders {
+		t.Fatal("htmlToFolders: true keeps them on")
+	}
+}
+
+func TestStaticoConfigVersionOptionsReportABadRedirect(t *testing.T) {
+	_, err := StaticoConfig{Name: "docs", Redirects: []statico.Redirect{{From: "/a"}}}.VersionOptions()
+	if err == nil || !strings.Contains(err.Error(), `statico "docs"`) {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestStaticoConfigRejectsInvalidFiles(t *testing.T) {
+	dir := t.TempDir()
+	for name, content := range map[string]string{
+		"status":             `{"statico": {"docs": {"defaultStatus": 204}}}`,
+		"dup":                `{"statico": [{"name": "a"}, {"name": "a"}]}`,
+		"scalar":             `{"statico": {"docs": 5}}`,
+		"include number":     `{"statico": {"docs": {"include": {"./a": 5}}}}`,
+		"include empty dest": `{"statico": {"docs": {"include": {"./a": ""}}}}`,
+		"include escape":     `{"statico": {"docs": {"include": {"./a": "../x"}}}}`,
+		"include string":     `{"statico": {"docs": {"include": "./a"}}}`,
+		"redirect no to":     `{"statico": {"docs": {"redirects": [{"from": "/a"}]}}}`,
+		"redirect from":      `{"statico": {"docs": {"redirects": [{"from": "a", "to": "/b"}]}}}`,
+		"redirect status":    `{"statico": {"docs": {"redirects": [{"from": "/a", "to": "/b", "statusCode": 200}]}}}`,
+	} {
+		if err := os.WriteFile(filepath.Join(dir, "futrou.json"), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := (&Config{}).Load(dir, "futrou.json"); err == nil {
+			t.Errorf("%s: expected a validation error", name)
+		}
+	}
+}
+
+func TestStaticoIncludeOrdersFromJSONAndYAML(t *testing.T) {
+	json := jsonIncludeOrders([]byte(`{"statico": {"a": {"include": {"y": 1, "x": 2}}, "b": {"name": "b"}}}`))
+	if !reflect.DeepEqual(json["a"], []string{"y", "x"}) || len(json["b"]) != 0 {
+		t.Fatalf("orders = %v", json)
+	}
+	list := jsonIncludeOrders([]byte(`{"statico": [{"include": {"q": 1, "p": 2}}, {"include": []}]}`))
+	if !reflect.DeepEqual(list["#0"], []string{"q", "p"}) || len(list["#1"]) != 0 {
+		t.Fatalf("orders = %v", list)
+	}
+	yamlKeyed := yamlIncludeOrders([]byte("statico:\n  a:\n    include:\n      y: 1\n      x: 2\n"))
+	if !reflect.DeepEqual(yamlKeyed["a"], []string{"y", "x"}) {
+		t.Fatalf("orders = %v", yamlKeyed)
+	}
+	yamlList := yamlIncludeOrders([]byte("statico:\n  - include:\n      q: 1\n      p: 2\n"))
+	if !reflect.DeepEqual(yamlList["#0"], []string{"q", "p"}) {
+		t.Fatalf("orders = %v", yamlList)
+	}
+	for _, bad := range []string{"", "{", "[]", `{"statico": 5}`} {
+		if got := jsonIncludeOrders([]byte(bad)); len(got) != 0 {
+			t.Errorf("jsonIncludeOrders(%q) = %v", bad, got)
+		}
+	}
+	if got := yamlIncludeOrders([]byte("")); len(got) != 0 {
+		t.Errorf("yaml orders = %v", got)
+	}
+}
+
+func TestStaticoIncludeIsNormalizedToArraysInKeyOrder(t *testing.T) {
+	object := map[string]interface{}{"statico": map[string]interface{}{"docs": map[string]interface{}{
+		"include": map[string]interface{}{"b": true, "a": false, "c": "./"},
+	}}}
+	normalizeStaticoInclude(object, map[string][]string{"docs": {"c", "b", "a"}})
+	rules := object["statico"].(map[string]interface{})["docs"].(map[string]interface{})["include"].([]interface{})
+	if len(rules) != 3 {
+		t.Fatalf("rules = %v", rules)
+	}
+	for i, want := range []string{"c", "b", "a"} {
+		if _, ok := rules[i].(map[string]interface{})[want]; !ok {
+			t.Errorf("rule %d = %v, want key %s", i, rules[i], want)
+		}
+	}
+	// keys the order does not know come last, sorted
+	object = map[string]interface{}{"statico": []interface{}{map[string]interface{}{"include": map[string]interface{}{"z": true, "a": true, "m": true}}}}
+	normalizeStaticoInclude(object, map[string][]string{"#0": {"m"}})
+	got := object["statico"].([]interface{})[0].(map[string]interface{})["include"].([]interface{})
+	var keys []string
+	for _, r := range got {
+		for k := range r.(map[string]interface{}) {
+			keys = append(keys, k)
+		}
+	}
+	if !reflect.DeepEqual(keys, []string{"m", "a", "z"}) {
+		t.Fatalf("keys = %v", keys)
+	}
+	// arrays and other shapes are left alone
+	object = map[string]interface{}{"statico": []interface{}{map[string]interface{}{"include": []interface{}{"x"}}, "not an object", 5}}
+	normalizeStaticoInclude(object, nil)
+}
+
+func TestPullToleratesAnAPIWithoutStatico(t *testing.T) {
+	routes := pullFixture()
+	delete(routes, "/v2/staticos")
+	cfg := &Config{Workspace: "acme", Project: "demo"}
+	if err := cfg.Pull(routes, ""); err != nil {
+		t.Fatalf("a missing /v2/staticos must mean none: %v", err)
+	}
+	if len(cfg.Staticos) != 0 {
+		t.Fatalf("staticos = %#v", cfg.Staticos)
+	}
+}
+
+func TestProjectCommandsAreLoadedSavedAndKeptByAPull(t *testing.T) {
+	cfg := loadStaticoDoc(t, "futrou.json", `{"workspace": "acme", "project": "demo", "installCommand": "npm ci", "buildCommand": "npx astro build"}`)
+	if cfg.InstallCommand != "npm ci" || cfg.BuildCommand != "npx astro build" {
+		t.Fatalf("cfg = %#v", cfg)
+	}
+	for _, name := range []string{"futrou.json", "futrou.yaml"} {
+		dir := t.TempDir()
+		if _, err := cfg.Save(dir, name); err != nil {
+			t.Fatal(err)
+		}
+		again := &Config{}
+		if _, err := again.Load(dir, name); err != nil || again.InstallCommand != "npm ci" || again.BuildCommand != "npx astro build" {
+			t.Fatalf("%s: %#v %v", name, again, err)
+		}
+	}
+	// a pull is a snapshot of the cloud, which knows nothing about these commands
+	if err := cfg.Pull(pullFixture(), ""); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.InstallCommand != "npm ci" || cfg.BuildCommand != "npx astro build" {
+		t.Fatalf("a pull must keep the commands: %#v", cfg)
 	}
 }

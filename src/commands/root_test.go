@@ -4,10 +4,16 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"futrou-cli/src/statico"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -15,7 +21,7 @@ import (
 
 	"futrou-cli/src/constants"
 	"futrou-cli/src/logger"
-	"futrou-cli/src/services"
+	"futrou-cli/src/utils"
 
 	"github.com/urfave/cli/v2"
 )
@@ -30,6 +36,7 @@ type testServer struct {
 
 func init() {
 	openBrowserFunc = func(string) {} // never open a real browser during tests
+	statico.RetryDelay = 0            // an interrupted upload retries at once in tests
 }
 
 func newTestServer(t *testing.T) *testServer {
@@ -93,7 +100,7 @@ type cloud struct {
 	nextID   int
 }
 
-var cloudCollections = []string{"/v2/workspaces", "/v2/projects", "/v2/regions", "/v2/networks", "/v2/serverlets", "/v2/dns", "/v2/proxies", "/v2/storages", "/v2/crons"}
+var cloudCollections = []string{"/v2/workspaces", "/v2/projects", "/v2/regions", "/v2/networks", "/v2/serverlets", "/v2/dns", "/v2/proxies", "/v2/storages", "/v2/crons", "/v2/staticos"}
 
 // newCloudServer returns a test server backed by a cloud that already holds
 // the workspace "acme", its project "demo" and the region "europe".
@@ -320,7 +327,7 @@ func runArgs(t *testing.T, ts *testServer, args ...string) (string, error) {
 
 // runArgsNoAuth runs without injecting credentials (tests "not logged in"
 // path). CI=true is set so requireAuth's auto-login short-circuits to
-// projectconfig.ErrCIRequiresToken instead of attempting a real interactive
+// cliconfig.ErrCIRequiresToken instead of attempting a real interactive
 // OAuth flow against the test server.
 func runArgsNoAuth(t *testing.T, ts *testServer, args ...string) (string, error) {
 	t.Helper()
@@ -609,7 +616,7 @@ func TestEveryCommandNeedsCredentials(t *testing.T) {
 
 // probeApp runs the real root app with one extra command that reports what
 // the global helpers resolve to.
-func probeApp(t *testing.T, args ...string) (apiURL, apiKey string, err error) {
+func probeApp(t *testing.T, args ...string) (apiURL, apiToken string, err error) {
 	t.Helper()
 	// The flag structs are package-level and urfave stores parsed values in
 	// them, so a value read from the environment would leak into the next run.
@@ -624,7 +631,7 @@ func probeApp(t *testing.T, args ...string) (apiURL, apiKey string, err error) {
 	}
 	app := buildApp()
 	app.Commands = []*cli.Command{withGlobalFlags(&cli.Command{Name: "probe", Action: func(c *cli.Context) error {
-		apiURL, apiKey = globalApiUrl(c), globalApiKey(c)
+		apiURL, apiToken = globalApiUrl(c), globalApiToken(c)
 		return nil
 	}})}
 	err = app.Run(append([]string{"futrou"}, args...))
@@ -638,11 +645,11 @@ func TestGlobalFlagShorthandsResolveTheAPIURL(t *testing.T) {
 		args []string
 		want string
 	}{
-		"default":                      {[]string{"probe"}, services.NormalizeApiUrl(constants.ApiUrl)},
-		"--local":                      {[]string{"--local", "probe"}, services.NormalizeApiUrl(constants.LocalApiUrl)},
-		"--dev":                        {[]string{"--dev", "probe"}, services.NormalizeApiUrl(constants.DevApiUrl)},
-		"--local after the command":    {[]string{"probe", "--local"}, services.NormalizeApiUrl(constants.LocalApiUrl)},
-		"--dev after the command":      {[]string{"probe", "--dev"}, services.NormalizeApiUrl(constants.DevApiUrl)},
+		"default":                      {[]string{"probe"}, utils.NormalizeApiUrl(constants.ApiUrl)},
+		"--local":                      {[]string{"--local", "probe"}, utils.NormalizeApiUrl(constants.LocalApiUrl)},
+		"--dev":                        {[]string{"--dev", "probe"}, utils.NormalizeApiUrl(constants.DevApiUrl)},
+		"--local after the command":    {[]string{"probe", "--local"}, utils.NormalizeApiUrl(constants.LocalApiUrl)},
+		"--dev after the command":      {[]string{"probe", "--dev"}, utils.NormalizeApiUrl(constants.DevApiUrl)},
 		"explicit url beats --local":   {[]string{"--api-url", "https://example.com/v2", "--local", "probe"}, "https://example.com"},
 		"bare host gets https":         {[]string{"--api-url", "api.example.com", "probe"}, "https://api.example.com"},
 		"loopback host:port gets http": {[]string{"--api-url", "localhost:4000", "probe"}, "http://localhost:4000"},
@@ -667,10 +674,10 @@ func unsetEnv(t *testing.T, name string) {
 func TestShorthandsStillWorkWhenTheURLVariableIsEmpty(t *testing.T) {
 	t.Setenv("FUTROU_API_URL", "")
 	t.Setenv("FUTROU_API_TOKEN", "")
-	if got, _, err := probeApp(t, "--local", "probe"); err != nil || got != services.NormalizeApiUrl(constants.LocalApiUrl) {
+	if got, _, err := probeApp(t, "--local", "probe"); err != nil || got != utils.NormalizeApiUrl(constants.LocalApiUrl) {
 		t.Fatalf("an empty FUTROU_API_URL must not disable --local: %q, %v", got, err)
 	}
-	if got, _, _ := probeApp(t, "--local", "--dev", "probe"); got != services.NormalizeApiUrl(constants.LocalApiUrl) {
+	if got, _, _ := probeApp(t, "--local", "--dev", "probe"); got != utils.NormalizeApiUrl(constants.LocalApiUrl) {
 		t.Fatalf("the first shorthand wins: %q", got)
 	}
 }
@@ -722,12 +729,12 @@ func TestGlobalFlagsWorkAfterTheCommandName(t *testing.T) {
 	}{
 		"api-url after":              {[]string{"probe", "--api-url", "localhost:4000"}, "http://localhost:4000", ""},
 		"api-url with https":         {[]string{"probe", "--api-url", "https://localhost:4000"}, "https://localhost:4000", ""},
-		"api-token after":            {[]string{"probe", "--api-token", "t"}, services.NormalizeApiUrl(constants.ApiUrl), "t"},
-		"api-key after":              {[]string{"probe", "--api-key", "k"}, services.NormalizeApiUrl(constants.ApiUrl), "k"},
+		"api-token after":            {[]string{"probe", "--api-token", "t"}, utils.NormalizeApiUrl(constants.ApiUrl), "t"},
+		"api-key after":              {[]string{"probe", "--api-key", "k"}, utils.NormalizeApiUrl(constants.ApiUrl), "k"},
 		"command flag beats root":    {[]string{"--api-url", "root.example.com", "probe", "--api-url", "leaf.example.com"}, "https://leaf.example.com", ""},
 		"root value survives":        {[]string{"--api-url", "root.example.com", "--api-token", "r", "probe"}, "https://root.example.com", "r"},
 		"--local with root url":      {[]string{"--api-url", "root.example.com", "probe", "--local"}, "https://root.example.com", ""},
-		"--local before the command": {[]string{"--local", "probe"}, services.NormalizeApiUrl(constants.LocalApiUrl), ""},
+		"--local before the command": {[]string{"--local", "probe"}, utils.NormalizeApiUrl(constants.LocalApiUrl), ""},
 	} {
 		t.Run(name, func(t *testing.T) {
 			url, key, err := probeApp(t, tc.args...)
@@ -813,9 +820,80 @@ func TestShorthandsAfterTheCommandSwitchTheAPI(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			got, _, err := probeApp(t, tc.args...)
-			if want := services.NormalizeApiUrl(tc.want); err != nil || got != want {
+			if want := utils.NormalizeApiUrl(tc.want); err != nil || got != want {
 				t.Fatalf("got %q, %v; want %q", got, err, want)
 			}
 		})
+	}
+}
+
+// Every spelling of the token flag is accepted on the app and on every command,
+// and the token is read from the nearest one given.
+func TestEveryTokenFlagNameIsAcceptedEverywhere(t *testing.T) {
+	for _, name := range apiTokenFlagNames {
+		for _, args := range [][]string{{"--" + name, "tok", "probe"}, {"probe", "--" + name, "tok"}} {
+			if _, got, err := probeApp(t, args...); err != nil || got != "tok" {
+				t.Errorf("%v: token %q, err %v", args, got, err)
+			}
+		}
+	}
+	if _, got, _ := probeApp(t, "--api-token", "outer", "probe", "--api-key", "inner"); got != "inner" {
+		t.Errorf("the nearest token wins: %q", got)
+	}
+}
+
+// A command's Go variable is named after the command, singular like the command
+// (serverletCommand for `serverlet`), so grepping for a command by its name finds it.
+func TestCommandVariablesAreNamedAfterTheirCommand(t *testing.T) {
+	files, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	checked := 0
+	for _, path := range files {
+		if strings.HasSuffix(path, "_test.go") {
+			continue
+		}
+		file, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, decl := range file.Decls {
+			gen, ok := decl.(*ast.GenDecl)
+			if !ok || gen.Tok != token.VAR {
+				continue
+			}
+			for _, spec := range gen.Specs {
+				value := spec.(*ast.ValueSpec)
+				for i, name := range value.Names {
+					stem := strings.TrimSuffix(name.Name, "Command")
+					if stem == name.Name || stem == "" || strings.ToLower(stem) != stem || i >= len(value.Values) {
+						continue // not a one-word command variable
+					}
+					unary, ok := value.Values[i].(*ast.UnaryExpr)
+					if !ok {
+						continue
+					}
+					literal, ok := unary.X.(*ast.CompositeLit)
+					if !ok {
+						continue
+					}
+					for _, element := range literal.Elts {
+						pair, ok := element.(*ast.KeyValueExpr)
+						if !ok || pair.Key.(*ast.Ident).Name != "Name" {
+							continue
+						}
+						commandName, _ := strconv.Unquote(pair.Value.(*ast.BasicLit).Value)
+						checked++
+						if commandName != stem {
+							t.Errorf("%s is the variable of the command %q: name it %sCommand", name.Name, commandName, commandName)
+						}
+					}
+				}
+			}
+		}
+	}
+	if checked < 15 {
+		t.Errorf("only %d command variables were checked: the scan is broken", checked)
 	}
 }

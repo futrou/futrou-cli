@@ -26,7 +26,7 @@ func downServer(t *testing.T) (*testServer, *[]string) {
 	var deleted []string
 	ts.on("GET", "/v2/projects", respond(http.StatusOK, []any{map[string]any{"id": "proj-1", "name": "demo", "workspaceId": downWorkspaceID}}))
 	collections := map[string]string{
-		"/v2/crons": "cron", "/v2/proxies": "proxy", "/v2/serverlets": "serverlet",
+		"/v2/crons": "cron", "/v2/staticos": "statico", "/v2/proxies": "proxy", "/v2/serverlets": "serverlet",
 		"/v2/storages": "storage", "/v2/networks": "network", "/v2/dns": "dns",
 	}
 	for path, name := range collections {
@@ -56,9 +56,9 @@ func TestDownDeletesEverythingThenTheProject(t *testing.T) {
 
 	out, err := runArgs(t, ts, "down", "--yes")
 	assertNoError(t, err)
-	assertContains(t, out, "Delete (7)")
-	assertContains(t, out, "Deleted 6 resource(s) and project")
-	want := "cron,proxy,serverlet,storage,network,dns,project"
+	assertContains(t, out, "Delete (8)")
+	assertContains(t, out, "Deleted 7 resource(s) and project")
+	want := "cron,proxy,statico,serverlet,storage,network,dns,project"
 	if got := strings.Join(*deleted, ","); got != want {
 		t.Fatalf("delete order = %s, want %s", got, want)
 	}
@@ -83,7 +83,7 @@ func TestDownAliasesAndCI(t *testing.T) {
 			if strings.Contains(out, "[y/N]") {
 				t.Fatalf("must not prompt: %s", out)
 			}
-			if len(*deleted) != 7 {
+			if len(*deleted) != 8 {
 				t.Fatalf("expected 7 deletes, got %v", *deleted)
 			}
 		})
@@ -94,7 +94,7 @@ func TestDownConfirmation(t *testing.T) {
 	for name, tc := range map[string]struct {
 		stdin   string
 		deleted int
-	}{"y": {"y\n", 7}, "yes": {"yes\n", 7}, "enter": {"\n", 0}, "n": {"n\n", 0}} {
+	}{"y": {"y\n", 8}, "yes": {"yes\n", 8}, "enter": {"\n", 0}, "n": {"n\n", 0}} {
 		t.Run(name, func(t *testing.T) {
 			writeDownConfig(t)
 			t.Setenv("CI", "")
@@ -117,7 +117,7 @@ func TestDownDryRunDeletesNothing(t *testing.T) {
 
 	out, err := runArgs(t, ts, "down", "--dry-run", "--yes")
 	assertNoError(t, err)
-	assertContains(t, out, "Delete (7)")
+	assertContains(t, out, "Delete (8)")
 	if len(*deleted) != 0 {
 		t.Fatalf("dry run must not delete: %v", *deleted)
 	}
@@ -179,7 +179,11 @@ func TestDownProjectSelectsTheMatchingConfigFile(t *testing.T) {
 	out, err := runArgs(t, ts, "down", "--project", "prod", "--yes")
 	assertNoError(t, err)
 	assertContains(t, out, "Using config: futrou.prod.json")
-	if len(*deleted) != 7 {
+	ts, deleted = downServer(t)
+	out, err = runArgs(t, ts, "down", "--project-name", "prod", "--yes")
+	assertNoError(t, err)
+	assertContains(t, out, "Using config: futrou.prod.json")
+	if len(*deleted) != 8 {
 		t.Fatalf("the project of futrou.prod.json must be torn down: %v", *deleted)
 	}
 }

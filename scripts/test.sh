@@ -10,5 +10,8 @@ set -euo pipefail
 # go test -v ./src/vips/
 # go run -mod=mod gotest.tools/gotestsum@v1.12.2 -- -cover -v ./src/vips/
 # go run -mod=mod gotest.tools/gotestsum@v1.12.2 tool slowest -- -v ./src/...
+echo "Running install script tests..."
+bash "$(dirname "${BASH_SOURCE[0]}")/test-install.sh"
+
 echo "Running tests..."
 go run -mod=mod gotest.tools/gotestsum@v1.13.0 -- -cover -v ./src/... -timeout=120s

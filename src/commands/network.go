@@ -19,12 +19,9 @@ var networkCommand = &cli.Command{
 					return err
 				}
 				var result interface{}
-				status, err := client.RequestInto("GET", "/v2/networks", nil, &result)
+				_, err = client.RequestInto("GET", "/v2/networks", nil, &result)
 				if err != nil {
 					return err
-				}
-				if status >= 400 {
-					return fmt.Errorf("request failed with status %d", status)
 				}
 				if isJSON(c) {
 					return printJSON(result)
@@ -54,11 +51,7 @@ var networkCommand = &cli.Command{
 				projectFlag,
 			},
 			Action: func(c *cli.Context) error {
-				workspaceID, err := resolveWorkspaceID(c)
-				if err != nil {
-					return err
-				}
-				projectID, err := resolveProjectID(c, workspaceID)
+				workspaceID, projectID, err := resolveScope(c)
 				if err != nil {
 					return err
 				}
@@ -84,12 +77,9 @@ var networkCommand = &cli.Command{
 					body["regionId"] = v
 				}
 				var result interface{}
-				status, err := client.RequestInto("POST", "/v2/networks", body, &result)
+				_, err = client.RequestInto("POST", "/v2/networks", body, &result)
 				if err != nil {
 					return err
-				}
-				if status >= 400 {
-					return fmt.Errorf("request failed with status %d", status)
 				}
 				if isJSON(c) {
 					return printJSON(result)
@@ -131,12 +121,9 @@ var networkCommand = &cli.Command{
 					return fmt.Errorf("no fields to update")
 				}
 				var result interface{}
-				status, err := client.RequestInto("PATCH", "/v2/networks/"+id, body, &result)
+				_, err = client.RequestInto("PATCH", "/v2/networks/"+id, body, &result)
 				if err != nil {
 					return err
-				}
-				if status >= 400 {
-					return fmt.Errorf("request failed with status %d", status)
 				}
 				if isJSON(c) {
 					return printJSON(result)
@@ -149,28 +136,7 @@ var networkCommand = &cli.Command{
 			Name:      "rm",
 			Usage:     "Delete a network",
 			ArgsUsage: "<id>",
-			Action: func(c *cli.Context) error {
-				id := c.Args().First()
-				if id == "" {
-					return fmt.Errorf("network ID required")
-				}
-				client, err := requireAuth(c)
-				if err != nil {
-					return err
-				}
-				status, err := client.RequestInto("DELETE", "/v2/networks/"+id, nil, nil)
-				if err != nil {
-					return err
-				}
-				if status >= 400 {
-					return fmt.Errorf("request failed with status %d", status)
-				}
-				if isJSON(c) {
-					return printJSON(map[string]string{"status": "deleted"})
-				}
-				fmt.Println("✓ Network deleted")
-				return nil
-			},
+			Action:    rmAction("network", "/v2/networks"),
 		},
 		{
 			Name:      "devices",
@@ -203,12 +169,9 @@ func networkRequest(c *cli.Context, method, pathFmt string, body interface{}) er
 		return err
 	}
 	var result interface{}
-	status, err := client.RequestInto(method, fmt.Sprintf(pathFmt, id), body, &result)
+	_, err = client.RequestInto(method, fmt.Sprintf(pathFmt, id), body, &result)
 	if err != nil {
 		return err
-	}
-	if status >= 400 {
-		return fmt.Errorf("request failed with status %d", status)
 	}
 	return printJSON(result)
 }

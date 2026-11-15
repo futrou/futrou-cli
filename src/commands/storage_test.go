@@ -629,7 +629,7 @@ func TestStorageSync_localPathIsFileErrors(t *testing.T) {
 	assertError(t, err)
 }
 
-func TestStoragePathAndGlobRoot(t *testing.T) {
+func TestStoragePath(t *testing.T) {
 	for in, want := range map[[3]string]string{
 		{"files", "st-1", ""}:         "/v2/storages/st-1/files",
 		{"files", "st-1", "/"}:        "/v2/storages/st-1/files",
@@ -639,19 +639,6 @@ func TestStoragePathAndGlobRoot(t *testing.T) {
 	} {
 		if got := storagePath(in[0], in[1], in[2]); got != want {
 			t.Errorf("storagePath%v = %q, want %q", in, got, want)
-		}
-	}
-	for in, want := range map[string]string{
-		"a/b/*.txt":  "a/b",
-		"*.txt":      "",
-		"a/**/c":     "a",
-		"/abs/*":     "/abs",
-		"/*.log":     "/",
-		"plain/path": "plain/path",
-		"a/b?/c":     "a",
-	} {
-		if got := globRoot(in); got != want {
-			t.Errorf("globRoot(%q) = %q, want %q", in, got, want)
 		}
 	}
 }
@@ -697,7 +684,7 @@ func TestResolveLocalTargets(t *testing.T) {
 	if _, err := resolveLocalTargets(filepath.Join(dir, "missing", "*.txt")); err == nil {
 		t.Fatal("a glob below a missing directory must fail")
 	}
-	if _, err := walkLocalDir(filepath.Join(dir, "missing"), ""); err == nil {
+	if _, err := walkLocalDir(filepath.Join(dir, "missing")); err == nil {
 		t.Fatal("walking a missing directory must fail")
 	}
 }

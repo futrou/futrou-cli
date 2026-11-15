@@ -15,7 +15,7 @@ import (
 
 // requireAuth returns an authenticated ApiClient, transparently running an
 // interactive login if no token is available (CI=true short-circuits to
-// projectconfig.ErrCIRequiresToken instead of attempting one).
+// cliconfig.ErrCIRequiresToken instead of attempting one).
 //
 // requireAuth can block for up to the login timeout (several minutes) if
 // it triggers an interactive login — call it as early as practical in a
@@ -40,7 +40,7 @@ func requireAuth(c *cli.Context) (*services.ApiClient, error) {
 		}
 	}
 
-	token, err := cfg.EnsureLoggedIn(apiUrl, globalApiKey(c), promptSelectWorkspace, openBrowserFunc, onAuthURL, loginTimeout)
+	token, err := cfg.EnsureLoggedIn(apiUrl, globalApiToken(c), nil, openBrowserFunc, onAuthURL, loginTimeout)
 
 	if interactive && countdownDone != nil {
 		close(stopCountdown)

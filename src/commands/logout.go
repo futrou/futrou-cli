@@ -4,22 +4,23 @@ import (
 	"fmt"
 
 	"futrou-cli/src/cliconfig"
-	"futrou-cli/src/services"
+	"futrou-cli/src/logger"
+	"futrou-cli/src/utils"
 
 	"github.com/urfave/cli/v2"
 )
 
 var logoutCommand = &cli.Command{
 	Name:  "logout",
-	Usage: "Log out from Futrou Cloud on this machine",
+	Usage: "Log out from Futrou Cloud: destroys the token at the API and removes it from this machine",
 	Action: func(c *cli.Context) error {
-		apiUrl := services.NormalizeApiUrl(globalApiUrl(c))
+		apiUrl := utils.NormalizeApiUrl(globalApiUrl(c))
 		cfg, err := cliconfig.Load()
 		if err != nil {
 			return fmt.Errorf("logout failed: %w", err)
 		}
 
-		wasLoggedIn, err := cfg.Logout(apiUrl)
+		wasLoggedIn, revokeErr, err := cfg.Logout(apiUrl)
 		if err != nil {
 			return fmt.Errorf("logout failed: %w", err)
 		}
@@ -32,8 +33,11 @@ var logoutCommand = &cli.Command{
 			return nil
 		}
 
+		if revokeErr != nil {
+			logger.Warn("the token could not be destroyed at %s (%v): it was removed from this machine only", apiUrl, revokeErr)
+		}
 		if isJSON(c) {
-			return printJSON(map[string]string{"status": "logged out"})
+			return printJSON(map[string]interface{}{"status": "logged out", "revoked": revokeErr == nil})
 		}
 		fmt.Println("✓ Logged out")
 		return nil

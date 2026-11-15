@@ -28,7 +28,7 @@ npx futrou --help
 ```bash
 futrou login                      # opens the browser to sign in
 futrou login --workspace acme     # also select the default workspace
-futrou whoami                     # show who you are logged in as
+futrou whoami                     # show the user (or API key) you are logged in as, and the workspace
 futrou logout
 
 # Or use env vars / flags instead of stored credentials
@@ -79,6 +79,8 @@ futrou whoami
 
 Describe the project in `futrou.json`, `futrou.js`/`.cjs`/`.mjs`/`.ts` or `futrou.yaml`/`.yml` in your project root. The CLI uses the first one it finds, in that order, and as a last resort a Docker Compose file (`compose.yaml`, `compose.yml`, `docker-compose.yaml`, `docker-compose.yml`), which is converted to the same structure; YAML is converted to the equivalent JSON and validated the same way. When the CLI updates the config (`config pull`, lock refresh after a deploy) it writes it back in the same format, JSON or YAML; JS/TS configs are code and are never rewritten. Resources are arrays, or objects keyed by name like Docker Compose services (`serverlets: { web: { image: nginx } }`; the key is the domain for `proxies` and `dns`, and a `name` inside an item wins); `networks` are created before the serverlets that join them. The same project in each format, with every supported option (also in `examples/`):
 
+**Install and build.** `installCommand` (for example `npm ci`) and `buildCommand` (for example `npx astro build`) run in the folder of the config before `futrou deploy` or `futrou statico deploy` does anything else, with their output streamed. `installCommand` runs once per device and project folder (again when it changes or fails), `buildCommand` before every deploy, also with `--dry-run`; a failing command stops the deploy before any request. With them set, `futrou deploy` alone builds and deploys.
+
 #### futrou.json
 
 <!-- example:futrou.json:start -->
@@ -88,6 +90,8 @@ Describe the project in `futrou.json`, `futrou.js`/`.cjs`/`.mjs`/`.ts` or `futro
   "$schema": "https://futrou.com/futrou.schema.json",
   "workspace": "acme",
   "project": "website",
+  "installCommand": "npm ci",
+  "buildCommand": "npx astro build",
   "region": "<region-name-or-id>",
   "networks": {
     "backend": {
@@ -100,6 +104,24 @@ Describe the project in `futrou.json`, `futrou.js`/`.cjs`/`.mjs`/`.ts` or `futro
     "uploads": {
       "storagePlanId": "<storage-plan-id>",
       "public": false
+    }
+  },
+  "statico": {
+    "docs": {
+      "regionId": "<region-id>",
+      "public": true,
+      "include": {
+        "./dist": true,
+        "./extra/robots.txt": "./",
+        "./assets": true,
+        "./dist/*.{map,ts}": false,
+        "./dist/drafts": false
+      },
+      "htmlToFolders": true,
+      "defaultFile": "/index.html",
+      "defaultStatus": 200,
+      "fallbackFile": "/404.html",
+      "fallbackStatus": 404
     }
   },
   "serverlets": {
@@ -239,6 +261,8 @@ Describe the project in `futrou.json`, `futrou.js`/`.cjs`/`.mjs`/`.ts` or `futro
 $schema: https://futrou.com/futrou.schema.json
 workspace: acme # workspace name or ID
 project: website # project name or ID; the deploy target
+installCommand: npm ci # runs once on a device before the first deploy (again when it changes)
+buildCommand: npx astro build # runs before every futrou deploy / futrou statico deploy; a failure stops the deploy
 region: <region-name-or-id> # default region (name or ID) of every resource below
 
 networks:
@@ -251,6 +275,26 @@ storages:
   uploads:
     storagePlanId: <storage-plan-id>
     public: false
+
+statico:
+  docs:
+    regionId: <region-id> # overrides the top-level region
+    public: true # default true; false = answers only to a request with an API token
+    # The files, as an object whose keys run in order: a file, folder or glob (relative to
+    # this file, or absolute). true: a folder's files go to the root, a file or glob keeps its
+    # path. A destination puts it there ("./" is the root). false leaves out what it matches from what was selected so far.
+    # Redirects: put a _redirects file (Cloudflare Pages syntax) at the root of the website; it is read, not uploaded.
+    include:
+      ./dist: true
+      ./extra/robots.txt: ./
+      ./assets: true
+      ./dist/*.{map,ts}: false
+      ./dist/drafts: false
+    htmlToFolders: true # also copy page.html as page/index.html (default true)
+    defaultFile: /index.html
+    defaultStatus: 200
+    fallbackFile: /404.html
+    fallbackStatus: 404
 
 serverlets:
   db:
@@ -359,6 +403,8 @@ export default {
   "$schema": "https://futrou.com/futrou.schema.json",
   "workspace": "acme",
   "project": "website",
+  "installCommand": "npm ci",
+  "buildCommand": "npx astro build",
   "region": region,
   "networks": {
     "backend": {
@@ -371,6 +417,24 @@ export default {
     "uploads": {
       "storagePlanId": "<storage-plan-id>",
       "public": false
+    }
+  },
+  "statico": {
+    "docs": {
+      "regionId": "<region-id>",
+      "public": true,
+      "include": {
+        "./dist": true,
+        "./extra/robots.txt": "./",
+        "./assets": true,
+        "./dist/*.{map,ts}": false,
+        "./dist/drafts": false
+      },
+      "htmlToFolders": true,
+      "defaultFile": "/index.html",
+      "defaultStatus": 200,
+      "fallbackFile": "/404.html",
+      "fallbackStatus": 404
     }
   },
   "serverlets": {
@@ -611,6 +675,35 @@ futrou storage file rm <id> old/
 futrou storage sync <id> remote/ ./local-dir --dry-run
 ```
 
+### Statico (static websites)
+
+A statico website serves a folder of files (single or multi page) from `statico-<id>.<domain>` or a proxy that targets it. Each upload is a new **StaticoVersion**: only files whose sha256 differs from the served version are sent, files the selection no longer has are removed, and the switch is atomic (no downtime; the old files answer until the new version is activated, and an upload that fails changes nothing). Older versions stay for rollback. Every request, uploads included, uses the CLI's normal API token; Cloud checks it and forwards the files to the node, so the CLI never holds a node credential.
+
+**Selecting files.** `include` is an object whose keys run in order. A key is a file, a folder or a glob, relative to the config file (the current directory on the command line) or absolute; `{js,css}` and `**` work. Its value is `true` (include it: a folder's files land at the root of the website, a file or glob keeps its path relative to the config), a destination in the website (`"./"` is the root: a folder's files land below it, a file with a name as destination is renamed) or `false` (leave out what it matches from the files selected so far). So `{"./dist": "./", "./dist/*.map": false, "./dist/drafts": false}` uploads `dist` at the root without source maps and drafts. Without `include` the folder of the config is uploaded to the root. Hidden files and folders (such as `.env`, `.git` and `.futrou`) and `.map` files found in a folder or by a glob are never uploaded, so a secret cannot go up by accident; name one on purpose (`./dist/.well-known`, `./dist/app.js.map`) to include it. The config file is never uploaded either, and links are not followed.
+
+**Pages.** (`htmlToFolders`, on by default.) Every `page.html` or `page.htm` is also copied as `page/index.html` (and `index.htm` as `index.html`) unless that path exists, so a proxy serves `/page` (`htmlToFolders: false` or `--html-to-folders=false` turns it off). A `_redirects` file at the root of the website uses the syntax of [Cloudflare Pages](https://developers.cloudflare.com/pages/configuration/redirects/): `source destination [status]` per line, `#` comments, `:name` placeholders, a `*` splat used as `:splat`, status 301, 302 (default), 303, 307 or 308. It sets the redirects of the version after the version is created and is not uploaded; lines that cannot be converted (status 200 proxying, queries in the source) are reported as warnings and skipped. Prefer the `_redirects` file; `redirects` in `futrou.json` (`{"from": "/old", "to": "/new", "statusCode": 301}`, `from` optional) is also accepted and comes first.
+
+**Staging.** The selected files are copied to `.futrou/statico/<name>/<version>` next to the config and uploaded from there, so a file edited during the upload cannot make a half-new version. `.futrou` is cleared at the start of every `deploy` and `statico deploy` (its `cache` folder, with the hashes and the install record, is kept; `.futrou` is made only when needed and ignores itself), and the staged files are removed when the upload worked; after a failure they stay for inspection. A terminal shows the batch being sent with a percentage per file and a total; otherwise each file is printed as it starts and finishes, with the total so far.
+
+A website declared under `statico` in `futrou.json` is uploaded by `futrou deploy` every time (the plan shows what changes: a change of the files or of how the website answers; nothing happens when the served version already has exactly these files and answers). `futrou statico deploy` with no `--include` uses the declared selection.
+
+```bash
+futrou statico deploy                                # the folder's files, to a website named like the folder
+futrou statico deploy --include ./dist --exclude './dist/*.map' --dry-run docs
+futrou statico up --include ./dist --fallback-file /index.html --fallback-status 200 docs
+futrou statico deploy --version release-2 docs       # serves the version release-2 if it exists, else uploads it
+futrou statico deploy --activate=false --include ./dist docs
+futrou statico version ls docs                       # all the versions, newest first
+futrou statico version activate --version release-1 docs   # serve that version (a rollback when it is older)
+futrou statico download docs                         # the served version as docs-<version>.tar.gz
+futrou statico download --version release-1 docs
+futrou statico ls
+futrou statico show docs
+futrou statico rm docs
+```
+
+`futrou statico deploy` (also `up`) is the only upload command: it creates the website on the first run, finds it on later ones, compares the files with the served version and sends only what changed. With no name it uses the one website `futrou.json` declares, else the name of the current folder; with no `--include` it uses the declared selection, else the whole folder at the root. `--include SOURCE[:DESTINATION]` and `--exclude SOURCE` are repeatable: includes run in the order given, then the excludes (the same as `SOURCE: false`). Other options: `--version <name>`, `--empty`, `--activate=false`, `--html-to-folders=false`, `--default-file`, `--default-status`, `--fallback-file`, `--fallback-status` (a single page app: `--fallback-file /index.html --fallback-status 200`), `--dry-run`, and `--region` and `--public=false` for a website the deploy creates. `futrou statico version ls` lists the versions and `futrou statico version activate --version <name>` serves one (`versions` and `activate` still work).
+
 ### DNS
 
 ```bash
@@ -705,13 +798,13 @@ Generated by `make build-docs`; do not edit by hand. `[...]` is optional and `<.
 ```bash
 # global options: --api-url <string>, --api-token|--api-key <string>, --log-level <string>, --local, --dev, --debug
 
-futrou deploy|up [--file|-f <string>] [--project|-p <string>] [--yes|-y] [--dry-run] [--destroy]  # Deploy or upgrade resources based on futrou.json|yaml config
-futrou down [--file|-f <string>] [--project|-p <string>] [--yes|-y] [--dry-run]                   # Deprovision every resource in the project and delete the project
-futrou login [--workspace <string>]                                                               # Log in to Futrou Cloud on this machine
-futrou logout                                                                                     # Log out from Futrou Cloud on this machine
-futrou whoami                                                                                     # Display the currently authenticated user or api token info
+futrou deploy|up [--file|-f <string>] [--project-name|-p <string>] [--yes|-y] [--dry-run] [--destroy]  # Deploy or upgrade resources based on futrou.json|yaml config
+futrou down [--file|-f <string>] [--project-name|-p <string>] [--yes|-y] [--dry-run]  # Deprovision every resource in the project and delete the project
+futrou login [--workspace <string>]                                                   # Log in to Futrou Cloud on this machine
+futrou logout                                                                         # Log out from Futrou Cloud: destroys the token at the API and removes it from this machine
+futrou whoami                                                                         # Display the logged in user (or API key) and workspace (checks that the API token is still valid)
 
-futrou config [--file|-f <string>] [--project|-p <string>]                 # Display the loaded Futrou project configuration as JSON
+futrou config [--file|-f <string>] [--project-name|-p <string>]            # Display the loaded Futrou project configuration as JSON
 futrou config init [--file|-f <string>] [--project <string>]               # Create a new Futrou project config with the default project name
 futrou config pull [--project|-p <string>] [--file|-f <string>] [--force]  # Fetch a cloud project and write it as a Futrou project config
 futrou config schema                                                       # Print the Futrou project config JSON Schema
@@ -727,7 +820,7 @@ futrou workspace update <id> [--name <string>] [--display-name <string>]        
 futrou workspace rm <id>                                                                 # Delete a workspace
 futrou workspace limit [--workspace <string>]                                            # Get resource limits for a workspace
 futrou workspace contact show [--workspace <string>]                                     # Show the workspace billing contact
-futrou workspace contact update [--workspace <string>] [--firstname <string>] [--lastname <string>] [--company <string>] [--email <string>] [--phone <string>] [--street-address <string>] [--city <string>] [--postal-code <string>] [--country <string>]  # Update the workspace billing contact
+futrou workspace contact update [--workspace <string>] [--first-name <string>] [--last-name <string>] [--company <string>] [--email <string>] [--phone <string>] [--street-address <string>] [--city <string>] [--postal-code <string>] [--country <string>]  # Update the workspace billing contact
 futrou workspace user ls [--workspace <string>]                                          # List users in a workspace
 futrou workspace user show <workspace-user-id> [--workspace <string>]                    # Show a user in a workspace
 futrou workspace user add [--workspace <string>] --user-id <string> [--role <string>]    # Add a user to a workspace
@@ -740,13 +833,13 @@ futrou project create --name <string> [--display-name <string>] [--workspace <st
 futrou project update <id> [--name <string>] [--display-name <string>]                  # Update a project
 futrou project rm <id>                                                                  # Delete a project
 
-futrou server ls [--region <string>]                                                              # List servers
-futrou server show <id>                                                                           # Show a server by ID
-futrou server create --name <string> [--region <string>] [--workspace <string>]                   # Create a server in the workspace
+futrou server ls [--region <string>]                                                           # List servers
+futrou server show <id>                                                                        # Show a server by ID
+futrou server create --name <string> [--region <string>] [--workspace <string>]                # Create a server in the workspace
 futrou server update <id> [--name <string>] [--ipv4 <string>] [--ipv6 <string>] [--api-port <string>]  # Update a server
-futrou server rm <id>                                                                             # Delete a server
-futrou server metrics <id>                                                                        # Show server metrics
-futrou server logs <id> [--type <string>] [--id <string>] [--instance-id <string>] [LOG-OPTIONS]  # View server logs
+futrou server rm <id>                                                                          # Delete a server
+futrou server metrics <id>                                                                     # Show server metrics
+futrou server logs <id> [--type <string>] [--id <string>] [--instance <string>] [LOG-OPTIONS]  # View server logs
 
 futrou serverlet ls                                                                  # List all serverlets
 futrou serverlet show <id>                                                           # Show a serverlet by ID
@@ -820,6 +913,15 @@ futrou storage file mkdir <storage-id> <path>                                   
 futrou storage file move <storage-id> <path> <destination>                                         # Move or rename a file or folder in a storage
 futrou storage file rm <storage-id> <path-or-glob> [--recursive]                                   # Delete a file, folder, or glob match in a storage
 futrou storage sync <storage-id> [remote-path] [local-dir] [--dry-run]                             # Two-way sync between a local directory and a storage path by modification time
+
+futrou statico ls [--workspace <string>] [--project <string>]                                       # List statico websites (defaults to all you can see; --workspace/--project or futrou.json narrow it)
+futrou statico show <name|id> [--workspace <string>] [--project <string>]                           # Show a statico website by name or ID, with its versions
+futrou statico rm <name|id> [--workspace <string>] [--project <string>]                             # Delete a statico website with all its versions and files
+futrou statico deploy|up [name|id] [--workspace <string>] [--project <string>] [--include|-i <string>...] [--exclude|-e <string>...] [--version <string>] [--empty] [--activate=false] [--html-to-folders=false] [--default-file <string>] [--default-status <int>] [--fallback-file <string>] [--fallback-status <int>] [--dry-run] [--region <string>] [--public=false]  # Upload files as a new version of a statico website and serve it (the first deploy creates the website; the name defaults to the folder)
+futrou statico version [name|id] [--workspace <string>] [--project <string>]                        # List and serve the versions of a statico website
+futrou statico version ls [name|id] [--workspace <string>] [--project <string>]                     # List all the versions of a statico website, newest first
+futrou statico version activate [name|id] [--workspace <string>] [--project <string>] --version <string>  # Serve a version of a statico website (an older one is a rollback)
+futrou statico download [name|id] [--workspace <string>] [--project <string>] [--version <string>]  # Download a version of a statico website (the served one by default) as <name>-<version>.tar.gz
 
 futrou logs <name-or-id> [--type|-t <string>] [--instance <string>] [--ls] [LOG-OPTIONS]  # Browse logs of all services
 futrou upgrade [version]                                                                  # Upgrade Futrou CLI to the latest or a specific version

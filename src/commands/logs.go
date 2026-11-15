@@ -35,9 +35,9 @@ var logsCommand = &cli.Command{
 	Name:      "logs",
 	Usage:     "Browse logs of all services",
 	ArgsUsage: "<name-or-id>",
-	Description: "Looks the resource up by name or ID (serverlets by default) and prints its log entries.\n" +
+	Description: "Looks the resource up by name or ID (serverlets by default) and prints its log entries once.\n" +
 		"   Use --type to pick another resource, --instance for a single serverlet instance,\n" +
-		"   and --live=false to print once and exit.",
+		"   --live to keep following new entries and --tail to keep only the recent ones.",
 	Flags: append([]cli.Flag{
 		&cli.StringFlag{Name: "type", Aliases: []string{"t"}, Value: "serverlet", Usage: "Resource type: serverlet, proxy, dns, storage, server, monitor"},
 		&cli.StringFlag{Name: "instance", Usage: "Serverlet instance ID"},
@@ -53,12 +53,9 @@ var logsCommand = &cli.Command{
 			return err
 		}
 		var items []map[string]interface{}
-		status, err := client.RequestInto("GET", kind.path, nil, &items)
+		_, err = client.RequestInto("GET", kind.path, nil, &items)
 		if err != nil {
 			return err
-		}
-		if status >= 400 {
-			return fmt.Errorf("request failed with status %d", status)
 		}
 		if c.Bool("ls") {
 			if isJSON(c) {
@@ -124,12 +121,9 @@ func streamLogs(c *cli.Context, client *services.ApiClient, base string, opts lo
 	seen := map[string]bool{}
 	for {
 		var entries interface{}
-		status, err := client.RequestInto("GET", path, nil, &entries)
+		_, err := client.RequestInto("GET", path, nil, &entries)
 		if err != nil {
 			return err
-		}
-		if status >= 400 {
-			return fmt.Errorf("request failed with status %d", status)
 		}
 		if list, ok := entries.([]interface{}); ok && recent && !opts.hasTail && len(list) > recentLogEntries {
 			entries = list[len(list)-recentLogEntries:]

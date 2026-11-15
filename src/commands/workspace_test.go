@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"encoding/json"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -8,22 +9,30 @@ import (
 	"testing"
 )
 
-func TestLooksLikeUUID(t *testing.T) {
-	tests := []struct {
-		value string
-		want  bool
-	}{
-		{"11111111-1111-1111-1111-111111111111", true},
-		{"019ec1d7-e8d3-718d-9bb2-5aef81dc7911", true},
-		{"default", false},
-		{"my-workspace", false},
-		{"", false},
-		{"11111111111111111111111111111111", false},
+// --first-name and --last-name are the names; --firstname and --lastname keep working, hidden.
+func TestWorkspaceContactUpdateNameFlags(t *testing.T) {
+	wsID := "11111111-1111-1111-1111-111111111111"
+	for name, flags := range map[string][]string{
+		"new names": {"--first-name", "Ada", "--last-name", "L"},
+		"old names": {"--firstname", "Ada", "--lastname", "L"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			ts := newTestServer(t)
+			var body map[string]any
+			ts.on("PATCH", "/v2/workspaces/"+wsID+"/contact", func(w http.ResponseWriter, r *http.Request) {
+				_ = json.NewDecoder(r.Body).Decode(&body)
+				respond(200, map[string]any{})(w, r)
+			})
+			_, err := runArgs(t, ts, append([]string{"workspace", "contact", "update", "--workspace", wsID}, flags...)...)
+			assertNoError(t, err)
+			if body["firstname"] != "Ada" || body["lastname"] != "L" {
+				t.Errorf("body = %v", body)
+			}
+		})
 	}
-	for _, tt := range tests {
-		if got := looksLikeUUID(tt.value); got != tt.want {
-			t.Errorf("looksLikeUUID(%q) = %v, want %v", tt.value, got, tt.want)
-		}
+	help, _ := runArgs(t, newTestServer(t), "workspace", "contact", "update", "--help")
+	if strings.Contains(help, "--firstname") || strings.Contains(help, "--lastname") || !strings.Contains(help, "--first-name") {
+		t.Errorf("the help shows the old names:\n%s", help)
 	}
 }
 
@@ -183,6 +192,8 @@ func TestResolveWorkspaceID_ErrorsWithoutAnySource(t *testing.T) {
 	t.Setenv("HOME", homeDir)
 
 	ts := newTestServer(t)
+	ts.on("GET", "/v2/workspaces", respond(200, []map[string]any{}))                                                     // the account has none
+	ts.on("GET", "/v2/auth/context", respond(200, map[string]any{"user": map[string]any{"id": "u1", "email": "a@b.c"}})) // a token of no workspace
 	_, err := runArgs(t, ts, "storages", "create", "--name", "x", "--plan", "y")
 	assertError(t, err)
 	if err != nil {

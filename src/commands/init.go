@@ -57,9 +57,9 @@ var initConfigCommand = &cli.Command{
 
 		// validate or suggest: check if name is taken (if logged in)
 		apiUrl := globalApiUrl(c)
-		apiKey := globalApiKey(c)
+		apiToken := globalApiToken(c)
 		var suggestedName string
-		if client, err := services.NewApiClient(apiUrl, apiKey); err == nil && client.ApiToken() != "" {
+		if client, err := services.NewApiClient(apiUrl, apiToken); err == nil && client.ApiToken() != "" {
 			suggestedName = checkServerletName(client, name)
 		}
 		if suggestedName != "" && suggestedName != name {

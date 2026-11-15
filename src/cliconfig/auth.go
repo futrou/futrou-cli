@@ -1,7 +1,6 @@
-// Package config additions: session lifecycle (login/logout/whoami) built
-// on top of CliConfig, using raw net/http rather than the services package
-// to avoid an import cycle (services already imports cliconfig -> config).
-package config
+// Session lifecycle (login/logout) built on top of CliConfig. It uses raw
+// net/http rather than the services package, which already imports cliconfig.
+package cliconfig
 
 import (
 	"context"
@@ -15,18 +14,27 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"futrou-cli/src/constants"
+	"futrou-cli/src/logger"
+	"futrou-cli/src/utils"
 )
 
 // ErrCIRequiresToken is returned by EnsureLoggedIn (and Login, when no
 // token is available under CI) instead of attempting an interactive
 // browser flow that nobody in a CI environment could complete.
 var ErrCIRequiresToken = errors.New("not logged in — CI environment requires a non-empty --api-token (or FUTROU_API_TOKEN)")
+
+// oauthTimeout is how long one request of the login flow may take. Without it a
+// server that accepts the connection and never answers would hang `futrou login`
+// for ever; tests shorten it.
+var oauthTimeout = 30 * time.Second
+
+func oauthClient() *http.Client { return &http.Client{Timeout: oauthTimeout} }
 
 type oauthDiscovery struct {
 	AuthorizationEndpoint string `json:"authorization_endpoint"`
@@ -35,11 +43,14 @@ type oauthDiscovery struct {
 }
 
 func fetchOAuthDiscovery(apiUrl string) (*oauthDiscovery, error) {
-	resp, err := http.Get(apiUrl + "/.well-known/oauth-authorization-server")
+	resp, err := oauthClient().Get(apiUrl + "/.well-known/oauth-authorization-server")
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("status %d", resp.StatusCode)
+	}
 	var d oauthDiscovery
 	if err := json.NewDecoder(resp.Body).Decode(&d); err != nil {
 		return nil, err
@@ -55,11 +66,14 @@ func registerClient(registrationEndpoint string) (string, error) {
 		"response_types": []string{"code"},
 		"logo_uri":       constants.LogoUrl,
 	})
-	resp, err := http.Post(registrationEndpoint, "application/json", strings.NewReader(string(body)))
+	resp, err := oauthClient().Post(registrationEndpoint, "application/json", strings.NewReader(string(body)))
 	if err != nil {
 		return "", err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return "", fmt.Errorf("registration failed with status %d", resp.StatusCode)
+	}
 	var reg struct {
 		ClientID string `json:"client_id"`
 	}
@@ -104,14 +118,13 @@ func buildShortAuthURL(apiUrl, challenge string, port int) string {
 	return apiUrl + "/v2/auth/cli/" + url.QueryEscape(challenge) + "/" + strconv.Itoa(port)
 }
 
-// verifyShortAuthURL confirms shortURL redirects (without following it) to
-// an authorize request whose client_id, redirect_uri, and code_challenge
-// exactly match what this login expects. This guards against the short
-// link being unavailable, misconfigured, or resolving to something
-// unexpected on a server that merely shares the default API's hostname —
-// callers should fall back to the full explicit authorize URL when this
-// returns false.
-func verifyShortAuthURL(shortURL, clientID, redirectURI, challenge string) bool {
+// shortAuthClientID asks the server's short login link (without following it)
+// which client it logs in with, and returns that client_id when the link
+// redirects to an authorize request for exactly this login: the same
+// redirect_uri and code_challenge. It returns "" when the link is unavailable,
+// misconfigured or resolves to something unexpected (a server that merely shares
+// the default API's hostname), and the caller then registers its own client.
+func shortAuthClientID(shortURL, redirectURI, challenge string) string {
 	client := &http.Client{
 		Timeout: 10 * time.Second,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
@@ -120,20 +133,21 @@ func verifyShortAuthURL(shortURL, clientID, redirectURI, challenge string) bool 
 	}
 	resp, err := client.Get(shortURL)
 	if err != nil {
-		return false
+		return ""
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 300 || resp.StatusCode >= 400 {
-		return false
+		return ""
 	}
 	location, err := url.Parse(resp.Header.Get("Location"))
 	if err != nil {
-		return false
+		return ""
 	}
 	q := location.Query()
-	return q.Get("client_id") == clientID &&
-		q.Get("redirect_uri") == redirectURI &&
-		q.Get("code_challenge") == challenge
+	if q.Get("redirect_uri") != redirectURI || q.Get("code_challenge") != challenge {
+		return ""
+	}
+	return q.Get("client_id")
 }
 
 func exchangeCode(tokenEndpoint, clientID, code, verifier, redirectURI string) (token, email string, err error) {
@@ -144,11 +158,14 @@ func exchangeCode(tokenEndpoint, clientID, code, verifier, redirectURI string) (
 		"code_verifier": verifier,
 		"redirect_uri":  redirectURI,
 	})
-	resp, err := http.Post(tokenEndpoint, "application/json", strings.NewReader(string(body)))
+	resp, err := oauthClient().Post(tokenEndpoint, "application/json", strings.NewReader(string(body)))
 	if err != nil {
 		return "", "", err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return "", "", fmt.Errorf("token request failed with status %d", resp.StatusCode)
+	}
 
 	var result struct {
 		AccessToken string `json:"access_token"`
@@ -169,18 +186,11 @@ func exchangeCode(tokenEndpoint, clientID, code, verifier, redirectURI string) (
 	return result.AccessToken, result.Email, nil
 }
 
-// NormalizeApiUrl strips a trailing slash and a trailing "/v2" so that both
-// "https://api.futrou.com" and "https://api.futrou.com/v2" resolve the same.
-func NormalizeApiUrl(apiUrl string) string {
-	apiUrl = strings.TrimRight(apiUrl, "/")
-	apiUrl = strings.TrimSuffix(apiUrl, "/v2")
-	return apiUrl
-}
-
 // Workspace is a minimal workspace summary used by SelectWorkspaceFunc.
 type Workspace struct {
-	ID   string
-	Name string
+	ID        string
+	Name      string
+	CreatedAt time.Time
 }
 
 // SelectWorkspaceFunc resolves which workspace to store as the default
@@ -213,7 +223,7 @@ func (cfg *CliConfig) Login(
 	onAuthURL func(string),
 	loginTimeout time.Duration,
 ) (email string, alreadyLoggedIn bool, err error) {
-	apiUrl = NormalizeApiUrl(apiUrl)
+	apiUrl = utils.NormalizeApiUrl(apiUrl)
 
 	if cfg.TokenFor(apiUrl) != "" {
 		return "", true, nil
@@ -228,11 +238,6 @@ func (cfg *CliConfig) Login(
 		return "", false, fmt.Errorf("fetching OAuth config: %w", err)
 	}
 
-	clientID, err := registerClient(discovery.RegistrationEndpoint)
-	if err != nil {
-		return "", false, fmt.Errorf("registering OAuth client: %w", err)
-	}
-
 	verifier, challenge, err := pkce()
 	if err != nil {
 		return "", false, fmt.Errorf("generating PKCE: %w", err)
@@ -245,34 +250,70 @@ func (cfg *CliConfig) Login(
 	port := listener.Addr().(*net.TCPAddr).Port
 	redirectURI := fmt.Sprintf("http://localhost:%d/", port)
 
+	// The server's own login link names the CLI's built-in client, whose token is
+	// bound to the workspace the user picks and acts with their role there. A client
+	// registered on the fly gets no permissions at all, so it is only the fallback
+	// for a server without that link.
+	shortURL := buildShortAuthURL(apiUrl, challenge, port)
+	authURL := shortURL
+	clientID := shortAuthClientID(shortURL, redirectURI, challenge)
+	if clientID == "" {
+		clientID, err = registerClient(discovery.RegistrationEndpoint)
+		if err != nil {
+			listener.Close()
+			return "", false, fmt.Errorf("registering OAuth client: %w", err)
+		}
+		authURL = buildAuthURL(discovery.AuthorizationEndpoint, clientID, redirectURI, challenge)
+	}
+
 	codeCh := make(chan string, 1)
 	errCh := make(chan error, 1)
 
+	// send delivers the first result and drops later ones, so a repeat request
+	// (the browser also asks for /favicon.ico) can never block a handler.
+	sendCode := func(code string) {
+		select {
+		case codeCh <- code:
+		default:
+		}
+	}
+	sendErr := func(err error) {
+		select {
+		case errCh <- err:
+		default:
+		}
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		// only the redirect itself counts: anything else (favicon, probes,
+		// requests without a result) is ignored and never ends the login
+		if r.Method != http.MethodGet || r.URL.Path != "/" {
+			http.NotFound(w, r)
+			return
+		}
 		code := r.URL.Query().Get("code")
-		if errParam := r.URL.Query().Get("error"); errParam != "" {
-			errCh <- fmt.Errorf("authorization denied: %s", errParam)
+		errParam := r.URL.Query().Get("error")
+		switch {
+		case errParam != "":
+			sendErr(fmt.Errorf("authorization denied: %s", errParam))
 			fmt.Fprintf(w, "<html><body><h2>Authorization denied. You can close this window.</h2></body></html>")
-			return
+		case code != "":
+			sendCode(code)
+			fmt.Fprintf(w, "<html><body><h2>Logged in! You can close this window.</h2></body></html>")
+		default:
+			http.NotFound(w, r)
 		}
-		if code == "" {
-			errCh <- fmt.Errorf("no code in callback")
-			return
-		}
-		codeCh <- code
-		fmt.Fprintf(w, "<html><body><h2>Logged in! You can close this window.</h2></body></html>")
 	})
-	srv := &http.Server{Handler: mux}
+	srv := &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 
 	go srv.Serve(listener)
-	defer srv.Shutdown(context.Background())
-
-	authURL := buildAuthURL(discovery.AuthorizationEndpoint, clientID, redirectURI, challenge)
-	shortURL := buildShortAuthURL(apiUrl, challenge, port)
-	if verifyShortAuthURL(shortURL, clientID, redirectURI, challenge) {
-		authURL = shortURL
-	}
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		if srv.Shutdown(ctx) != nil {
+			srv.Close()
+		}
+	}()
 
 	if onAuthURL != nil {
 		onAuthURL(authURL)
@@ -296,22 +337,32 @@ func (cfg *CliConfig) Login(
 	}
 
 	cfg.ApiUrl = apiUrl
-	cfg.SetToken(apiUrl, token)
+	if err := cfg.SetToken(apiUrl, token); err != nil {
+		return "", false, fmt.Errorf("storing the token: %w", err)
+	}
 
-	if selectWorkspace != nil {
-		workspaces, err := listWorkspaces(apiUrl, token)
+	// every login ends with a default workspace, so that no command asks for one:
+	// the one named with --workspace, the one the caller's picker chooses, else
+	// the one stored before, else the oldest (or the token's own, see EnsureDefaultWorkspace)
+	workspaces, listErr := listWorkspaces(apiUrl, token)
+	if listErr != nil && workspaceFlag != "" && !utils.IsUuid(workspaceFlag) {
+		return "", false, fmt.Errorf("listing workspaces: %w", listErr)
+	}
+	chosen := ""
+	if workspaceFlag != "" || (selectWorkspace != nil && len(workspaces) > 0) {
+		picker := selectWorkspace
+		if picker == nil {
+			picker = func([]Workspace) (string, string, error) { return "", "", nil }
+		}
+		chosen, _, err = resolveOrPromptWorkspace(workspaces, workspaceFlag, picker)
 		if err != nil {
-			return "", false, fmt.Errorf("listing workspaces: %w", err)
+			return "", false, fmt.Errorf("selecting default workspace: %w", err)
 		}
-		if len(workspaces) > 0 {
-			workspaceID, _, err := resolveOrPromptWorkspace(workspaces, workspaceFlag, selectWorkspace)
-			if err != nil {
-				return "", false, fmt.Errorf("selecting default workspace: %w", err)
-			}
-			if workspaceID != "" {
-				cfg.SetDefaultWorkspace(apiUrl, workspaceID)
-			}
-		}
+	}
+	if chosen != "" {
+		cfg.SetDefaultWorkspace(apiUrl, chosen)
+	} else if _, err := cfg.EnsureDefaultWorkspace(apiUrl, token); err != nil {
+		logger.Warn("no default workspace was set (%v): pass --workspace to the commands that need one", err)
 	}
 
 	if err := Save(cfg); err != nil {
@@ -319,18 +370,6 @@ func (cfg *CliConfig) Login(
 	}
 
 	return userEmail, false, nil
-}
-
-// uuidRe matches UUID-shaped strings. Duplicated from
-// commands.looksLikeUUID (src/commands/workspace.go): config cannot import
-// commands (and shouldn't — config is a lower-level package), so this small
-// regex is kept in sync manually here, mirroring how NormalizeApiUrl is
-// duplicated across config and services for the same reason.
-var uuidRe = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
-
-// looksLikeUUID reports whether s is formatted like a UUID.
-func looksLikeUUID(s string) bool {
-	return uuidRe.MatchString(s)
 }
 
 // resolveOrPromptWorkspace resolves workspaceFlag (by UUID or name)
@@ -346,7 +385,7 @@ func resolveOrPromptWorkspace(workspaces []Workspace, workspaceFlag string, sele
 				return w.ID, w.Name, nil
 			}
 		}
-		if looksLikeUUID(workspaceFlag) {
+		if utils.IsUuid(workspaceFlag) {
 			return workspaceFlag, workspaceFlag, nil
 		}
 		return "", "", fmt.Errorf("no workspace named %q found", workspaceFlag)
@@ -356,14 +395,14 @@ func resolveOrPromptWorkspace(workspaces []Workspace, workspaceFlag string, sele
 
 // listWorkspaces fetches the caller's workspaces from apiUrl using token.
 func listWorkspaces(apiUrl, token string) ([]Workspace, error) {
-	req, err := http.NewRequest("GET", NormalizeApiUrl(apiUrl)+"/v2/workspaces", nil)
+	req, err := http.NewRequest("GET", utils.NormalizeApiUrl(apiUrl)+"/v2/workspaces", nil)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Accept", "application/json")
 
-	resp, err := (&http.Client{Timeout: 30 * time.Second}).Do(req)
+	resp, err := oauthClient().Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -373,29 +412,132 @@ func listWorkspaces(apiUrl, token string) ([]Workspace, error) {
 	}
 
 	var raw []struct {
-		Id   string `json:"id"`
-		Name string `json:"name"`
+		Id        string    `json:"id"`
+		Name      string    `json:"name"`
+		CreatedAt time.Time `json:"createdAt"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
 		return nil, err
 	}
 	workspaces := make([]Workspace, len(raw))
 	for i, w := range raw {
-		workspaces[i] = Workspace{ID: w.Id, Name: w.Name}
+		workspaces[i] = Workspace{ID: w.Id, Name: w.Name, CreatedAt: w.CreatedAt}
 	}
-	return workspaces, nil
+	return OldestFirst(workspaces), nil
 }
 
-// Logout removes the stored token and default workspace for apiUrl and
-// saves cfg. wasLoggedIn reports whether a token was present beforehand.
-func (cfg *CliConfig) Logout(apiUrl string) (wasLoggedIn bool, err error) {
-	apiUrl = NormalizeApiUrl(apiUrl)
-	wasLoggedIn = cfg.TokenFor(apiUrl) != ""
+// OldestFirst orders workspaces by creation time, the oldest first. Workspaces
+// without a creation time keep their order, after the ones that have one.
+func OldestFirst(workspaces []Workspace) []Workspace {
+	sorted := append([]Workspace(nil), workspaces...)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		a, b := sorted[i].CreatedAt, sorted[j].CreatedAt
+		switch {
+		case a.IsZero() || b.IsZero():
+			return !a.IsZero() && b.IsZero()
+		}
+		return a.Before(b)
+	})
+	return sorted
+}
+
+// tokenWorkspace is the workspace the API says the token belongs to (an API key
+// of a workspace, or the workspace of a login), or "" when it names none.
+func tokenWorkspace(apiUrl, token string) (string, error) {
+	req, err := http.NewRequest("GET", utils.NormalizeApiUrl(apiUrl)+"/v2/auth/context", nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Accept", "application/json")
+	resp, err := oauthClient().Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return "", fmt.Errorf("reading the login failed with status %d", resp.StatusCode)
+	}
+	var context struct {
+		APIToken struct {
+			WorkspaceID string `json:"workspaceId"`
+		} `json:"apiToken"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&context); err != nil {
+		return "", err
+	}
+	return context.APIToken.WorkspaceID, nil
+}
+
+// EnsureDefaultWorkspace makes sure a default workspace is stored for apiUrl and
+// returns it: the one already stored, else the oldest workspace of the account,
+// else the workspace the token itself belongs to (an account whose workspace
+// list is empty, such as a staff user or an API key, still has that one). It
+// returns "" when there is none. It changes cfg but does not save it.
+func (cfg *CliConfig) EnsureDefaultWorkspace(apiUrl, token string) (string, error) {
+	apiUrl = utils.NormalizeApiUrl(apiUrl)
+	if id := cfg.DefaultWorkspaceFor(apiUrl); id != "" {
+		return id, nil
+	}
+	id := ""
+	workspaces, listErr := listWorkspaces(apiUrl, token)
+	if len(workspaces) > 0 {
+		id = workspaces[0].ID
+	}
+	var tokenErr error
+	if id == "" {
+		id, tokenErr = tokenWorkspace(apiUrl, token)
+	}
+	if id == "" {
+		if listErr != nil {
+			return "", listErr
+		}
+		return "", tokenErr
+	}
+	cfg.SetDefaultWorkspace(apiUrl, id)
+	return id, nil
+}
+
+// RevokeToken asks the API to destroy token (RFC 7009), so a copy of it that
+// leaked is worthless. A token the API no longer knows (401/404) is already gone.
+func RevokeToken(apiUrl, token string) error {
+	body, _ := json.Marshal(map[string]string{"token": token, "token_type_hint": "access_token"})
+	req, err := http.NewRequest("POST", utils.NormalizeApiUrl(apiUrl)+"/v2/auth/oauth2/revoke", strings.NewReader(string(body)))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := oauthClient().Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusNotFound {
+		return nil
+	}
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("revoking the token failed with status %d", resp.StatusCode)
+	}
+	return nil
+}
+
+// Logout destroys the stored token at the API, then removes it and the default
+// workspace for apiUrl from cfg and saves cfg. The login is removed locally even
+// when the API could not be asked (offline): revokeErr then says the token was
+// not destroyed. wasLoggedIn reports whether a token was present beforehand.
+func (cfg *CliConfig) Logout(apiUrl string) (wasLoggedIn bool, revokeErr error, err error) {
+	apiUrl = utils.NormalizeApiUrl(apiUrl)
+	token := cfg.TokenFor(apiUrl)
+	wasLoggedIn = token != ""
+	if wasLoggedIn {
+		revokeErr = RevokeToken(apiUrl, token)
+	}
 	cfg.RemoveApiUrl(apiUrl)
 	if err := Save(cfg); err != nil {
-		return wasLoggedIn, err
+		return wasLoggedIn, revokeErr, err
 	}
-	return wasLoggedIn, nil
+	return wasLoggedIn, revokeErr, nil
 }
 
 // EnsureLoggedIn returns a usable API token for apiUrl: tokenOverride or
@@ -409,7 +551,7 @@ func (cfg *CliConfig) EnsureLoggedIn(
 	onAuthURL func(string),
 	loginTimeout time.Duration,
 ) (token string, err error) {
-	apiUrl = NormalizeApiUrl(apiUrl)
+	apiUrl = utils.NormalizeApiUrl(apiUrl)
 
 	if tokenOverride != "" {
 		return tokenOverride, nil

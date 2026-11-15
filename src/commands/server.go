@@ -28,12 +28,9 @@ var serverCommand = &cli.Command{
 					path += "?regionId=" + v
 				}
 				var result interface{}
-				status, err := client.RequestInto("GET", path, nil, &result)
+				_, err = client.RequestInto("GET", path, nil, &result)
 				if err != nil {
 					return err
-				}
-				if status >= 400 {
-					return fmt.Errorf("request failed with status %d", status)
 				}
 				if isJSON(c) {
 					return printJSON(result)
@@ -73,12 +70,9 @@ var serverCommand = &cli.Command{
 					body["workspaceId"] = workspaceID
 				}
 				var result interface{}
-				status, err := client.RequestInto("POST", "/v2/servers", body, &result)
+				_, err = client.RequestInto("POST", "/v2/servers", body, &result)
 				if err != nil {
 					return err
-				}
-				if status >= 400 {
-					return fmt.Errorf("request failed with status %d", status)
 				}
 				if isJSON(c) {
 					return printJSON(result)
@@ -117,12 +111,9 @@ var serverCommand = &cli.Command{
 					return fmt.Errorf("no fields to update")
 				}
 				var result interface{}
-				status, err := client.RequestInto("PATCH", "/v2/servers/"+id, body, &result)
+				_, err = client.RequestInto("PATCH", "/v2/servers/"+id, body, &result)
 				if err != nil {
 					return err
-				}
-				if status >= 400 {
-					return fmt.Errorf("request failed with status %d", status)
 				}
 				if isJSON(c) {
 					return printJSON(result)
@@ -135,28 +126,7 @@ var serverCommand = &cli.Command{
 			Name:      "rm",
 			Usage:     "Delete a server",
 			ArgsUsage: "<id>",
-			Action: func(c *cli.Context) error {
-				id := c.Args().First()
-				if id == "" {
-					return fmt.Errorf("server ID required")
-				}
-				client, err := requireAuth(c)
-				if err != nil {
-					return err
-				}
-				status, err := client.RequestInto("DELETE", "/v2/servers/"+id, nil, nil)
-				if err != nil {
-					return err
-				}
-				if status >= 400 {
-					return fmt.Errorf("request failed with status %d", status)
-				}
-				if isJSON(c) {
-					return printJSON(map[string]string{"status": "deleted"})
-				}
-				fmt.Println("✓ Server deleted")
-				return nil
-			},
+			Action:    rmAction("server", "/v2/servers"),
 		},
 		{
 			Name:      "metrics",
@@ -171,14 +141,18 @@ var serverCommand = &cli.Command{
 			Flags: append([]cli.Flag{
 				&cli.StringFlag{Name: "type", Usage: "Only logs of this resource type (e.g. serverlet, storage)"},
 				&cli.StringFlag{Name: "id", Usage: "Only logs of the resource with this ID"},
-				&cli.StringFlag{Name: "instance-id", Usage: "Only logs of the instance with this ID"},
+				&cli.StringFlag{Name: "instance", Usage: "Only logs of the instance with this ID"},
+				&cli.StringFlag{Name: "instance-id", Hidden: true, Usage: "Same as --instance"},
 			}, logFlags...),
 			Action: func(c *cli.Context) error {
 				extra := url.Values{}
-				for flag, key := range map[string]string{"type": "type", "id": "id", "instance-id": "instanceId"} {
+				for flag, key := range map[string]string{"type": "type", "id": "id"} {
 					if v := c.String(flag); v != "" {
 						extra.Set(key, v)
 					}
+				}
+				if v := firstSet(c, "instance", "instance-id"); v != "" {
+					extra.Set("instanceId", v)
 				}
 				return resourceLogsAction("server", "/v2/servers", logOptions{extra: extra})(c)
 			},
@@ -200,12 +174,9 @@ func serverAction(method, suffix, message string) cli.ActionFunc {
 		}
 		path := "/v2/servers/" + id + suffix
 		var result interface{}
-		status, err := client.RequestInto(method, path, nil, &result)
+		_, err = client.RequestInto(method, path, nil, &result)
 		if err != nil {
 			return err
-		}
-		if status >= 400 {
-			return fmt.Errorf("request failed with status %d", status)
 		}
 		if message != "" && !isJSON(c) {
 			fmt.Println(message)

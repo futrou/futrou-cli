@@ -6,7 +6,7 @@ import (
 	"github.com/urfave/cli/v2"
 )
 
-var projectsCommand = &cli.Command{
+var projectCommand = &cli.Command{
 	Name:  "project",
 	Usage: "Manage projects",
 	Subcommands: []*cli.Command{
@@ -19,12 +19,9 @@ var projectsCommand = &cli.Command{
 					return err
 				}
 				var result interface{}
-				status, err := client.RequestInto("GET", "/v2/projects", nil, &result)
+				_, err = client.RequestInto("GET", "/v2/projects", nil, &result)
 				if err != nil {
 					return err
-				}
-				if status >= 400 {
-					return fmt.Errorf("request failed with status %d", status)
 				}
 				if isJSON(c) {
 					return printJSON(result)
@@ -37,25 +34,7 @@ var projectsCommand = &cli.Command{
 			Name:      "show",
 			Usage:     "Show a project by ID",
 			ArgsUsage: "<id>",
-			Action: func(c *cli.Context) error {
-				id := c.Args().First()
-				if id == "" {
-					return fmt.Errorf("project ID required")
-				}
-				client, err := requireAuth(c)
-				if err != nil {
-					return err
-				}
-				var result interface{}
-				status, err := client.RequestInto("GET", "/v2/projects/"+id, nil, &result)
-				if err != nil {
-					return err
-				}
-				if status >= 400 {
-					return fmt.Errorf("request failed with status %d", status)
-				}
-				return printJSON(result)
-			},
+			Action:    showAction("project", "/v2/projects"),
 		},
 		{
 			Name:  "create",
@@ -82,12 +61,9 @@ var projectsCommand = &cli.Command{
 					body["displayName"] = v
 				}
 				var result interface{}
-				status, err := client.RequestInto("POST", "/v2/projects", body, &result)
+				_, err = client.RequestInto("POST", "/v2/projects", body, &result)
 				if err != nil {
 					return err
-				}
-				if status >= 400 {
-					return fmt.Errorf("request failed with status %d", status)
 				}
 				if isJSON(c) {
 					return printJSON(result)
@@ -125,12 +101,9 @@ var projectsCommand = &cli.Command{
 					return fmt.Errorf("no fields to update")
 				}
 				var result interface{}
-				status, err := client.RequestInto("PATCH", "/v2/projects/"+id, body, &result)
+				_, err = client.RequestInto("PATCH", "/v2/projects/"+id, body, &result)
 				if err != nil {
 					return err
-				}
-				if status >= 400 {
-					return fmt.Errorf("request failed with status %d", status)
 				}
 				if isJSON(c) {
 					return printJSON(result)
@@ -143,28 +116,7 @@ var projectsCommand = &cli.Command{
 			Name:      "rm",
 			Usage:     "Delete a project",
 			ArgsUsage: "<id>",
-			Action: func(c *cli.Context) error {
-				id := c.Args().First()
-				if id == "" {
-					return fmt.Errorf("project ID required")
-				}
-				client, err := requireAuth(c)
-				if err != nil {
-					return err
-				}
-				status, err := client.RequestInto("DELETE", "/v2/projects/"+id, nil, nil)
-				if err != nil {
-					return err
-				}
-				if status >= 400 {
-					return fmt.Errorf("request failed with status %d", status)
-				}
-				if isJSON(c) {
-					return printJSON(map[string]string{"status": "deleted"})
-				}
-				fmt.Println("✓ Project deleted")
-				return nil
-			},
+			Action:    rmAction("project", "/v2/projects"),
 		},
 	},
 }

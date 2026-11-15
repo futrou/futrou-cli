@@ -6,8 +6,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+
+	"futrou-cli/src/statico/mock"
 )
 
 func TestDeployCreatesEveryDeclaredResourceWithYes(t *testing.T) {
@@ -406,7 +409,7 @@ func projectMocks(ts *testServer, serverlets []any) {
 	ts.on("GET", "/v2/workspaces", respond(http.StatusOK, []any{map[string]any{"id": "ws-1", "name": "acme"}}))
 	ts.on("GET", "/v2/workspaces/ws-1", respond(http.StatusOK, map[string]any{"id": "ws-1", "name": "acme"}))
 	ts.on("GET", "/v2/projects", respond(http.StatusOK, []any{map[string]any{"id": "proj-1", "name": "demo", "workspaceId": "ws-1"}}))
-	for _, path := range []string{"/v2/networks", "/v2/dns", "/v2/proxies", "/v2/storages", "/v2/crons"} {
+	for _, path := range []string{"/v2/networks", "/v2/dns", "/v2/proxies", "/v2/storages", "/v2/crons", "/v2/staticos"} {
 		ts.on("GET", path, respond(http.StatusOK, []any{}))
 	}
 	ts.on("GET", "/v2/serverlets", respond(http.StatusOK, serverlets))
@@ -635,7 +638,7 @@ func TestDownWithDockerComposeProject(t *testing.T) {
 	ts, deleted := downServer(t)
 	_, err := runArgs(t, ts, "down", "--yes")
 	assertNoError(t, err)
-	if len(*deleted) != 7 {
+	if len(*deleted) != 8 {
 		t.Fatalf("expected the project to be torn down, got %v", *deleted)
 	}
 }
@@ -687,7 +690,7 @@ func storageServer(t *testing.T) (*testServer, *[]string) {
 		projects = append(projects, map[string]any{"id": "proj-" + name, "name": name, "workspaceId": "ws-1"})
 	}
 	ts.on("GET", "/v2/projects", respond(http.StatusOK, projects))
-	for _, path := range []string{"/v2/networks", "/v2/serverlets", "/v2/dns", "/v2/proxies", "/v2/crons"} {
+	for _, path := range []string{"/v2/networks", "/v2/serverlets", "/v2/dns", "/v2/proxies", "/v2/crons", "/v2/staticos"} {
 		ts.on("GET", path, respond(http.StatusOK, []any{}))
 	}
 	ts.on("GET", "/v2/storages", respond(http.StatusOK, []any{}))
@@ -711,11 +714,13 @@ func TestDeployProjectSelectsTheMatchingConfigFile(t *testing.T) {
 		file string
 		want string
 	}{
-		"no project uses futrou.json": {[]string{"deploy", "--yes"}, "futrou.json", "from-json"},
-		"--project prod":              {[]string{"deploy", "--project", "prod", "--yes"}, "futrou.prod.json", "from-prod"},
-		"-p dev reads the yaml":       {[]string{"deploy", "-p", "dev", "--yes"}, "futrou.dev.yaml", "from-dev"},
-		"unknown project falls back":  {[]string{"deploy", "-p", "qa", "--yes"}, "futrou.json", "from-json"},
-		"-f beats the project":        {[]string{"deploy", "-p", "prod", "-f", "futrou.json", "--yes"}, "futrou.json", "from-json"},
+		"no project uses futrou.json":    {[]string{"deploy", "--yes"}, "futrou.json", "from-json"},
+		"--project prod":                 {[]string{"deploy", "--project", "prod", "--yes"}, "futrou.prod.json", "from-prod"},
+		"--project-name prod":            {[]string{"deploy", "--project-name", "prod", "--yes"}, "futrou.prod.json", "from-prod"},
+		"--project-name beats --project": {[]string{"deploy", "--project-name", "prod", "--project", "dev", "--yes"}, "futrou.prod.json", "from-prod"},
+		"-p dev reads the yaml":          {[]string{"deploy", "-p", "dev", "--yes"}, "futrou.dev.yaml", "from-dev"},
+		"unknown project falls back":     {[]string{"deploy", "-p", "qa", "--yes"}, "futrou.json", "from-json"},
+		"-f beats the project":           {[]string{"deploy", "-p", "prod", "-f", "futrou.json", "--yes"}, "futrou.json", "from-json"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			dir := t.TempDir()
@@ -985,7 +990,7 @@ func TestDeployThenDestroyAndDown(t *testing.T) {
 					t.Fatal("down deletes the project")
 				}
 			}
-			for _, path := range []string{"/v2/networks", "/v2/storages", "/v2/proxies", "/v2/crons"} {
+			for _, path := range []string{"/v2/networks", "/v2/storages", "/v2/proxies", "/v2/crons", "/v2/staticos"} {
 				if len(cloud.items[path]) != 0 {
 					t.Errorf("%s still holds %v", path, cloud.items[path])
 				}
@@ -1102,4 +1107,322 @@ func TestDeployWithDNSZoneIsATwoStepProcess(t *testing.T) {
 	out, err = runArgs(t, ts, "deploy", "--yes")
 	assertNoError(t, err)
 	assertContains(t, out, "No changes")
+}
+
+// ---- deploy and down with statico websites ----
+
+const staticoProject = `{"workspace": "acme", "project": "demo", "region": "europe",
+  "statico": {"docs": {"include": {"./dist": "./", "./dist/*.map": false}, "htmlToFolders": false, "fallbackFile": "/index.html", "fallbackStatus": 200}}}`
+
+func TestDeployCreatesTheWebsiteAndUploadsItsFiles(t *testing.T) {
+	ts, _, fake := deployStaticoServer(t)
+	writeStaticoProject(t, staticoProject, map[string]string{"dist/index.html": "i", "dist/a.js": "js", "dist/a.js.map": "m"})
+
+	out, err := runArgs(t, ts, "deploy", "--dry-run")
+	assertNoError(t, err)
+	assertContains(t, out, "Create (1)")
+	assertContains(t, out, "2 file(s) selected: 2 to upload")
+	if strings.Contains(out, "Upload (") {
+		t.Fatalf("there is no separate upload step in the plan:\n%s", out)
+	}
+	if len(fake.Staticos) != 0 {
+		t.Fatal("a dry run created the website")
+	}
+	if _, err := os.Stat(".futrou"); err == nil {
+		t.Fatal("a dry run stages nothing")
+	}
+
+	out, err = runArgs(t, ts, "deploy", "--yes")
+	assertNoError(t, err)
+	assertContains(t, out, "docs: version v1 is live at https://"+mock.PublicDomain(fake.Statico("docs"))+" (2 uploaded, 0 deleted, 0 unchanged)")
+	assertContains(t, out, "uploading a.js")
+	assertContains(t, out, "uploaded index.html")
+	got := fake.ActiveFiles("docs")
+	if len(got) != 2 || got["index.html"] != "i" || got["a.js"] != "js" {
+		t.Fatalf("served = %v", got)
+	}
+	created := fake.Created[0]
+	if created["projectId"] != "proj-1" || created["regionId"] != "reg-eu" {
+		t.Fatalf("create body = %v", created)
+	}
+	for _, key := range []string{"include", "htmlToFolders", "fallbackFile", "fallbackStatus", "defaultFile", "redirects"} {
+		if _, sent := created[key]; sent {
+			t.Fatalf("version option %q was sent to the API with the website: %v", key, created)
+		}
+	}
+	if v := fake.Statico("docs").Versions[0]; v.Extra["fallbackFile"] != "/index.html" || v.Extra["fallbackStatus"] != float64(200) {
+		t.Fatalf("answers = %v", v.Extra)
+	}
+	if _, err := os.Stat(".futrou"); !os.IsNotExist(err) {
+		t.Fatal(".futrou must be empty (and removed) after a deploy that worked")
+	}
+}
+
+func TestDeployUploadsAgainOnlyWhenTheFilesChange(t *testing.T) {
+	ts, _, fake := deployStaticoServer(t)
+	dir := writeStaticoProject(t, staticoProject, map[string]string{"dist/index.html": "i"})
+	_, err := runArgs(t, ts, "deploy", "--yes")
+	assertNoError(t, err)
+
+	out, err := runArgs(t, ts, "deploy", "--yes")
+	assertNoError(t, err)
+	assertContains(t, out, "No changes")
+	if len(fake.Statico("docs").Versions) != 1 {
+		t.Fatal("a deploy of unchanged files created a version")
+	}
+
+	writeTree(t, dir, map[string]string{"dist/index.html": "changed", "dist/new.html": "n"})
+	out, err = runArgs(t, ts, "deploy", "--dry-run")
+	assertNoError(t, err)
+	assertContains(t, out, "Update (1)")
+	assertContains(t, out, `~ statico: "docs"`)
+	assertContains(t, out, "2 file(s) selected: 2 to upload")
+	if strings.Contains(out, "regionId") {
+		t.Fatalf("only the files changed, not the website:\n%s", out)
+	}
+	_, err = runArgs(t, ts, "deploy", "--yes")
+	assertNoError(t, err)
+	if got := fake.ActiveFiles("docs"); got["index.html"] != "changed" || got["new.html"] != "n" || len(fake.Statico("docs").Versions) != 2 {
+		t.Fatalf("served = %v, versions = %d", got, len(fake.Statico("docs").Versions))
+	}
+}
+
+func TestDeployChangesOfTheWebsiteAndOfItsFilesAreOneAction(t *testing.T) {
+	ts, _, fake := deployStaticoServer(t)
+	dir := writeStaticoProject(t, staticoProject, map[string]string{"dist/index.html": "i"})
+	_, err := runArgs(t, ts, "deploy", "--yes")
+	assertNoError(t, err)
+	config := `{"workspace": "acme", "project": "demo", "region": "europe", "statico": {"docs": {"public": false, "include": {"./dist": "./"}, "htmlToFolders": false}}}`
+	if err := os.WriteFile(filepath.Join(dir, "futrou.json"), []byte(config), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeTree(t, dir, map[string]string{"dist/index.html": "v2"})
+	out, err := runArgs(t, ts, "deploy", "--yes")
+	assertNoError(t, err)
+	assertContains(t, out, "Applied 1 change(s)")
+	if fake.Statico("docs").Public || fake.ActiveFiles("docs")["index.html"] != "v2" {
+		t.Fatalf("public = %v served = %v", fake.Statico("docs").Public, fake.ActiveFiles("docs"))
+	}
+}
+
+func TestDeployChangedAnswersAloneMakeANewVersion(t *testing.T) {
+	ts, _, fake := deployStaticoServer(t)
+	dir := writeStaticoProject(t, staticoProject, map[string]string{"dist/index.html": "i"})
+	_, err := runArgs(t, ts, "deploy", "--yes")
+	assertNoError(t, err)
+	config := `{"workspace": "acme", "project": "demo", "region": "europe", "statico": {"docs": {"include": {"./dist": "./", "./dist/*.map": false}, "htmlToFolders": false,
+		"fallbackFile": "/index.html", "fallbackStatus": 200, "redirects": [{"from": "/old", "to": "/new", "statusCode": 301}]}}}`
+	if err := os.WriteFile(filepath.Join(dir, "futrou.json"), []byte(config), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, err := runArgs(t, ts, "deploy", "--dry-run")
+	assertNoError(t, err)
+	assertContains(t, out, "1 redirect(s)")
+	_, err = runArgs(t, ts, "deploy", "--yes")
+	assertNoError(t, err)
+	redirects, _ := fake.Statico("docs").Versions[1].Extra["redirects"].([]interface{})
+	if len(redirects) != 1 || len(fake.Statico("docs").Versions) != 2 {
+		t.Fatalf("redirects = %v versions = %d", redirects, len(fake.Statico("docs").Versions))
+	}
+	out, err = runArgs(t, ts, "deploy", "--yes")
+	assertNoError(t, err)
+	assertContains(t, out, "No changes")
+}
+
+func TestDeployUsesTheRedirectsFileOfTheFolder(t *testing.T) {
+	ts, _, fake := deployStaticoServer(t)
+	writeStaticoProject(t, staticoProject, map[string]string{"dist/index.html": "i", "dist/_redirects": "/old /new 301\n/blog/* /news/:splat\n"})
+	out, err := runArgs(t, ts, "deploy", "--dry-run")
+	assertNoError(t, err)
+	assertContains(t, out, "2 redirect(s)")
+	_, err = runArgs(t, ts, "deploy", "--yes")
+	assertNoError(t, err)
+	if _, served := fake.ActiveFiles("docs")["_redirects"]; served {
+		t.Fatal("_redirects must not be uploaded")
+	}
+	if redirects, _ := fake.Statico("docs").Versions[0].Extra["redirects"].([]interface{}); len(redirects) != 2 {
+		t.Fatalf("redirects = %v", fake.Statico("docs").Versions[0].Extra)
+	}
+}
+
+func TestDeployWarnsAboutRedirectLinesItCannotConvert(t *testing.T) {
+	ts, _, _ := deployStaticoServer(t)
+	writeStaticoProject(t, staticoProject, map[string]string{"dist/index.html": "i", "dist/_redirects": "/a /b 200\n/c /d\n"})
+	out, err := runArgs(t, ts, "deploy", "--dry-run")
+	assertNoError(t, err)
+	assertContains(t, out, "warning: _redirects line 1")
+	assertContains(t, out, "1 redirect(s)")
+}
+
+func TestDeployIncludeRulesRunInTheOrderOfTheKeys(t *testing.T) {
+	ts, _, fake := deployStaticoServer(t)
+	config := `{"workspace": "acme", "project": "demo", "statico": {"docs": {"htmlToFolders": false, "include": {
+		"./src/index.js": true,
+		"./src/public": "./",
+		"./src/public/*.{js,css}": false,
+		"./src/public/images/*.{jpg,webp}": true}}}}`
+	writeStaticoProject(t, config, map[string]string{
+		"src/index.js": "i", "src/public/app.js": "a", "src/public/style.css": "c", "src/public/logo.svg": "l",
+		"src/public/images/a.jpg": "j", "src/public/images/b.png": "p"})
+	_, err := runArgs(t, ts, "deploy", "--yes")
+	assertNoError(t, err)
+	want := map[string]string{
+		"src/index.js": "i", "logo.svg": "l", "images/a.jpg": "j", "images/b.png": "p", "src/public/images/a.jpg": "j",
+	}
+	if got := fake.ActiveFiles("docs"); !reflect.DeepEqual(got, want) {
+		t.Fatalf("served = %v\nwant     %v", got, want)
+	}
+}
+
+func TestDeployClearsWhatEarlierRunsLeftInFutrou(t *testing.T) {
+	ts, _, _ := deployStaticoServer(t)
+	dir := writeStaticoProject(t, `{"workspace": "acme", "project": "demo"}`, nil)
+	writeTree(t, dir, map[string]string{".futrou/statico/old/v9/index.html": "stale", ".futrou/tmp/x": "x"})
+	if err := os.WriteFile(filepath.Join(dir, ".futrou", ".gitignore"), []byte("*\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := runArgs(t, ts, "deploy", "--dry-run")
+	assertNoError(t, err)
+	entries, _ := os.ReadDir(filepath.Join(dir, ".futrou"))
+	if len(entries) != 1 || entries[0].Name() != ".gitignore" {
+		t.Fatalf(".futrou holds %v after a deploy; only the .gitignore may stay", entries)
+	}
+}
+
+func TestDeployKeepsTheStagedFilesOfAFailedUploadUntilTheNextRun(t *testing.T) {
+	ts, _, fake := deployStaticoServer(t)
+	dir := writeStaticoProject(t, staticoProject, map[string]string{"dist/index.html": "v1"})
+	_, err := runArgs(t, ts, "deploy", "--yes")
+	assertNoError(t, err)
+
+	writeTree(t, dir, map[string]string{"dist/index.html": "v2"})
+	_ = fake.Statico("docs")
+	fake.FailWrites = 500
+	_, err = runArgs(t, ts, "deploy", "--yes")
+	assertError(t, err)
+	if !strings.Contains(err.Error(), `upload statico "docs"`) || !strings.Contains(err.Error(), filepath.Join(".futrou", "statico", "docs", "v2")) {
+		t.Fatalf("the error must say where the staged files are: %v", err)
+	}
+	if b, err := os.ReadFile(filepath.Join(dir, ".futrou", "statico", "docs", "v2", "index.html")); err != nil || string(b) != "v2" {
+		t.Fatalf("staged file = %q err = %v", b, err)
+	}
+	if fake.ActiveFiles("docs")["index.html"] != "v1" {
+		t.Fatal("a failed upload changed what is served")
+	}
+
+	fake.FailWrites = 0
+	_, err = runArgs(t, ts, "deploy", "--yes")
+	assertNoError(t, err)
+	if _, err := os.Stat(filepath.Join(dir, ".futrou")); !os.IsNotExist(err) {
+		t.Fatal("the next run must clear the leftovers")
+	}
+	if fake.ActiveFiles("docs")["index.html"] != "v2" {
+		t.Fatalf("served = %v", fake.ActiveFiles("docs"))
+	}
+}
+
+func TestDeployResolvesIncludesRelativeToTheConfigFile(t *testing.T) {
+	ts, _, fake := deployStaticoServer(t)
+	dir := writeStaticoProject(t, staticoProject, map[string]string{"site/dist/index.html": "i"})
+	nested := filepath.Join(dir, "site")
+	if err := os.Rename(filepath.Join(dir, "futrou.json"), filepath.Join(nested, "futrou.json")); err != nil {
+		t.Fatal(err)
+	}
+	_, err := runArgs(t, ts, "deploy", "--yes", "-f", filepath.Join(nested, "futrou.json"))
+	assertNoError(t, err)
+	if got := fake.ActiveFiles("docs"); got["index.html"] != "i" {
+		t.Fatalf("served = %v", got)
+	}
+}
+
+func TestDeployNeverUploadsTheConfigFileOrFutrou(t *testing.T) {
+	ts, _, fake := deployStaticoServer(t)
+	writeStaticoProject(t, `{"workspace": "acme", "project": "demo", "statico": {"docs": {"htmlToFolders": false}}}`, map[string]string{"index.html": "i", ".git/config": "g"})
+	_, err := runArgs(t, ts, "deploy", "--yes")
+	assertNoError(t, err)
+	if got := fake.ActiveFiles("docs"); len(got) != 1 || got["index.html"] != "i" {
+		t.Fatalf("served = %v", got)
+	}
+}
+
+func TestDeployFailsBeforeTouchingTheAPIWhenFilesAreMissing(t *testing.T) {
+	ts, c, fake := deployStaticoServer(t)
+	writeStaticoProject(t, staticoProject, map[string]string{"other.txt": "x"})
+	_, err := runArgs(t, ts, "deploy", "--yes")
+	assertError(t, err)
+	if !strings.Contains(err.Error(), `statico "docs"`) || !strings.Contains(err.Error(), "does not exist") {
+		t.Fatalf("err = %v", err)
+	}
+	if len(c.mutations()) != 0 || len(fake.Staticos) != 0 {
+		t.Fatalf("nothing may change when the files cannot be read: %v", c.mutations())
+	}
+}
+
+func TestDeployValidatesStaticoConfigBeforeTheAPI(t *testing.T) {
+	ts, c, _ := deployStaticoServer(t)
+	for name, config := range map[string]string{
+		"bad status":     `{"workspace": "acme", "project": "demo", "statico": {"a": {"defaultStatus": 204}}}`,
+		"include string": `{"workspace": "acme", "project": "demo", "statico": {"a": {"include": "dist"}}}`,
+		"include value":  `{"workspace": "acme", "project": "demo", "statico": {"a": {"include": {"./dist": 5}}}}`,
+		"include escape": `{"workspace": "acme", "project": "demo", "statico": {"a": {"include": {"./dist": "../x"}}}}`,
+		"redirect no to": `{"workspace": "acme", "project": "demo", "statico": {"a": {"redirects": [{"from": "/x"}]}}}`,
+		"redirect from":  `{"workspace": "acme", "project": "demo", "statico": {"a": {"redirects": [{"from": "x", "to": "/y"}]}}}`,
+		"duplicate":      `{"workspace": "acme", "project": "demo", "statico": [{"name": "a"}, {"name": "a"}]}`,
+		"unknown type":   `{"workspace": "acme", "project": "demo", "statico": {"a": {"public": []}}}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			writeStaticoProject(t, config, map[string]string{"x": "x"})
+			_, err := runArgs(t, ts, "deploy", "--yes")
+			assertError(t, err)
+			if len(c.mutations()) != 0 {
+				t.Fatalf("the API was changed: %v", c.mutations())
+			}
+		})
+	}
+}
+
+func TestDeployStaticoListFormAndDeletingARemovedWebsite(t *testing.T) {
+	ts, _, fake := deployStaticoServer(t)
+	writeStaticoProject(t, `{"workspace": "acme", "project": "demo", "statico": [{"name": "docs", "htmlToFolders": false}]}`, map[string]string{"index.html": "i"})
+	_, err := runArgs(t, ts, "deploy", "--yes")
+	assertNoError(t, err)
+	if got := fake.ActiveFiles("docs"); len(got) != 1 || got["index.html"] != "i" {
+		t.Fatalf("served = %v", got)
+	}
+
+	if err := os.WriteFile("futrou.json", []byte(`{"workspace": "acme", "project": "demo"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, err := runArgs(t, ts, "deploy", "--yes")
+	assertNoError(t, err)
+	assertContains(t, out, "Delete (1)")
+	if len(fake.Staticos) != 0 {
+		t.Fatal("a website removed from the config was not deleted")
+	}
+}
+
+func TestDeployCopiesPagesAsFolderIndexes(t *testing.T) {
+	ts, _, fake := deployStaticoServer(t)
+	writeStaticoProject(t, `{"workspace": "acme", "project": "demo", "statico": {"docs": {}}}`, map[string]string{"index.html": "home", "about.html": "about", "blog/post.htm": "post"})
+	_, err := runArgs(t, ts, "deploy", "--yes")
+	assertNoError(t, err)
+	got := fake.ActiveFiles("docs")
+	if got["about/index.html"] != "about" || got["blog/post/index.html"] != "post" || got["about.html"] != "about" || got["index.html"] != "home" {
+		t.Fatalf("served = %v", got)
+	}
+}
+
+func TestDownDeletesTheWebsites(t *testing.T) {
+	ts, _, fake := deployStaticoServer(t)
+	writeStaticoProject(t, staticoProject, map[string]string{"dist/index.html": "i"})
+	_, err := runArgs(t, ts, "deploy", "--yes")
+	assertNoError(t, err)
+	if len(fake.Staticos) != 1 {
+		t.Fatal("setup: the website was not created")
+	}
+	_, err = runArgs(t, ts, "down", "--yes")
+	assertNoError(t, err)
+	if len(fake.Staticos) != 0 {
+		t.Fatal("down left the website behind")
+	}
 }

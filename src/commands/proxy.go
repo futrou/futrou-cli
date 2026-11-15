@@ -6,7 +6,7 @@ import (
 	"github.com/urfave/cli/v2"
 )
 
-var proxiesCommand = &cli.Command{
+var proxyCommand = &cli.Command{
 	Name:  "proxy",
 	Usage: "Manage HTTPs/TCP/UDP proxies",
 	Subcommands: []*cli.Command{
@@ -19,12 +19,9 @@ var proxiesCommand = &cli.Command{
 					return err
 				}
 				var result interface{}
-				status, err := client.RequestInto("GET", "/v2/proxies", nil, &result)
+				_, err = client.RequestInto("GET", "/v2/proxies", nil, &result)
 				if err != nil {
 					return err
-				}
-				if status >= 400 {
-					return fmt.Errorf("request failed with status %d", status)
 				}
 				if isJSON(c) {
 					return printJSON(result)
@@ -37,25 +34,7 @@ var proxiesCommand = &cli.Command{
 			Name:      "show",
 			Usage:     "Show a proxy by ID",
 			ArgsUsage: "<id>",
-			Action: func(c *cli.Context) error {
-				id := c.Args().First()
-				if id == "" {
-					return fmt.Errorf("proxy ID required")
-				}
-				client, err := requireAuth(c)
-				if err != nil {
-					return err
-				}
-				var result interface{}
-				status, err := client.RequestInto("GET", "/v2/proxies/"+id, nil, &result)
-				if err != nil {
-					return err
-				}
-				if status >= 400 {
-					return fmt.Errorf("request failed with status %d", status)
-				}
-				return printJSON(result)
-			},
+			Action:    showAction("proxy", "/v2/proxies"),
 		},
 		{
 			Name:  "create",
@@ -86,12 +65,9 @@ var proxiesCommand = &cli.Command{
 					body["strategy"] = s
 				}
 				var result interface{}
-				status, err := client.RequestInto("POST", "/v2/proxies", body, &result)
+				_, err = client.RequestInto("POST", "/v2/proxies", body, &result)
 				if err != nil {
 					return err
-				}
-				if status >= 400 {
-					return fmt.Errorf("request failed with status %d", status)
 				}
 				if isJSON(c) {
 					return printJSON(result)
@@ -141,12 +117,9 @@ var proxiesCommand = &cli.Command{
 					return fmt.Errorf("no fields to update")
 				}
 				var result interface{}
-				status, err := client.RequestInto("PATCH", "/v2/proxies/"+id, body, &result)
+				_, err = client.RequestInto("PATCH", "/v2/proxies/"+id, body, &result)
 				if err != nil {
 					return err
-				}
-				if status >= 400 {
-					return fmt.Errorf("request failed with status %d", status)
 				}
 				if isJSON(c) {
 					return printJSON(result)
@@ -159,28 +132,7 @@ var proxiesCommand = &cli.Command{
 			Name:      "rm",
 			Usage:     "Delete a proxy",
 			ArgsUsage: "<id>",
-			Action: func(c *cli.Context) error {
-				id := c.Args().First()
-				if id == "" {
-					return fmt.Errorf("proxy ID required")
-				}
-				client, err := requireAuth(c)
-				if err != nil {
-					return err
-				}
-				status, err := client.RequestInto("DELETE", "/v2/proxies/"+id, nil, nil)
-				if err != nil {
-					return err
-				}
-				if status >= 400 {
-					return fmt.Errorf("request failed with status %d", status)
-				}
-				if isJSON(c) {
-					return printJSON(map[string]string{"status": "deleted"})
-				}
-				fmt.Println("✓ Proxy deleted")
-				return nil
-			},
+			Action:    rmAction("proxy", "/v2/proxies"),
 		},
 		{
 			Name:      "purge",
@@ -195,12 +147,9 @@ var proxiesCommand = &cli.Command{
 				if err != nil {
 					return err
 				}
-				status, err := client.RequestInto("POST", "/v2/proxies/"+id+"/purge", nil, nil)
+				_, err = client.RequestInto("POST", "/v2/proxies/"+id+"/purge", nil, nil)
 				if err != nil {
 					return err
-				}
-				if status >= 400 {
-					return fmt.Errorf("request failed with status %d", status)
 				}
 				if isJSON(c) {
 					return printJSON(map[string]string{"status": "purged"})
@@ -223,12 +172,9 @@ var proxiesCommand = &cli.Command{
 					return err
 				}
 				var result interface{}
-				status, err := client.RequestInto("GET", "/v2/proxies/"+id+"/metrics", nil, &result)
+				_, err = client.RequestInto("GET", "/v2/proxies/"+id+"/metrics", nil, &result)
 				if err != nil {
 					return err
-				}
-				if status >= 400 {
-					return fmt.Errorf("request failed with status %d", status)
 				}
 				return printJSON(result)
 			},

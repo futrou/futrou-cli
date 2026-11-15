@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/urfave/cli/v2"
 )
 
 func TestLogsByName(t *testing.T) {
@@ -222,5 +224,22 @@ func TestFormatLogEntry(t *testing.T) {
 				t.Fatalf("got %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+// Logs print once unless --live asks to follow them; the help must say so.
+func TestLogsHelpDescribesTheRealDefaults(t *testing.T) {
+	if strings.Contains(logsCommand.Description, "--live=false") {
+		t.Error("the help tells to turn off --live, which is off by default")
+	}
+	for _, want := range []string{"once", "--live", "--tail"} {
+		if !strings.Contains(logsCommand.Description, want) {
+			t.Errorf("the help does not mention %q: %s", want, logsCommand.Description)
+		}
+	}
+	for _, flag := range logsCommand.Flags {
+		if bf, ok := flag.(*cli.BoolFlag); ok && (bf.Name == "live" || bf.Name == "tail") && bf.Value {
+			t.Errorf("--%s must be off by default", bf.Name)
+		}
 	}
 }

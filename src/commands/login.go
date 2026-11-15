@@ -8,11 +8,9 @@ import (
 	"time"
 
 	"futrou-cli/src/cliconfig"
-	projectconfig "futrou-cli/src/config"
 	"futrou-cli/src/logger"
-	"futrou-cli/src/services"
+	"futrou-cli/src/utils"
 
-	"github.com/manifoldco/promptui"
 	"github.com/urfave/cli/v2"
 )
 
@@ -26,11 +24,35 @@ var loginCommand = &cli.Command{
 	Usage: "Log in to Futrou Cloud on this machine",
 	Flags: []cli.Flag{workspaceFlag},
 	Action: func(c *cli.Context) error {
-		apiUrl := services.NormalizeApiUrl(globalApiUrl(c))
+		apiUrl := utils.NormalizeApiUrl(globalApiUrl(c))
 
 		cfg, err := cliconfig.Load()
 		if err != nil {
 			return fmt.Errorf("loading config: %w", err)
+		}
+
+		// A stored token proves nothing: when the API does not accept it, the login
+		// is done again instead of telling the user they are logged in.
+		var current *sessionInfo // who is logged in, when the stored login was checked and works
+		if stored := cfg.TokenFor(apiUrl); stored != "" && globalApiToken(c) == "" {
+			stopLoader := startLoader(c, "Checking the stored login...")
+			state, context, _ := checkSession(apiUrl, stored)
+			if state == sessionValid {
+				// a login made before defaults existed, or by a client that skipped
+				// the choice, gets its default workspace now
+				if _, err := cfg.EnsureDefaultWorkspace(apiUrl, stored); err == nil {
+					_ = cliconfig.Save(cfg)
+				}
+				info := newSessionInfo(apiUrl, stored, cfg, *context, false)
+				current = &info
+			}
+			stopLoader()
+			if state == sessionRejected {
+				if !isJSON(c) {
+					fmt.Printf("The stored login for %s is no longer valid. Logging in again.\n", apiUrl)
+				}
+				cfg.ClearToken(apiUrl)
+			}
 		}
 
 		expiresAt := time.Now().Add(loginTimeout)
@@ -45,7 +67,7 @@ var loginCommand = &cli.Command{
 			}
 		}
 
-		email, alreadyLoggedIn, err := cfg.Login(apiUrl, c.String("workspace"), promptSelectWorkspace, openBrowserFunc, onAuthURL, loginTimeout)
+		email, alreadyLoggedIn, err := cfg.Login(apiUrl, c.String("workspace"), nil, openBrowserFunc, onAuthURL, loginTimeout)
 
 		if interactive && countdownDone != nil {
 			close(stopCountdown)
@@ -59,62 +81,61 @@ var loginCommand = &cli.Command{
 
 		if alreadyLoggedIn {
 			if isJSON(c) {
-				return printJSON(map[string]string{"status": "already logged in"})
+				output := map[string]interface{}{"status": "already logged in"}
+				if current != nil {
+					for key, value := range current.json() {
+						output[key] = value
+					}
+				}
+				return printJSON(output)
 			}
-			fmt.Printf("Already logged in to %s.\nRun 'futrou logout' to log out.\n", apiUrl)
+			if current == nil { // not checked: --api-token given, or the API could not be asked
+				fmt.Printf("Already logged in to %s.\nRun 'futrou logout' to log out.\n", apiUrl)
+				return nil
+			}
+			fmt.Printf("Already logged in.\n%sRun 'futrou logout' to log out.\n", current.text())
 			return nil
 		}
 
+		workspaceID := cfg.DefaultWorkspaceFor(apiUrl)
 		workspaceName := ""
-		if id := cfg.DefaultWorkspaceFor(apiUrl); id != "" {
-			workspaceName = id
+		if workspaceID != "" {
+			token := cfg.TokenFor(apiUrl)
+			if _, context, _ := checkSession(apiUrl, token); context != nil {
+				workspaceName = context.workspaceName(workspaceID)
+			}
+			if workspaceName == "" {
+				workspaceName = lookupWorkspaceName(apiUrl, token, workspaceID)
+			}
 		}
 
 		if isJSON(c) {
 			return printJSON(map[string]string{
-				"email":     email,
-				"status":    "logged in",
-				"workspace": workspaceName,
+				"email":         email,
+				"status":        "logged in",
+				"workspace":     workspaceID,
+				"workspaceName": workspaceName,
 			})
 		}
-
-		if email != "" {
-			fmt.Printf("✓ Logged in as %s\n", email)
-		} else {
-			fmt.Println("✓ Logged in successfully")
-		}
-		if workspaceName != "" {
-			fmt.Printf("✓ Default workspace set to %s\n", workspaceName)
-		}
+		fmt.Print(loggedInText(email, workspaceID, workspaceName))
 		return nil
 	},
 }
 
-// promptSelectWorkspace is the interactive workspace picker injected into
-// CliConfig.Login. It's the CLI-layer counterpart to the non-interactive
-// --workspace flag resolution CliConfig.Login handles internally.
-func promptSelectWorkspace(workspaces []projectconfig.Workspace) (id, name string, err error) {
-	if !isInteractiveTerminal() {
-		return "", "", nil
+// loggedInText is what a finished login prints: who, and the default workspace by
+// its name (its ID only when the name could not be read).
+func loggedInText(email, workspaceID, workspaceName string) string {
+	text := "✓ Logged in successfully\n"
+	if email != "" {
+		text = "✓ Logged in as " + email + "\n"
 	}
-	if len(workspaces) == 1 {
-		return workspaces[0].ID, workspaces[0].Name, nil
+	switch {
+	case workspaceName != "":
+		text += "✓ Default workspace set to " + workspaceName + "\n"
+	case workspaceID != "":
+		text += "✓ Default workspace set to " + workspaceID + "\n"
 	}
-
-	names := make([]string, len(workspaces))
-	for i, w := range workspaces {
-		names[i] = w.Name
-	}
-	prompt := promptui.Select{
-		Label: "Select a default workspace",
-		Items: names,
-	}
-	choice, _, err := prompt.Run()
-	if err != nil {
-		return "", "", fmt.Errorf("selecting workspace: %w", err)
-	}
-	w := workspaces[choice]
-	return w.ID, w.Name, nil
+	return text
 }
 
 // startCountdown starts a goroutine that updates the loader with the time

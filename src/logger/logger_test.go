@@ -56,14 +56,14 @@ func TestSetLogLevel(t *testing.T) {
 		input string
 		want  int
 	}{
-		{"debug", DEBUG},
-		{"DEBUG", DEBUG},
-		{"info", INFO},
-		{"warn", WARN},
-		{"error", ERROR},
-		{"fatal", FATAL},
-		{"bogus", INFO},
-		{"", INFO},
+		{"debug", LevelDebug},
+		{"DEBUG", LevelDebug},
+		{"info", LevelInfo},
+		{"warn", LevelWarn},
+		{"error", LevelError},
+		{"fatal", LevelFatal},
+		{"bogus", LevelInfo},
+		{"", LevelInfo},
 	}
 	for _, tt := range tests {
 		SetLogLevel(tt.input)
@@ -76,17 +76,17 @@ func TestSetLogLevel(t *testing.T) {
 
 func TestSetLogFormat(t *testing.T) {
 	SetLogFormat("json")
-	if GetLogFormat() != FORMAT_JSON {
+	if GetLogFormat() != FormatJSON {
 		t.Errorf("expected format json, got %s", GetLogFormat())
 	}
 
 	SetLogFormat("text")
-	if GetLogFormat() != FORMAT_TEXT {
+	if GetLogFormat() != FormatText {
 		t.Errorf("expected format text, got %s", GetLogFormat())
 	}
 
 	SetLogFormat("bogus")
-	if GetLogFormat() != FORMAT_TEXT {
+	if GetLogFormat() != FormatText {
 		t.Errorf("expected unknown format to fall back to text, got %s", GetLogFormat())
 	}
 }
@@ -128,7 +128,7 @@ func TestDebug(t *testing.T) {
 	SetLogLevel("debug")
 	Debug("debug %s", "msg")
 	if !strings.Contains(out.String(), "DEBUG") || !strings.Contains(out.String(), "debug msg") {
-		t.Errorf("expected DEBUG log with message, got %q", out.String())
+		t.Errorf("expected LevelDebug log with message, got %q", out.String())
 	}
 }
 
@@ -146,7 +146,7 @@ func TestInfo(t *testing.T) {
 	SetLogLevel("info")
 	Info("info %s", "msg")
 	if !strings.Contains(out.String(), "INFO") || !strings.Contains(out.String(), "info msg") {
-		t.Errorf("expected INFO log with message, got %q", out.String())
+		t.Errorf("expected LevelInfo log with message, got %q", out.String())
 	}
 }
 
@@ -164,7 +164,7 @@ func TestWarn(t *testing.T) {
 	SetLogLevel("warn")
 	Warn("warn %s", "msg")
 	if !strings.Contains(out.String(), "WARN") || !strings.Contains(out.String(), "warn msg") {
-		t.Errorf("expected WARN log with message, got %q", out.String())
+		t.Errorf("expected LevelWarn log with message, got %q", out.String())
 	}
 }
 
@@ -182,7 +182,7 @@ func TestError(t *testing.T) {
 	SetLogLevel("error")
 	Error("error %s", "msg")
 	if !strings.Contains(errOut.String(), "ERROR") || !strings.Contains(errOut.String(), "error msg") {
-		t.Errorf("expected ERROR log with message, got %q", errOut.String())
+		t.Errorf("expected LevelError log with message, got %q", errOut.String())
 	}
 }
 
@@ -336,5 +336,17 @@ func TestLog_stopsRunningLoader(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "done") {
 		t.Errorf("expected log message after spinner stop, got %q", out.String())
+	}
+}
+
+func TestLogFormatNames(t *testing.T) {
+	defer SetLogFormat(FormatText)
+	for in, want := range map[string]string{
+		"json": FormatJSON, "JSON": FormatJSON, "text": FormatText, "plain": FormatText, "": FormatText, "jsno": FormatText,
+	} {
+		SetLogFormat(in)
+		if got := GetLogFormat(); got != want {
+			t.Errorf("SetLogFormat(%q) -> %q, want %q", in, got, want)
+		}
 	}
 }

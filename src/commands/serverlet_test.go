@@ -2,6 +2,7 @@ package commands
 
 import (
 	"bytes"
+	"futrou-cli/src/services"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -10,8 +11,6 @@ import (
 	"sync"
 	"testing"
 	"time"
-
-	"futrou-cli/src/services"
 
 	"github.com/gorilla/websocket"
 )

@@ -63,7 +63,7 @@ func TestTopLevelHelpGroupsCommands(t *testing.T) {
 		{"login", "logout", "whoami", "config"},
 		{"init mcp", "init skills", "init config"},
 		{"workspace", "project", "server"},
-		{"serverlet", "network", "proxy", "dns", "storage", "logs"},
+		{"serverlet", "network", "proxy", "dns", "storage", "statico", "logs"},
 		{"upgrade", "schema", "version", "license", "help"},
 	}
 	if len(names) != len(want) {

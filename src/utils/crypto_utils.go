@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -57,10 +58,10 @@ func DeviceFingerprint(cliName string) []byte {
 }
 
 // EncryptToken encrypts plaintext with the device fingerprint key.
-// Always produces an enc:v1:-prefixed value — never stores as plaintext.
-func EncryptToken(plaintext, cliName string) string {
+// It returns an enc:v1:-prefixed value or an error, never the plaintext.
+func EncryptToken(plaintext, cliName string) (string, error) {
 	if plaintext == "" {
-		return ""
+		return "", nil
 	}
 	return EncryptWithKey(plaintext, DeviceFingerprint(cliName))
 }
@@ -79,23 +80,27 @@ func DecryptToken(stored, cliName string) (string, error) {
 }
 
 // EncryptWithKey encrypts plaintext with an explicit key, returning an enc:v1:-prefixed value.
-// Used by tests to exercise key isolation without relying on the real device fingerprint.
-func EncryptWithKey(plaintext string, key []byte) string {
+// When it cannot (an unusable key, no source of randomness) it returns an error and never
+// the plaintext, so a secret is not written to disk in the clear by accident.
+func EncryptWithKey(plaintext string, key []byte) (string, error) {
 	block, err := aes.NewCipher(key)
 	if err != nil {
-		return plaintext
+		return "", fmt.Errorf("cannot encrypt: %w", err)
 	}
 	gcm, err := cipher.NewGCM(block)
 	if err != nil {
-		return plaintext
+		return "", fmt.Errorf("cannot encrypt: %w", err)
 	}
 	nonce := make([]byte, gcm.NonceSize())
-	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
-		return plaintext
+	if _, err := io.ReadFull(randomSource, nonce); err != nil {
+		return "", fmt.Errorf("cannot encrypt: %w", err)
 	}
 	sealed := gcm.Seal(nonce, nonce, []byte(plaintext), nil)
-	return EncPrefix + base64.StdEncoding.EncodeToString(sealed)
+	return EncPrefix + base64.StdEncoding.EncodeToString(sealed), nil
 }
+
+// randomSource is where nonces come from; tests replace it to see a failure.
+var randomSource io.Reader = rand.Reader
 
 // DecryptWithKey decrypts an enc:v1:-prefixed value with an explicit key.
 // Used by tests to exercise key isolation without relying on the real device fingerprint.

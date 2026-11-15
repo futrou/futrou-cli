@@ -263,6 +263,26 @@ if command -v futrou >/dev/null 2>&1; then
   exit 0
 fi
 
+# True when a shell config already sets up futrou (the FUTROU_INSTALL variable, or
+# the install folder in PATH), so running the installer again, before the shell was
+# reloaded and futrou is on PATH, does not add it a second time.
+configures_futrou() {
+  [[ -f $1 ]] || return 1
+  grep -qE "(^|[^A-Za-z0-9_])${install_env}([^A-Za-z0-9_]|$)" "$1" && return 0
+  grep -qF -e "$bin_dir" -e "$(tildify "$bin_dir")" -e "${bin_dir/#$HOME/\$HOME}" "$1"
+}
+
+# Adds the futrou lines to a shell config. Returns 1, changing nothing, when the
+# config already has them.
+append_futrou_config() {
+  local config=$1
+  shift
+  if configures_futrou "$config"; then
+    return 1
+  fi
+  { echo; echo '# futrou'; for cmd in "$@"; do echo "$cmd"; done; } >> "$config"
+}
+
 tilde_bin_dir=$(tildify "$bin_dir")
 quoted_install_dir="\"${install_dir//\"/\\\"}\""
 [[ $quoted_install_dir == \"$HOME/* ]] && quoted_install_dir="${quoted_install_dir/$HOME\//\$HOME/}"
@@ -277,8 +297,11 @@ fish)
     "set --export $install_env $quoted_install_dir"
     "set --export PATH \$$install_env/bin \$PATH"
   )
-  if [[ -w $fish_config ]]; then
-    { echo; echo '# futrou'; for cmd in "${commands[@]}"; do echo "$cmd"; done; } >> "$fish_config"
+  if configures_futrou "$fish_config"; then
+    info "\"$tilde_bin_dir\" is already in \$PATH in \"$tilde_fish_config\""
+    info_bold "  source $tilde_fish_config"
+  elif [[ -w $fish_config ]]; then
+    append_futrou_config "$fish_config" "${commands[@]}"
     info "Added \"$tilde_bin_dir\" to \$PATH in \"$tilde_fish_config\""
     info_bold "  source $tilde_fish_config"
   else
@@ -293,8 +316,11 @@ zsh)
     "export $install_env=$quoted_install_dir"
     "export PATH=\"\$$install_env/bin:\$PATH\""
   )
-  if [[ -w $zsh_config ]]; then
-    { echo; echo '# futrou'; for cmd in "${commands[@]}"; do echo "$cmd"; done; } >> "$zsh_config"
+  if configures_futrou "$zsh_config"; then
+    info "\"$tilde_bin_dir\" is already in \$PATH in \"$tilde_zsh_config\""
+    info_bold "  exec \$SHELL"
+  elif [[ -w $zsh_config ]]; then
+    append_futrou_config "$zsh_config" "${commands[@]}"
     info "Added \"$tilde_bin_dir\" to \$PATH in \"$tilde_zsh_config\""
     info_bold "  exec \$SHELL"
   else
@@ -308,15 +334,26 @@ bash)
     "export PATH=\"\$$install_env/bin:\$PATH\""
   )
   set_manually=true
+  # either file may already have it: bash reads .bash_profile for a login shell and .bashrc for the others
   for bash_config in "$HOME/.bash_profile" "$HOME/.bashrc"; do
-    if [[ -w $bash_config ]]; then
-      { echo; echo '# futrou'; for cmd in "${commands[@]}"; do echo "$cmd"; done; } >> "$bash_config"
-      info "Added \"$tilde_bin_dir\" to \$PATH in \"$(tildify "$bash_config")\""
+    if configures_futrou "$bash_config"; then
+      info "\"$tilde_bin_dir\" is already in \$PATH in \"$(tildify "$bash_config")\""
       info_bold "  source $(tildify "$bash_config")"
       set_manually=false
       break
     fi
   done
+  if [[ $set_manually == true ]]; then
+    for bash_config in "$HOME/.bash_profile" "$HOME/.bashrc"; do
+      if [[ -w $bash_config ]]; then
+        append_futrou_config "$bash_config" "${commands[@]}"
+        info "Added \"$tilde_bin_dir\" to \$PATH in \"$(tildify "$bash_config")\""
+        info_bold "  source $(tildify "$bash_config")"
+        set_manually=false
+        break
+      fi
+    done
+  fi
   if [[ $set_manually == true ]]; then
     info "Manually add to ~/.bashrc:"
     for cmd in "${commands[@]}"; do info_bold "  $cmd"; done

@@ -1,8 +1,9 @@
 package commands
 
 import (
-	"encoding/json"
 	"fmt"
+	"futrou-cli/src/logger"
+	"futrou-cli/src/services"
 	"math/rand"
 	"net/http"
 	"net/url"
@@ -11,15 +12,12 @@ import (
 	"strings"
 	"time"
 
-	"futrou-cli/src/logger"
-	"futrou-cli/src/services"
-
 	"github.com/gorilla/websocket"
 	"github.com/urfave/cli/v2"
 	"golang.org/x/term"
 )
 
-var serverletsCommand = &cli.Command{
+var serverletCommand = &cli.Command{
 	Name:  "serverlet",
 	Usage: "Manage serverlets",
 	Subcommands: []*cli.Command{
@@ -32,12 +30,9 @@ var serverletsCommand = &cli.Command{
 					return err
 				}
 				var result interface{}
-				status, err := client.RequestInto("GET", "/v2/serverlets", nil, &result)
+				_, err = client.RequestInto("GET", "/v2/serverlets", nil, &result)
 				if err != nil {
 					return err
-				}
-				if status >= 400 {
-					return fmt.Errorf("request failed with status %d", status)
 				}
 				if isJSON(c) {
 					return printJSON(result)
@@ -50,25 +45,7 @@ var serverletsCommand = &cli.Command{
 			Name:      "show",
 			Usage:     "Show a serverlet by ID",
 			ArgsUsage: "<id>",
-			Action: func(c *cli.Context) error {
-				id := c.Args().First()
-				if id == "" {
-					return fmt.Errorf("serverlet ID required")
-				}
-				client, err := requireAuth(c)
-				if err != nil {
-					return err
-				}
-				var result interface{}
-				status, err := client.RequestInto("GET", "/v2/serverlets/"+id, nil, &result)
-				if err != nil {
-					return err
-				}
-				if status >= 400 {
-					return fmt.Errorf("request failed with status %d", status)
-				}
-				return printJSON(result)
-			},
+			Action:    showAction("serverlet", "/v2/serverlets"),
 		},
 		{
 			Name:  "create",
@@ -81,11 +58,7 @@ var serverletsCommand = &cli.Command{
 				projectFlag,
 			},
 			Action: func(c *cli.Context) error {
-				workspaceID, err := resolveWorkspaceID(c)
-				if err != nil {
-					return err
-				}
-				projectID, err := resolveProjectID(c, workspaceID)
+				workspaceID, projectID, err := resolveScope(c)
 				if err != nil {
 					return err
 				}
@@ -101,12 +74,9 @@ var serverletsCommand = &cli.Command{
 					"projectId":       projectID,
 				}
 				var result interface{}
-				status, err := client.RequestInto("POST", "/v2/serverlets", body, &result)
+				_, err = client.RequestInto("POST", "/v2/serverlets", body, &result)
 				if err != nil {
 					return err
-				}
-				if status >= 400 {
-					return fmt.Errorf("request failed with status %d", status)
 				}
 				if isJSON(c) {
 					return printJSON(result)
@@ -148,12 +118,9 @@ var serverletsCommand = &cli.Command{
 					return fmt.Errorf("no fields to update")
 				}
 				var result interface{}
-				status, err := client.RequestInto("PATCH", "/v2/serverlets/"+id, body, &result)
+				_, err = client.RequestInto("PATCH", "/v2/serverlets/"+id, body, &result)
 				if err != nil {
 					return err
-				}
-				if status >= 400 {
-					return fmt.Errorf("request failed with status %d", status)
 				}
 				if isJSON(c) {
 					return printJSON(result)
@@ -166,28 +133,7 @@ var serverletsCommand = &cli.Command{
 			Name:      "rm",
 			Usage:     "Delete a serverlet",
 			ArgsUsage: "<id>",
-			Action: func(c *cli.Context) error {
-				id := c.Args().First()
-				if id == "" {
-					return fmt.Errorf("serverlet ID required")
-				}
-				client, err := requireAuth(c)
-				if err != nil {
-					return err
-				}
-				status, err := client.RequestInto("DELETE", "/v2/serverlets/"+id, nil, nil)
-				if err != nil {
-					return err
-				}
-				if status >= 400 {
-					return fmt.Errorf("request failed with status %d", status)
-				}
-				if isJSON(c) {
-					return printJSON(map[string]string{"status": "deleted"})
-				}
-				fmt.Println("✓ Serverlet deleted")
-				return nil
-			},
+			Action:    rmAction("serverlet", "/v2/serverlets"),
 		},
 		{
 			Name:      "start",
@@ -297,12 +243,9 @@ func serverletAction(action string) cli.ActionFunc {
 		if err != nil {
 			return err
 		}
-		status, err := client.RequestInto("POST", "/v2/serverlets/"+id+"/"+action, nil, nil)
+		_, err = client.RequestInto("POST", "/v2/serverlets/"+id+"/"+action, nil, nil)
 		if err != nil {
 			return err
-		}
-		if status >= 400 {
-			return fmt.Errorf("request failed with status %d", status)
 		}
 		if isJSON(c) {
 			return printJSON(map[string]string{"status": action})
@@ -338,6 +281,73 @@ var shellCommand = &cli.Command{
 
 		return runShell(wsURL, client.ApiToken())
 	},
+}
+
+var serverletInstancesAction = func(c *cli.Context) error {
+	id := c.Args().First()
+	if id == "" {
+		return fmt.Errorf("serverlet ID required")
+	}
+	client, err := requireAuth(c)
+	if err != nil {
+		return err
+	}
+	var result interface{}
+	_, err = client.RequestInto("GET", "/v2/serverlets/"+id+"/instances", nil, &result)
+	if err != nil {
+		return err
+	}
+	if isJSON(c) {
+		return printJSON(result)
+	}
+	printTable(result, []string{"id", "status", "createdAt"})
+	return nil
+}
+
+// serverletGet prints the JSON response of GET /v2/serverlets/<id><suffix>.
+func serverletGet(suffix string) cli.ActionFunc {
+	return func(c *cli.Context) error {
+		id := c.Args().First()
+		if id == "" {
+			return fmt.Errorf("serverlet ID required")
+		}
+		return getJSON(c, "/v2/serverlets/"+id+suffix)
+	}
+}
+
+// serverletInstanceGet prints the JSON response of
+// GET /v2/serverlets/<id>/instances/<instance-id><suffix>.
+func serverletInstanceGet(suffix string) cli.ActionFunc {
+	return func(c *cli.Context) error {
+		id, instanceID := c.Args().Get(0), c.Args().Get(1)
+		if id == "" || instanceID == "" {
+			return fmt.Errorf("serverlet ID and instance ID required")
+		}
+		return getJSON(c, "/v2/serverlets/"+id+"/instances/"+instanceID+suffix)
+	}
+}
+
+// serverletInstanceAction POSTs /v2/serverlets/<id>/instances/<instance-id>/<action>.
+func serverletInstanceAction(action string) cli.ActionFunc {
+	return func(c *cli.Context) error {
+		id, instanceID := c.Args().Get(0), c.Args().Get(1)
+		if id == "" || instanceID == "" {
+			return fmt.Errorf("serverlet ID and instance ID required")
+		}
+		client, err := requireAuth(c)
+		if err != nil {
+			return err
+		}
+		_, err = client.RequestInto("POST", "/v2/serverlets/"+id+"/instances/"+instanceID+"/"+action, nil, nil)
+		if err != nil {
+			return err
+		}
+		if isJSON(c) {
+			return printJSON(map[string]string{"status": action})
+		}
+		fmt.Printf("✓ Instance %s\n", action)
+		return nil
+	}
 }
 
 // shellWebsocketURLFor builds the shell WebSocket URL for a serverlet,
@@ -658,168 +668,4 @@ func parseSentinelLine(line, sentinel string) (int, bool) {
 		return 0, false
 	}
 	return code, true
-}
-
-// printTable prints a slice of maps as an aligned table with the given columns.
-func printTable(data interface{}, cols []string) {
-	raw, err := json.Marshal(data)
-	if err != nil {
-		fmt.Println(data)
-		return
-	}
-
-	var rows []map[string]interface{}
-	if err := json.Unmarshal(raw, &rows); err != nil {
-		// maybe it's wrapped in a data field
-		var wrapped struct {
-			Data []map[string]interface{} `json:"data"`
-		}
-		if err2 := json.Unmarshal(raw, &wrapped); err2 != nil || len(wrapped.Data) == 0 {
-			fmt.Println(string(raw))
-			return
-		}
-		rows = wrapped.Data
-	}
-
-	if len(rows) == 0 {
-		fmt.Println("No results.")
-		return
-	}
-
-	// calculate column widths
-	widths := make([]int, len(cols))
-	for i, col := range cols {
-		widths[i] = len(col)
-	}
-	for _, row := range rows {
-		for i, col := range cols {
-			v := fmt.Sprintf("%v", row[col])
-			if len(v) > widths[i] {
-				widths[i] = len(v)
-			}
-		}
-	}
-
-	// header
-	for i, col := range cols {
-		if i > 0 {
-			fmt.Print("  ")
-		}
-		fmt.Print(strings.ToUpper(col))
-		fmt.Print(strings.Repeat(" ", widths[i]-len(col)))
-	}
-	fmt.Println()
-
-	// separator
-	for i, col := range cols {
-		if i > 0 {
-			fmt.Print("  ")
-		}
-		fmt.Print(strings.Repeat("-", widths[i]+len(col)-len(col)))
-		_ = col
-		fmt.Print(strings.Repeat("-", widths[i]))
-	}
-	fmt.Println()
-
-	// rows
-	for _, row := range rows {
-		for i, col := range cols {
-			if i > 0 {
-				fmt.Print("  ")
-			}
-			v := fmt.Sprintf("%v", row[col])
-			fmt.Print(v)
-			fmt.Print(strings.Repeat(" ", widths[i]-len(v)))
-		}
-		fmt.Println()
-	}
-}
-
-var serverletInstancesAction = func(c *cli.Context) error {
-	id := c.Args().First()
-	if id == "" {
-		return fmt.Errorf("serverlet ID required")
-	}
-	client, err := requireAuth(c)
-	if err != nil {
-		return err
-	}
-	var result interface{}
-	status, err := client.RequestInto("GET", "/v2/serverlets/"+id+"/instances", nil, &result)
-	if err != nil {
-		return err
-	}
-	if status >= 400 {
-		return fmt.Errorf("request failed with status %d", status)
-	}
-	if isJSON(c) {
-		return printJSON(result)
-	}
-	printTable(result, []string{"id", "status", "createdAt"})
-	return nil
-}
-
-// serverletGet prints the JSON response of GET /v2/serverlets/<id><suffix>.
-func serverletGet(suffix string) cli.ActionFunc {
-	return func(c *cli.Context) error {
-		id := c.Args().First()
-		if id == "" {
-			return fmt.Errorf("serverlet ID required")
-		}
-		return getJSON(c, "/v2/serverlets/"+id+suffix)
-	}
-}
-
-// serverletInstanceGet prints the JSON response of
-// GET /v2/serverlets/<id>/instances/<instance-id><suffix>.
-func serverletInstanceGet(suffix string) cli.ActionFunc {
-	return func(c *cli.Context) error {
-		id, instanceID := c.Args().Get(0), c.Args().Get(1)
-		if id == "" || instanceID == "" {
-			return fmt.Errorf("serverlet ID and instance ID required")
-		}
-		return getJSON(c, "/v2/serverlets/"+id+"/instances/"+instanceID+suffix)
-	}
-}
-
-func getJSON(c *cli.Context, path string) error {
-	client, err := requireAuth(c)
-	if err != nil {
-		return err
-	}
-	var result interface{}
-	status, err := client.RequestInto("GET", path, nil, &result)
-	if err != nil {
-		return err
-	}
-	if status >= 400 {
-		return fmt.Errorf("request failed with status %d", status)
-	}
-	return printJSON(result)
-}
-
-// serverletInstanceAction POSTs /v2/serverlets/<id>/instances/<instance-id>/<action>.
-func serverletInstanceAction(action string) cli.ActionFunc {
-	return func(c *cli.Context) error {
-		id, instanceID := c.Args().Get(0), c.Args().Get(1)
-		if id == "" || instanceID == "" {
-			return fmt.Errorf("serverlet ID and instance ID required")
-		}
-		client, err := requireAuth(c)
-		if err != nil {
-			return err
-		}
-		status, err := client.RequestInto("POST", "/v2/serverlets/"+id+"/instances/"+instanceID+"/"+action, nil, nil)
-		if err != nil {
-			return err
-		}
-		if status >= 400 {
-			return fmt.Errorf("request failed with status %d", status)
-		}
-		if isJSON(c) {
-			return printJSON(map[string]string{"status": action})
-		}
-		fmt.Printf("✓ Instance %s\n", action)
-		return nil
-	}
 }

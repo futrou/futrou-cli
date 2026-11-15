@@ -3,6 +3,7 @@ package utils
 import (
 	"bytes"
 	"encoding/base64"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -28,11 +29,11 @@ func TestDeriveKeyDependsOnEveryComponent(t *testing.T) {
 
 func TestEncryptDecryptWithKey(t *testing.T) {
 	key := DeriveKey("cli", "machine", "1000")
-	sealed := EncryptWithKey("secret-token", key)
+	sealed := mustEncryptWithKey(t, "secret-token", key)
 	if !strings.HasPrefix(sealed, EncPrefix) || strings.Contains(sealed, "secret-token") {
 		t.Fatalf("the token must be encrypted: %s", sealed)
 	}
-	if again := EncryptWithKey("secret-token", key); again == sealed {
+	if again := mustEncryptWithKey(t, "secret-token", key); again == sealed {
 		t.Fatal("every encryption needs a fresh nonce")
 	}
 	got, err := DecryptWithKey(sealed, key)
@@ -51,8 +52,8 @@ func TestEncryptDecryptWithKey(t *testing.T) {
 	if _, err := DecryptWithKey(EncPrefix+"AAAA", key); err == nil || !strings.Contains(err.Error(), "malformed") {
 		t.Fatalf("a payload shorter than the nonce is malformed: %v", err)
 	}
-	if got := EncryptWithKey("x", []byte("short")); got != "x" {
-		t.Fatalf("an unusable key must not produce a fake ciphertext: %q", got)
+	if got, err := EncryptWithKey("x", []byte("short")); err == nil || got != "" {
+		t.Fatalf("an unusable key must fail, never return the plaintext: %q, %v", got, err)
 	}
 	if _, err := DecryptWithKey(sealed, []byte("short")); err == nil {
 		t.Fatal("an invalid key size must fail")
@@ -61,7 +62,7 @@ func TestEncryptDecryptWithKey(t *testing.T) {
 
 func TestTamperedCiphertextIsRejected(t *testing.T) {
 	key := DeriveKey("cli", "machine", "1000")
-	stored := EncryptWithKey("secret", key)
+	stored := mustEncryptWithKey(t, "secret", key)
 	raw, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(stored, EncPrefix))
 	if err != nil {
 		t.Fatal(err)
@@ -74,10 +75,13 @@ func TestTamperedCiphertextIsRejected(t *testing.T) {
 }
 
 func TestEncryptAndDecryptTokenUseTheDeviceKey(t *testing.T) {
-	if got := EncryptToken("", "futrou"); got != "" {
+	if got, err := EncryptToken("", "futrou"); err != nil || got != "" {
 		t.Fatalf("an empty token stays empty: %q", got)
 	}
-	sealed := EncryptToken("tok", "futrou")
+	sealed, err := EncryptToken("tok", "futrou")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !strings.HasPrefix(sealed, EncPrefix) {
 		t.Fatalf("sealed = %q", sealed)
 	}
@@ -106,3 +110,31 @@ func TestStripPrefix(t *testing.T) {
 		}
 	}
 }
+
+func mustEncryptWithKey(t *testing.T, plaintext string, key []byte) string {
+	t.Helper()
+	sealed, err := EncryptWithKey(plaintext, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return sealed
+}
+
+// Without a source of randomness there is no nonce, so there is no encryption,
+// and the secret must not come back in the clear.
+func TestEncryptWithKeyFailsWithoutRandomness(t *testing.T) {
+	old := randomSource
+	randomSource = errReader{}
+	defer func() { randomSource = old }()
+	key := DeriveKey("a", "b", "c")
+	if got, err := EncryptWithKey("secret-token", key); err == nil || strings.Contains(got, "secret-token") || got != "" {
+		t.Fatalf("EncryptWithKey = %q, %v; want an error and no value", got, err)
+	}
+	if got, err := EncryptToken("secret-token", "futrou"); err == nil || got != "" {
+		t.Fatalf("EncryptToken = %q, %v; want an error and no value", got, err)
+	}
+}
+
+type errReader struct{}
+
+func (errReader) Read([]byte) (int, error) { return 0, errors.New("no randomness") }

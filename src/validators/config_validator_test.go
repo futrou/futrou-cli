@@ -569,3 +569,91 @@ func TestConfigValidatorAcceptsEveryResourceShape(t *testing.T) {
 		"locks": map[string]interface{}{"serverlets.web": "abc"},
 	})
 }
+
+func TestConfigValidatorStaticoValidation(t *testing.T) {
+	site := func(fields map[string]interface{}) map[string]interface{} {
+		fields["name"] = "docs"
+		return map[string]interface{}{"statico": []interface{}{fields}}
+	}
+	redirect := map[string]interface{}{"from": "/old", "to": "/new", "statusCode": float64(301)}
+	validateConfig(t, site(map[string]interface{}{
+		"public": true, "regionId": "r", "htmlToFolders": false,
+		"include":     map[string]interface{}{"./dist": "./", "./a.txt": true, "./dist/*.{map,ts}": false, "./x": "static/"},
+		"defaultFile": "/index.html", "defaultStatus": float64(200), "fallbackFile": "/404.html", "fallbackStatus": float64(404),
+		"redirects": []interface{}{redirect, map[string]interface{}{"to": "https://example.com/:splat"}, map[string]interface{}{"from": "https://old.example.com/*", "to": "/x"}},
+	}))
+	validateConfig(t, site(map[string]interface{}{"include": []interface{}{"./dist", map[string]interface{}{"./dist/*.map": false}, map[string]interface{}{"./x": "y/"}}}))
+	validateConfig(t, site(map[string]interface{}{}))
+	validateConfig(t, map[string]interface{}{"statico": []interface{}{}})
+
+	for name, fields := range map[string]map[string]interface{}{
+		"public type":            {"public": []interface{}{}},
+		"htmlToFolders type":     {"htmlToFolders": []interface{}{}},
+		"include string":         {"include": "dist"},
+		"include number":         {"include": float64(1)},
+		"include value number":   {"include": map[string]interface{}{"./a": float64(1)}},
+		"include value null":     {"include": map[string]interface{}{"./a": nil}},
+		"include value list":     {"include": map[string]interface{}{"./a": []interface{}{}}},
+		"include empty dest":     {"include": map[string]interface{}{"./a": ""}},
+		"include blank dest":     {"include": map[string]interface{}{"./a": "   "}},
+		"include dest escapes":   {"include": map[string]interface{}{"./a": "../x"}},
+		"include dest escapes 2": {"include": map[string]interface{}{"./a": "a/../../x"}},
+		"include empty source":   {"include": map[string]interface{}{"": true}},
+		"include null char":      {"include": map[string]interface{}{"a\x00b": true}},
+		"include array number":   {"include": []interface{}{float64(1)}},
+		"include array empty":    {"include": []interface{}{""}},
+		"include array two keys": {"include": []interface{}{map[string]interface{}{"./a": true, "./b": true}}},
+		"include array bad val":  {"include": []interface{}{map[string]interface{}{"./a": float64(5)}}},
+		"status 204":             {"defaultStatus": float64(204)},
+		"status 304":             {"fallbackStatus": float64(304)},
+		"status too low":         {"defaultStatus": float64(100)},
+		"status too high":        {"fallbackStatus": float64(600)},
+		"status fraction":        {"defaultStatus": 200.5},
+		"status text":            {"defaultStatus": "200"},
+		"default file type":      {"defaultFile": float64(1)},
+		"redirects not list":     {"redirects": map[string]interface{}{}},
+		"redirect not object":    {"redirects": []interface{}{"x"}},
+		"redirect no to":         {"redirects": []interface{}{map[string]interface{}{"from": "/a"}}},
+		"redirect to spaces":     {"redirects": []interface{}{map[string]interface{}{"to": "/a b"}}},
+		"redirect from relative": {"redirects": []interface{}{map[string]interface{}{"from": "a", "to": "/b"}}},
+		"redirect from query":    {"redirects": []interface{}{map[string]interface{}{"from": "/a?x=1", "to": "/b"}}},
+		"redirect from fragment": {"redirects": []interface{}{map[string]interface{}{"from": "/a#x", "to": "/b"}}},
+		"redirect status 200":    {"redirects": []interface{}{map[string]interface{}{"from": "/a", "to": "/b", "statusCode": float64(200)}}},
+		"redirect status 404":    {"redirects": []interface{}{map[string]interface{}{"to": "/b", "statusCode": float64(404)}}},
+		"redirect status text":   {"redirects": []interface{}{map[string]interface{}{"to": "/b", "statusCode": "301"}}},
+		"redirect status frac":   {"redirects": []interface{}{map[string]interface{}{"to": "/b", "statusCode": 301.5}}},
+	} {
+		t.Run(name, func(t *testing.T) { assertConfigFieldError(t, site(fields), "statico") })
+	}
+}
+
+func TestConfigValidatorStaticoNamesMustBeUnique(t *testing.T) {
+	assertConfigFieldError(t, map[string]interface{}{"statico": []interface{}{map[string]interface{}{"name": "a"}, map[string]interface{}{"name": "a"}}}, "statico")
+	assertConfigFieldError(t, map[string]interface{}{"statico": []interface{}{map[string]interface{}{"include": map[string]interface{}{"x": true}}}}, "statico")
+}
+
+func TestConfigValidatorStaticoSchemaDescribesTheOptions(t *testing.T) {
+	schema := ConfigValidator.ToJSONSchema()
+	properties := schema["properties"].(map[string]interface{})
+	statico, ok := properties["statico"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("statico is not in the schema: %v", properties)
+	}
+	item := statico["items"].(map[string]interface{})["properties"].(map[string]interface{})
+	for _, field := range []string{"name", "regionId", "public", "include", "htmlToFolders", "defaultFile", "defaultStatus", "fallbackFile", "fallbackStatus", "redirects"} {
+		if _, ok := item[field]; !ok {
+			t.Errorf("the schema lacks statico.%s", field)
+		}
+	}
+	for _, removed := range []string{"exclude", "keepExtra", "spa"} {
+		if _, ok := item[removed]; ok {
+			t.Errorf("statico.%s was removed", removed)
+		}
+	}
+	redirect := item["redirects"].(map[string]interface{})["items"].(map[string]interface{})["properties"].(map[string]interface{})
+	for _, field := range []string{"from", "to", "statusCode"} {
+		if _, ok := redirect[field]; !ok {
+			t.Errorf("the schema lacks statico.redirects.%s", field)
+		}
+	}
+}

@@ -101,6 +101,8 @@ func TestProjectsCreate_workspaceByName(t *testing.T) {
 
 func TestProjectsCreate_noWorkspaceSpecified(t *testing.T) {
 	ts := newTestServer(t)
+	ts.on("GET", "/v2/workspaces", respond(200, []map[string]any{}))                                                     // the account has none
+	ts.on("GET", "/v2/auth/context", respond(200, map[string]any{"user": map[string]any{"id": "u1", "email": "a@b.c"}})) // a token of no workspace
 	_, err := runArgs(t, ts, "projects", "create", "--name", "my-project")
 	assertError(t, err)
 }

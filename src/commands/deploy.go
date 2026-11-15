@@ -11,6 +11,7 @@ import (
 	"futrou-cli/src/deployer"
 	"futrou-cli/src/logger"
 	"futrou-cli/src/services"
+	"futrou-cli/src/statico"
 
 	"github.com/urfave/cli/v2"
 )
@@ -25,11 +26,8 @@ var deployCommand = &cli.Command{
 			Aliases: []string{"f"},
 			Usage:   "Config file (default: auto-detect futrou.json|yaml, then docker-compose.yml)",
 		},
-		&cli.StringFlag{
-			Name:    "project",
-			Aliases: []string{"p"},
-			Usage:   "Project to use: reads futrou.<project>.json|yaml first (e.g. futrou.prod.json), then the default config",
-		},
+		configNameFlag,
+		configNameLegacyFlag,
 		&cli.BoolFlag{
 			Name:    "yes",
 			Aliases: []string{"y"},
@@ -45,13 +43,21 @@ var deployCommand = &cli.Command{
 		},
 	},
 	Action: func(c *cli.Context) error {
-		cfg, cfgFile, err := projectconfig.LoadProjectConfig(".", c.String("file"), c.String("project"))
+		cfg, cfgFile, err := projectconfig.LoadProjectConfig(".", c.String("file"), configName(c))
 		if err != nil {
 			return err
 		}
 		fmt.Printf("Using config: %s\n", cfgFile)
+		// .futrou holds the staged files of uploads; whatever an earlier run left there is cleared.
+		if err := statico.ClearWorkDir(cfg.BaseDir()); err != nil {
+			return err
+		}
 
 		if err := cfg.Validate(); err != nil {
+			return err
+		}
+		// install (once) and build, before anything else happens
+		if err := runProjectCommands(c, cfg); err != nil {
 			return err
 		}
 
@@ -62,12 +68,17 @@ var deployCommand = &cli.Command{
 		// The deploy refreshes the config it loaded itself; the generic refresh
 		// after every change would look for the default config instead.
 		client.SetAfterMutation(nil)
+		defer cancelOnInterrupt(client)() // Ctrl+C stops the requests, uploads included
 		if cfg.Project != "" {
 			if err := ensureConfigWorkspace(c, client, cfg); err != nil {
 				return err
 			}
 		}
 
+		deployer.Progress = nil // the terminal or plain progress of the uploads
+		if isJSON(c) {
+			deployer.Progress = statico.Silent() // the JSON output is the plan, not the progress of an upload
+		}
 		plan, err := deployer.BuildPlan(client, cfg, c.Bool("destroy"))
 		if err != nil {
 			return err
@@ -151,12 +162,22 @@ func printPlanSection(title, color string, actions []deployer.Action, kind deplo
 		case deployer.Create:
 			printAdded(action.Resource, action.Name)
 			printActionPayload(action)
+			printActionDetails(action)
 		case deployer.Delete:
 			printRemoved(action.Resource, action.Name)
 		case deployer.Update:
 			printUpdatedResource(action.Resource, action.Name)
 			printActionFieldChanges(action)
+			printActionDetails(action)
 		}
+	}
+}
+
+// printActionDetails shows the extra lines of an action, such as what a
+// statico website's files change.
+func printActionDetails(action deployer.Action) {
+	for _, line := range action.Details {
+		fmt.Printf("    %s\n", line)
 	}
 }
 

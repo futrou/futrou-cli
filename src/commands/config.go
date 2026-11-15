@@ -15,6 +15,27 @@ import (
 	"github.com/urfave/cli/v2"
 )
 
+// configNameFlag picks which config file of the folder deploy, down and config
+// use: futrou.<name>.json|yaml first, then the default config (as Docker
+// Compose's -p/--project-name). It is not the Futrou Cloud project, which
+// --project selects in every other command.
+var configNameFlag = &cli.StringFlag{
+	Name:    "project-name",
+	Aliases: []string{"p"},
+	Usage:   "Config to use: reads futrou.<name>.json|yaml first (e.g. futrou.prod.json), then the default config",
+}
+
+// configNameLegacyFlag is the old spelling of --project-name, kept for scripts.
+var configNameLegacyFlag = &cli.StringFlag{Name: "project", Hidden: true, Usage: "Same as --project-name"}
+
+// configName is the config name given with --project-name (or the old --project).
+func configName(c *cli.Context) string {
+	if name := c.String("project-name"); name != "" {
+		return name
+	}
+	return c.String("project")
+}
+
 var configCommand = &cli.Command{
 	Name:  "config",
 	Usage: "Display the loaded Futrou project configuration as JSON",
@@ -24,14 +45,11 @@ var configCommand = &cli.Command{
 			Aliases: []string{"f"},
 			Usage:   "Config file path (default: auto-detect)",
 		},
-		&cli.StringFlag{
-			Name:    "project",
-			Aliases: []string{"p"},
-			Usage:   "Project to show: reads futrou.<project>.json|yaml first, then the default config",
-		},
+		configNameFlag,
+		configNameLegacyFlag,
 	},
 	Action: func(c *cli.Context) error {
-		cfg, _, err := projectconfig.LoadProjectConfig(".", c.String("file"), c.String("project"))
+		cfg, _, err := projectconfig.LoadProjectConfig(".", c.String("file"), configName(c))
 		if err != nil {
 			if errors.Is(err, projectconfig.ErrNoFutrouConfig) {
 				cfg = &projectconfig.Config{}
@@ -133,7 +151,7 @@ var configPullCommand = &cli.Command{
 			return fmt.Errorf("checking %s: %w", file, err)
 		}
 
-		client, err := services.NewApiClient(globalApiUrl(c), globalApiKey(c))
+		client, err := services.NewApiClient(globalApiUrl(c), globalApiToken(c))
 		if err != nil {
 			return fmt.Errorf("loading credentials: %w", err)
 		}
