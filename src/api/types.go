@@ -1,5 +1,5 @@
 // Code generated from the Futrou OpenAPI spec. DO NOT EDIT.
-// Generated at: 2026-11-15T13:01:20Z
+// Generated at: 2026-11-15T13:07:00Z
 // Source: https://api.futrou.com/v2/openapi.json
 
 package api
