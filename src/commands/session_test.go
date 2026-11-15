@@ -105,6 +105,7 @@ func TestLoginReplacesAStoredLoginTheAPIRejects(t *testing.T) {
 		"401":                {401, map[string]any{"message": "Unauthorized"}},
 	} {
 		t.Run(name, func(t *testing.T) {
+			t.Setenv("CI", "") // CI=true forbids the interactive flow this test expects
 			ts := newTestServer(t)
 			loggedInConfig(t, ts.URL, "ws-1")
 			ts.on("GET", "/v2/auth/context", respond(status.code, status.body))
