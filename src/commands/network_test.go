@@ -10,7 +10,7 @@ func TestNetworkLs(t *testing.T) {
 	ts.on("GET", "/v2/networks", respond(200, []interface{}{map[string]interface{}{"id": "net-1", "name": "backend"}}))
 
 	for _, args := range [][]string{{"network", "ls"}, {"networks", "list"}} {
-		out, err := runArgs(t, ts, args...)
+		out, err := runArgs(t, ts, append(args, "--workspace", "11111111-1111-1111-1111-111111111111", "--project", "22222222-2222-2222-2222-222222222222")...)
 		assertNoError(t, err)
 		assertContains(t, out, "net-1")
 	}
@@ -127,7 +127,7 @@ func TestNetworkRequests_apiError(t *testing.T) {
 	ts.on("GET", "/v2/networks/bad", respond(404, fixtureAPIError("not found")))
 	ts.on("DELETE", "/v2/networks/bad", respond(404, fixtureAPIError("not found")))
 	ts.on("GET", "/v2/networks", respond(500, fixtureAPIError("boom")))
-	for _, args := range [][]string{{"network", "show", "bad"}, {"network", "rm", "bad"}, {"network", "ls"}} {
+	for _, args := range [][]string{{"network", "show", "bad"}, {"network", "rm", "bad"}, {"network", "ls", "--workspace", "11111111-1111-1111-1111-111111111111", "--project", "22222222-2222-2222-2222-222222222222"}} {
 		_, err := runArgs(t, ts, args...)
 		assertError(t, err)
 	}
@@ -140,7 +140,7 @@ func TestNetworkRmAndLsJSON(t *testing.T) {
 	out, err := runArgs(t, ts, "--log-format", "json", "network", "rm", "net-1")
 	assertNoError(t, err)
 	assertContains(t, out, "deleted")
-	out, err = runArgs(t, ts, "--log-format", "json", "network", "ls")
+	out, err = runArgs(t, ts, "--log-format", "json", "network", "ls", "--workspace", "11111111-1111-1111-1111-111111111111", "--project", "22222222-2222-2222-2222-222222222222")
 	assertNoError(t, err)
 	assertContains(t, out, "backend")
 }

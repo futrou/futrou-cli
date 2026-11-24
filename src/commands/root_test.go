@@ -397,6 +397,7 @@ func fixtureProxy() map[string]any {
 func fixtureDNSZone() map[string]any {
 	return map[string]any{
 		"id":        "dns-789",
+		"domain":    "example.com",
 		"name":      "example.com",
 		"createdAt": "2026-01-01T00:00:00Z",
 	}
@@ -474,7 +475,7 @@ func TestGlobalFlags_apiUrl(t *testing.T) {
 	ts := newTestServer(t)
 	ts.on("GET", "/v2/serverlets", respond(200, []interface{}{fixtureServerlet()}))
 
-	out, err := runArgs(t, ts, "serverlets", "list")
+	out, err := runArgs(t, ts, "serverlets", "list", "--workspace", "11111111-1111-1111-1111-111111111111", "--project", "22222222-2222-2222-2222-222222222222")
 	assertNoError(t, err)
 	assertContains(t, out, "sl-123")
 }
@@ -487,7 +488,7 @@ func TestGlobalFlags_apiToken_env(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
 	// run without --api-key flag; token comes from env
-	args := []string{"futrou", "--api-url", ts.URL, "serverlets", "list"}
+	args := []string{"futrou", "--api-url", ts.URL, "serverlets", "list", "--workspace", "11111111-1111-1111-1111-111111111111", "--project", "22222222-2222-2222-2222-222222222222"}
 	out, err := captureRun(args)
 	assertNoError(t, err)
 	assertContains(t, out, "sl-123")
@@ -497,7 +498,7 @@ func TestGlobalFlags_logLevel(t *testing.T) {
 	ts := newTestServer(t)
 	ts.on("GET", "/v2/serverlets", respond(200, []interface{}{fixtureServerlet()}))
 
-	out, err := runArgs(t, ts, "--log-level", "debug", "serverlets", "list")
+	out, err := runArgs(t, ts, "--log-level", "debug", "serverlets", "list", "--workspace", "11111111-1111-1111-1111-111111111111", "--project", "22222222-2222-2222-2222-222222222222")
 	assertNoError(t, err)
 	assertContains(t, out, "sl-123")
 }
@@ -519,7 +520,7 @@ func TestGlobalFlags_apiKey_alias(t *testing.T) {
 	t.Setenv("FUTROU_API_TOKEN", "")
 
 	// --api-token alias should work the same as --api-key
-	args := []string{"futrou", "--api-url", ts.URL, "--api-token", "test-token", "serverlets", "list"}
+	args := []string{"futrou", "--api-url", ts.URL, "--api-token", "test-token", "serverlets", "list", "--workspace", "11111111-1111-1111-1111-111111111111", "--project", "22222222-2222-2222-2222-222222222222"}
 	out, err := captureRun(args)
 	assertNoError(t, err)
 	assertContains(t, out, "sl-123")

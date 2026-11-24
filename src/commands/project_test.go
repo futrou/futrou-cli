@@ -9,7 +9,7 @@ func TestProjectsList(t *testing.T) {
 	ts := newTestServer(t)
 	ts.on("GET", "/v2/projects", respond(200, []interface{}{fixtureProject()}))
 
-	out, err := runArgs(t, ts, "projects", "list")
+	out, err := runArgs(t, ts, "projects", "list", "--workspace", "11111111-1111-1111-1111-111111111111")
 	assertNoError(t, err)
 	assertContains(t, out, "proj-abc")
 	assertContains(t, out, "my-project")

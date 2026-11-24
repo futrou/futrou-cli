@@ -489,6 +489,27 @@ func defaultWorkspaceFromAccount(c *cli.Context) (string, error) {
 	return id, nil
 }
 
+// projectQuery is the query string that limits a listing to the project selected by
+// --workspace/--project, else futrou.json, else the login's default workspace and
+// its "default" project.
+func projectQuery(c *cli.Context) (string, error) {
+	workspaceID, projectID, err := resolveScope(c)
+	if err != nil {
+		return "", err
+	}
+	return "?" + url.Values{"workspaceId": {workspaceID}, "projectId": {projectID}}.Encode(), nil
+}
+
+// workspaceQuery is projectQuery for resources that belong to a workspace, not a
+// project (servers, projects): only the workspace is selected.
+func workspaceQuery(c *cli.Context) (string, error) {
+	workspaceID, err := resolveWorkspaceID(c)
+	if err != nil {
+		return "", err
+	}
+	return "?" + url.Values{"workspaceId": {workspaceID}}.Encode(), nil
+}
+
 // resolveScope is the workspace and project a project-scoped command works in:
 // --workspace/--project, else futrou.json, else the login's default workspace and
 // its "default" project.

@@ -12,14 +12,19 @@ var proxyCommand = &cli.Command{
 	Subcommands: []*cli.Command{
 		{
 			Name:  "ls",
-			Usage: "List all proxies",
+			Usage: "List proxies in a project (defaults to futrou.json|yaml, then the login workspace's \"default\" project)",
+			Flags: []cli.Flag{workspaceFlag, projectFlag},
 			Action: func(c *cli.Context) error {
+				query, err := projectQuery(c)
+				if err != nil {
+					return err
+				}
 				client, err := requireAuth(c)
 				if err != nil {
 					return err
 				}
 				var result interface{}
-				_, err = client.RequestInto("GET", "/v2/proxies", nil, &result)
+				_, err = client.RequestInto("GET", "/v2/proxies"+query, nil, &result)
 				if err != nil {
 					return err
 				}
@@ -38,8 +43,10 @@ var proxyCommand = &cli.Command{
 		},
 		{
 			Name:  "create",
-			Usage: "Create a new proxy",
+			Usage: "Create a new proxy (defaults to futrou.json|yaml, then the login workspace's \"default\" project)",
 			Flags: []cli.Flag{
+				workspaceFlag,
+				projectFlag,
 				&cli.StringFlag{Name: "domain", Required: true, Usage: "Domain name"},
 				&cli.StringFlag{Name: "target", Required: true, Usage: "Target host"},
 				&cli.IntFlag{Name: "port", Value: 80, Usage: "Target port"},
@@ -48,15 +55,21 @@ var proxyCommand = &cli.Command{
 				&cli.BoolFlag{Name: "https", Usage: "Enforce HTTPS"},
 			},
 			Action: func(c *cli.Context) error {
+				workspaceID, projectID, err := resolveScope(c)
+				if err != nil {
+					return err
+				}
 				client, err := requireAuth(c)
 				if err != nil {
 					return err
 				}
 				body := map[string]interface{}{
-					"domain": c.String("domain"),
-					"target": c.String("target"),
-					"port":   c.Int("port"),
-					"type":   c.String("type"),
+					"domain":      c.String("domain"),
+					"target":      c.String("target"),
+					"port":        c.Int("port"),
+					"type":        c.String("type"),
+					"workspaceId": workspaceID,
+					"projectId":   projectID,
 				}
 				if c.Bool("https") {
 					body["enforceHttps"] = true

@@ -243,3 +243,34 @@ func TestLogsHelpDescribesTheRealDefaults(t *testing.T) {
 		}
 	}
 }
+
+// The real API answers the logs of serverlets and proxies with plain text lines, not JSON.
+func TestLogsPrintPlainTextLines(t *testing.T) {
+	ts := newTestServer(t)
+	ts.on("GET", "/v2/serverlets", respond(200, []interface{}{map[string]interface{}{"id": "sl-1", "name": "web"}}))
+	ts.on("GET", "/v2/serverlets/sl-1/logs", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, "[SYSTEM] 2026-01-01T00:00:00Z INFO: created serverlet web\n[SYSTEM] 2026-01-01T00:00:01Z INFO: starting\n")
+	})
+	out, err := runArgs(t, ts, "logs", "--live=false", "web")
+	assertNoError(t, err)
+	assertContains(t, out, "INFO: created serverlet web")
+	assertContains(t, out, "INFO: starting")
+
+	ts.on("GET", "/v2/proxies/px-1/logs", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		fmt.Fprint(w, "app.example.com 1.2.3.4 - GET / 200\n")
+	})
+	out, err = runArgs(t, ts, "proxy", "logs", "px-1")
+	assertNoError(t, err)
+	assertContains(t, out, "app.example.com 1.2.3.4 - GET / 200")
+}
+
+func TestLogsKeepAnErrorOfTheAPI(t *testing.T) {
+	ts := newTestServer(t)
+	ts.on("GET", "/v2/proxies/px-1/logs", respond(400, map[string]interface{}{"message": "Bad Request"}))
+	_, err := runArgs(t, ts, "proxy", "logs", "px-1")
+	if err == nil || !strings.Contains(err.Error(), "Bad Request") {
+		t.Fatalf("want the API's error, got %v", err)
+	}
+}

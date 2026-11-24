@@ -745,3 +745,33 @@ func TestLogoutRemovesTheLoginEvenWhenTheTokenCannotBeDestroyed(t *testing.T) {
 		t.Errorf("offline: revoke error %v, error %v", revokeErr, err)
 	}
 }
+
+// A default workspace stored by an earlier login stays only while the new login can
+// still see it: the API refuses requests scoped to a workspace the token cannot read.
+func TestLoginDropsAStoredDefaultTheAccountCannotSee(t *testing.T) {
+	tempHome(t)
+	t.Setenv("CI", "")
+	server := newLoginServer(t, true)
+	cfg := &CliConfig{}
+	cfg.SetDefaultWorkspace(server.URL, "from-another-account")
+	if _, _, err := cfg.Login(server.URL, "", nil, follow(t), func(string) {}, 10*time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.DefaultWorkspaceFor(server.URL); got != "oldest" {
+		t.Errorf("default = %q, want oldest (the stored one is not in the account)", got)
+	}
+}
+
+func TestLoginKeepsAStoredDefaultTheAccountCanSee(t *testing.T) {
+	tempHome(t)
+	t.Setenv("CI", "")
+	server := newLoginServer(t, true)
+	cfg := &CliConfig{}
+	cfg.SetDefaultWorkspace(server.URL, "newer")
+	if _, _, err := cfg.Login(server.URL, "", nil, follow(t), func(string) {}, 10*time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.DefaultWorkspaceFor(server.URL); got != "newer" {
+		t.Errorf("default = %q, want newer (still in the account)", got)
+	}
+}

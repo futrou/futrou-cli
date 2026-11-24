@@ -3,6 +3,7 @@ package commands
 import (
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -338,4 +339,89 @@ func TestWorkspaceCommandsResolveAWorkspaceName(t *testing.T) {
 	assertContains(t, out, "ok")
 	_, err = runArgs(t, ts, "workspace", "limit", "--workspace", "ghost")
 	assertError(t, err)
+}
+
+// Every project-scoped listing selects the workspace and project with
+// --workspace/--project, and without them the login's default workspace and its
+// "default" project.
+func TestListsUseTheDefaultWorkspaceAndProject(t *testing.T) {
+	collections := map[string][]string{
+		"/v2/serverlets": {"serverlet", "ls"},
+		"/v2/networks":   {"network", "ls"},
+		"/v2/proxies":    {"proxy", "ls"},
+		"/v2/dns":        {"dns", "ls"},
+		"/v2/storages":   {"storage", "ls"},
+	}
+	for path, args := range collections {
+		t.Run(path, func(t *testing.T) {
+			ts := newTestServer(t)
+			writeCLIConfig(t, ts.URL, "33333333-3333-3333-3333-333333333333")
+			var query url.Values
+			ts.on("GET", "/v2/workspaces/33333333-3333-3333-3333-333333333333/projects", respond(200, []any{map[string]any{"id": "proj-default", "name": "default"}}))
+			ts.on("GET", path, func(w http.ResponseWriter, r *http.Request) {
+				query = r.URL.Query()
+				respond(200, []any{})(w, r)
+			})
+			_, err := runArgs(t, ts, args...)
+			assertNoError(t, err)
+			if query.Get("workspaceId") != "33333333-3333-3333-3333-333333333333" || query.Get("projectId") != "proj-default" {
+				t.Fatalf("query = %v, want the default workspace and project", query)
+			}
+		})
+	}
+}
+
+func TestListsAcceptAWorkspaceAndProjectID(t *testing.T) {
+	const ws, proj = "11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222"
+	for path, args := range map[string][]string{
+		"/v2/serverlets": {"serverlet", "ls"},
+		"/v2/networks":   {"network", "ls"},
+		"/v2/proxies":    {"proxy", "ls"},
+		"/v2/dns":        {"dns", "ls"},
+		"/v2/storages":   {"storage", "ls"},
+	} {
+		t.Run(path, func(t *testing.T) {
+			ts := newTestServer(t)
+			var query url.Values
+			ts.on("GET", path, func(w http.ResponseWriter, r *http.Request) {
+				query = r.URL.Query()
+				respond(200, []any{})(w, r)
+			})
+			_, err := runArgs(t, ts, append(args, "--workspace", ws, "--project", proj)...)
+			assertNoError(t, err)
+			if query.Get("workspaceId") != ws || query.Get("projectId") != proj {
+				t.Fatalf("query = %v", query)
+			}
+		})
+	}
+}
+
+// Servers and projects belong to a workspace, so only the workspace is selected.
+func TestWorkspaceListsUseTheDefaultWorkspace(t *testing.T) {
+	for path, args := range map[string][]string{"/v2/servers": {"server", "ls"}, "/v2/projects": {"project", "ls"}} {
+		t.Run(path, func(t *testing.T) {
+			ts := newTestServer(t)
+			writeCLIConfig(t, ts.URL, "33333333-3333-3333-3333-333333333333")
+			var query url.Values
+			ts.on("GET", path, func(w http.ResponseWriter, r *http.Request) {
+				query = r.URL.Query()
+				respond(200, []any{})(w, r)
+			})
+			_, err := runArgs(t, ts, args...)
+			assertNoError(t, err)
+			if query.Get("workspaceId") != "33333333-3333-3333-3333-333333333333" || query.Get("projectId") != "" {
+				t.Fatalf("query = %v, want only the default workspace", query)
+			}
+		})
+	}
+}
+
+func TestListWithoutAnyWorkspaceFails(t *testing.T) {
+	ts := newTestServer(t)
+	t.Setenv("HOME", t.TempDir())
+	ts.on("GET", "/v2/workspaces", respond(404, fixtureAPIError("not found")))
+	ts.on("GET", "/v2/auth/context", respond(404, fixtureAPIError("not found")))
+	if _, err := runArgs(t, ts, "serverlet", "ls"); err == nil {
+		t.Fatal("a listing needs a workspace")
+	}
 }

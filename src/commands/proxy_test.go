@@ -9,7 +9,7 @@ func TestProxiesList(t *testing.T) {
 	ts := newTestServer(t)
 	ts.on("GET", "/v2/proxies", respond(200, []interface{}{fixtureProxy()}))
 
-	out, err := runArgs(t, ts, "proxies", "list")
+	out, err := runArgs(t, ts, "proxies", "list", "--workspace", "11111111-1111-1111-1111-111111111111", "--project", "22222222-2222-2222-2222-222222222222")
 	assertNoError(t, err)
 	assertContains(t, out, "px-456")
 	assertContains(t, out, "example.com")
@@ -54,6 +54,7 @@ func TestProxiesCreate(t *testing.T) {
 	})
 
 	out, err := runArgs(t, ts, "proxies", "create",
+		"--workspace", "11111111-1111-1111-1111-111111111111", "--project", "22222222-2222-2222-2222-222222222222",
 		"--domain", "example.com",
 		"--target", "localhost",
 		"--port", "8080",
@@ -63,6 +64,9 @@ func TestProxiesCreate(t *testing.T) {
 
 	if received["domain"] != "example.com" {
 		t.Errorf("expected domain=example.com, got %v", received["domain"])
+	}
+	if received["workspaceId"] != "11111111-1111-1111-1111-111111111111" || received["projectId"] != "22222222-2222-2222-2222-222222222222" {
+		t.Errorf("a new proxy is created in a workspace and project: %v", received)
 	}
 	if received["target"] != "localhost" {
 		t.Errorf("expected target=localhost, got %v", received["target"])
@@ -81,6 +85,7 @@ func TestProxiesCreate_withHTTPS(t *testing.T) {
 	})
 
 	_, err := runArgs(t, ts, "proxies", "create",
+		"--workspace", "11111111-1111-1111-1111-111111111111", "--project", "22222222-2222-2222-2222-222222222222",
 		"--domain", "secure.com",
 		"--target", "backend",
 		"--https",
@@ -100,6 +105,7 @@ func TestProxiesCreate_withStrategy(t *testing.T) {
 	})
 
 	_, err := runArgs(t, ts, "proxies", "create",
+		"--workspace", "11111111-1111-1111-1111-111111111111", "--project", "22222222-2222-2222-2222-222222222222",
 		"--domain", "lb.com",
 		"--target", "backend",
 		"--strategy", "round-robin",
@@ -112,7 +118,7 @@ func TestProxiesCreate_withStrategy(t *testing.T) {
 
 func TestProxiesCreate_requiresAuth(t *testing.T) {
 	ts := newTestServer(t)
-	_, err := runArgsNoAuth(t, ts, "proxies", "create", "--domain", "x.com", "--target", "y")
+	_, err := runArgsNoAuth(t, ts, "proxies", "create", "--workspace", "11111111-1111-1111-1111-111111111111", "--project", "22222222-2222-2222-2222-222222222222", "--domain", "x.com", "--target", "y")
 	assertError(t, err)
 }
 

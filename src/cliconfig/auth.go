@@ -361,8 +361,16 @@ func (cfg *CliConfig) Login(
 	}
 	if chosen != "" {
 		cfg.SetDefaultWorkspace(apiUrl, chosen)
-	} else if _, err := cfg.EnsureDefaultWorkspace(apiUrl, token); err != nil {
-		logger.Warn("no default workspace was set (%v): pass --workspace to the commands that need one", err)
+	} else {
+		// a default stored by an earlier login (maybe of another account) is kept
+		// only while this one can see it: the API answers 403 to a request scoped
+		// to a workspace the token cannot read
+		if stored := cfg.DefaultWorkspaceFor(apiUrl); stored != "" && len(workspaces) > 0 && !hasWorkspace(workspaces, stored) {
+			delete(cfg.DefaultWorkspaces, normalizeUrlKey(apiUrl))
+		}
+		if _, err := cfg.EnsureDefaultWorkspace(apiUrl, token); err != nil {
+			logger.Warn("no default workspace was set (%v): pass --workspace to the commands that need one", err)
+		}
 	}
 
 	if err := Save(cfg); err != nil {
@@ -370,6 +378,16 @@ func (cfg *CliConfig) Login(
 	}
 
 	return userEmail, false, nil
+}
+
+// hasWorkspace reports whether one of the workspaces has the ID id.
+func hasWorkspace(workspaces []Workspace, id string) bool {
+	for _, workspace := range workspaces {
+		if workspace.ID == id {
+			return true
+		}
+	}
+	return false
 }
 
 // resolveOrPromptWorkspace resolves workspaceFlag (by UUID or name)

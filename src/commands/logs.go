@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/url"
@@ -120,8 +121,7 @@ func streamLogs(c *cli.Context, client *services.ApiClient, base string, opts lo
 
 	seen := map[string]bool{}
 	for {
-		var entries interface{}
-		_, err := client.RequestInto("GET", path, nil, &entries)
+		entries, err := fetchLogEntries(client, path)
 		if err != nil {
 			return err
 		}
@@ -136,6 +136,30 @@ func streamLogs(c *cli.Context, client *services.ApiClient, base string, opts lo
 		}
 		time.Sleep(logsPollInterval)
 	}
+}
+
+// fetchLogEntries GETs a logs endpoint. Entries come as a JSON array, but the API
+// also answers with plain text, one entry per line (serverlet, proxy and server
+// logs do); each line is then an entry.
+func fetchLogEntries(client *services.ApiClient, path string) (interface{}, error) {
+	data, _, _, err := client.DownloadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var entries interface{}
+	if len(bytes.TrimSpace(data)) == 0 {
+		return []interface{}{}, nil
+	}
+	if json.Unmarshal(data, &entries) == nil {
+		return entries, nil
+	}
+	lines := []interface{}{}
+	for _, line := range strings.Split(string(data), "\n") {
+		if line = strings.TrimRight(line, "\r"); line != "" {
+			lines = append(lines, line)
+		}
+	}
+	return lines, nil
 }
 
 // resourceLogsAction returns the Action for "<resource> logs <id>".

@@ -12,14 +12,19 @@ var projectCommand = &cli.Command{
 	Subcommands: []*cli.Command{
 		{
 			Name:  "ls",
-			Usage: "List all projects",
+			Usage: "List the projects of a workspace (defaults to futrou.json|yaml, then the login workspace)",
+			Flags: []cli.Flag{workspaceFlag},
 			Action: func(c *cli.Context) error {
+				query, err := workspaceQuery(c)
+				if err != nil {
+					return err
+				}
 				client, err := requireAuth(c)
 				if err != nil {
 					return err
 				}
 				var result interface{}
-				_, err = client.RequestInto("GET", "/v2/projects", nil, &result)
+				_, err = client.RequestInto("GET", "/v2/projects"+query, nil, &result)
 				if err != nil {
 					return err
 				}

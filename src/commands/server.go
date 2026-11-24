@@ -16,16 +16,20 @@ var serverCommand = &cli.Command{
 	Subcommands: []*cli.Command{
 		{
 			Name:  "ls",
-			Usage: "List servers",
-			Flags: []cli.Flag{&cli.StringFlag{Name: "region", Usage: "Only list servers in this region ID"}},
+			Usage: "List the servers of a workspace (defaults to futrou.json|yaml, then the login workspace)",
+			Flags: []cli.Flag{workspaceFlag, &cli.StringFlag{Name: "region", Usage: "Only list servers in this region ID"}},
 			Action: func(c *cli.Context) error {
+				path, err := workspaceQuery(c)
+				if err != nil {
+					return err
+				}
 				client, err := requireAuth(c)
 				if err != nil {
 					return err
 				}
-				path := "/v2/servers"
+				path = "/v2/servers" + path
 				if v := c.String("region"); v != "" {
-					path += "?regionId=" + v
+					path += "&regionId=" + url.QueryEscape(v)
 				}
 				var result interface{}
 				_, err = client.RequestInto("GET", path, nil, &result)

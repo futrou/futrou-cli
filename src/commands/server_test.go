@@ -9,7 +9,7 @@ import (
 func TestServerLs(t *testing.T) {
 	ts := newTestServer(t)
 	ts.on("GET", "/v2/servers", respond(200, []interface{}{map[string]interface{}{"id": "srv-1", "name": "edge-1"}}))
-	for _, args := range [][]string{{"server", "ls"}, {"servers", "list"}} {
+	for _, args := range [][]string{{"server", "ls", "--workspace", "11111111-1111-1111-1111-111111111111"}, {"servers", "list", "--workspace", "11111111-1111-1111-1111-111111111111"}} {
 		out, err := runArgs(t, ts, args...)
 		assertNoError(t, err)
 		assertContains(t, out, "srv-1")
@@ -134,7 +134,7 @@ func TestServerLsRegionFilterAndErrors(t *testing.T) {
 		}
 		respond(200, []any{map[string]any{"id": "srv-1"}})(w, r)
 	})
-	_, err := runArgs(t, ts, "server", "ls", "--region", "reg-1")
+	_, err := runArgs(t, ts, "server", "ls", "--workspace", "11111111-1111-1111-1111-111111111111", "--region", "reg-1")
 	assertNoError(t, err)
 
 	failing := newTestServer(t)
@@ -142,7 +142,7 @@ func TestServerLsRegionFilterAndErrors(t *testing.T) {
 	failing.on("POST", "/v2/servers", respond(422, fixtureAPIError("invalid")))
 	failing.on("PATCH", "/v2/servers/srv-1", respond(404, fixtureAPIError("nope")))
 	failing.on("DELETE", "/v2/servers/srv-1", respond(404, fixtureAPIError("nope")))
-	for _, args := range [][]string{{"server", "ls"}, {"server", "create", "--name", "x"}, {"server", "update", "--name", "x", "srv-1"}, {"server", "rm", "srv-1"}} {
+	for _, args := range [][]string{{"server", "ls", "--workspace", "11111111-1111-1111-1111-111111111111"}, {"server", "create", "--name", "x"}, {"server", "update", "--name", "x", "srv-1"}, {"server", "rm", "srv-1"}} {
 		_, err := runArgs(t, failing, args...)
 		assertError(t, err)
 	}
@@ -180,7 +180,7 @@ func TestServerCommandsReportAPIFailures(t *testing.T) {
 		ts.on(route.method, route.path, respond(500, map[string]string{"message": "boom"}))
 	}
 	for _, args := range [][]string{
-		{"server", "ls"}, {"server", "show", "srv-1"}, {"server", "create", "--name", "x"},
+		{"server", "ls", "--workspace", "11111111-1111-1111-1111-111111111111"}, {"server", "show", "srv-1"}, {"server", "create", "--name", "x"},
 		{"server", "update", "--name", "y", "srv-1"}, {"server", "rm", "srv-1"}, {"server", "metrics", "srv-1"},
 	} {
 		_, err := runArgs(t, ts, args...)
@@ -209,7 +209,7 @@ func TestServerLsFiltersByRegion(t *testing.T) {
 		query = r.URL.RawQuery
 		respond(200, []any{})(w, r)
 	})
-	_, err := runArgs(t, ts, "server", "ls", "--region", "reg-eu")
+	_, err := runArgs(t, ts, "server", "ls", "--workspace", "11111111-1111-1111-1111-111111111111", "--region", "reg-eu")
 	assertNoError(t, err)
 	if !strings.Contains(query, "reg-eu") {
 		t.Fatalf("the region filter must reach the API: %q", query)

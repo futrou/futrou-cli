@@ -10,7 +10,7 @@ func TestSingularNamesAndHiddenPlurals(t *testing.T) {
 	ts.on("GET", "/v2/serverlets", respond(200, []interface{}{}))
 	ts.on("GET", "/v2/proxies", respond(200, []interface{}{}))
 	for _, args := range [][]string{{"serverlet", "ls"}, {"serverlets", "ls"}, {"serverlet", "list"}, {"proxy", "ls"}, {"proxies", "list"}} {
-		if _, err := runArgs(t, ts, args...); err != nil {
+		if _, err := runArgs(t, ts, append(args, "--workspace", "11111111-1111-1111-1111-111111111111", "--project", "22222222-2222-2222-2222-222222222222")...); err != nil {
 			t.Fatalf("%v: %v", args, err)
 		}
 	}

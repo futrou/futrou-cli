@@ -12,14 +12,19 @@ var networkCommand = &cli.Command{
 	Subcommands: []*cli.Command{
 		{
 			Name:  "ls",
-			Usage: "List all networks",
+			Usage: "List networks in a project (defaults to futrou.json|yaml, then the login workspace's \"default\" project)",
+			Flags: []cli.Flag{workspaceFlag, projectFlag},
 			Action: func(c *cli.Context) error {
+				query, err := projectQuery(c)
+				if err != nil {
+					return err
+				}
 				client, err := requireAuth(c)
 				if err != nil {
 					return err
 				}
 				var result interface{}
-				_, err = client.RequestInto("GET", "/v2/networks", nil, &result)
+				_, err = client.RequestInto("GET", "/v2/networks"+query, nil, &result)
 				if err != nil {
 					return err
 				}

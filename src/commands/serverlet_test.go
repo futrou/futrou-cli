@@ -19,7 +19,7 @@ func TestServerletsList(t *testing.T) {
 	ts := newTestServer(t)
 	ts.on("GET", "/v2/serverlets", respond(200, []interface{}{fixtureServerlet()}))
 
-	out, err := runArgs(t, ts, "serverlets", "list")
+	out, err := runArgs(t, ts, "serverlets", "list", "--workspace", "11111111-1111-1111-1111-111111111111", "--project", "22222222-2222-2222-2222-222222222222")
 	assertNoError(t, err)
 	assertContains(t, out, "sl-123")
 	assertContains(t, out, "my-app")
@@ -29,7 +29,7 @@ func TestServerletsList_empty(t *testing.T) {
 	ts := newTestServer(t)
 	ts.on("GET", "/v2/serverlets", respond(200, []interface{}{}))
 
-	out, err := runArgs(t, ts, "serverlets", "list")
+	out, err := runArgs(t, ts, "serverlets", "list", "--workspace", "11111111-1111-1111-1111-111111111111", "--project", "22222222-2222-2222-2222-222222222222")
 	assertNoError(t, err)
 	assertContains(t, out, "No results.")
 }

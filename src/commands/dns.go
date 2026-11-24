@@ -12,21 +12,26 @@ var dnsCommand = &cli.Command{
 	Subcommands: []*cli.Command{
 		{
 			Name:  "ls",
-			Usage: "List all DNS zones",
+			Usage: "List DNS zones in a project (defaults to futrou.json|yaml, then the login workspace's \"default\" project)",
+			Flags: []cli.Flag{workspaceFlag, projectFlag},
 			Action: func(c *cli.Context) error {
+				query, err := projectQuery(c)
+				if err != nil {
+					return err
+				}
 				client, err := requireAuth(c)
 				if err != nil {
 					return err
 				}
 				var result interface{}
-				_, err = client.RequestInto("GET", "/v2/dns", nil, &result)
+				_, err = client.RequestInto("GET", "/v2/dns"+query, nil, &result)
 				if err != nil {
 					return err
 				}
 				if isJSON(c) {
 					return printJSON(result)
 				}
-				printTable(result, []string{"id", "name", "createdAt"})
+				printTable(result, []string{"id", "domain", "createdAt"})
 				return nil
 			},
 		},
@@ -38,17 +43,25 @@ var dnsCommand = &cli.Command{
 		},
 		{
 			Name:  "create",
-			Usage: "Create a DNS zone",
+			Usage: "Create a DNS zone (defaults to futrou.json|yaml, then the login workspace's \"default\" project)",
 			Flags: []cli.Flag{
 				&cli.StringFlag{Name: "name", Required: true, Usage: "Zone domain name"},
+				workspaceFlag,
+				projectFlag,
 			},
 			Action: func(c *cli.Context) error {
+				workspaceID, projectID, err := resolveScope(c)
+				if err != nil {
+					return err
+				}
 				client, err := requireAuth(c)
 				if err != nil {
 					return err
 				}
 				body := map[string]interface{}{
-					"name": c.String("name"),
+					"domain":      c.String("name"),
+					"workspaceId": workspaceID,
+					"projectId":   projectID,
 				}
 				var result interface{}
 				_, err = client.RequestInto("POST", "/v2/dns", body, &result)

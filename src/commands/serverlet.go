@@ -23,14 +23,19 @@ var serverletCommand = &cli.Command{
 	Subcommands: []*cli.Command{
 		{
 			Name:  "ls",
-			Usage: "List all serverlets",
+			Usage: "List serverlets in a project (defaults to futrou.json|yaml, then the login workspace's \"default\" project)",
+			Flags: []cli.Flag{workspaceFlag, projectFlag},
 			Action: func(c *cli.Context) error {
+				query, err := projectQuery(c)
+				if err != nil {
+					return err
+				}
 				client, err := requireAuth(c)
 				if err != nil {
 					return err
 				}
 				var result interface{}
-				_, err = client.RequestInto("GET", "/v2/serverlets", nil, &result)
+				_, err = client.RequestInto("GET", "/v2/serverlets"+query, nil, &result)
 				if err != nil {
 					return err
 				}

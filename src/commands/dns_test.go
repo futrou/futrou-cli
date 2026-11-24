@@ -9,7 +9,7 @@ func TestDNSList(t *testing.T) {
 	ts := newTestServer(t)
 	ts.on("GET", "/v2/dns", respond(200, []interface{}{fixtureDNSZone()}))
 
-	out, err := runArgs(t, ts, "dns", "list")
+	out, err := runArgs(t, ts, "dns", "list", "--workspace", "11111111-1111-1111-1111-111111111111", "--project", "22222222-2222-2222-2222-222222222222")
 	assertNoError(t, err)
 	assertContains(t, out, "dns-789")
 	assertContains(t, out, "example.com")
@@ -52,17 +52,20 @@ func TestDNSCreate(t *testing.T) {
 		respond(201, fixtureDNSZone())(w, r)
 	})
 
-	out, err := runArgs(t, ts, "dns", "create", "--name", "example.com")
+	out, err := runArgs(t, ts, "dns", "create", "--workspace", "11111111-1111-1111-1111-111111111111", "--project", "22222222-2222-2222-2222-222222222222", "--name", "example.com")
 	assertNoError(t, err)
 	assertContains(t, out, "created")
-	if received["name"] != "example.com" {
-		t.Errorf("expected name=example.com, got %v", received["name"])
+	if received["domain"] != "example.com" {
+		t.Errorf("expected domain=example.com, got %v", received["domain"])
+	}
+	if received["workspaceId"] != "11111111-1111-1111-1111-111111111111" || received["projectId"] != "22222222-2222-2222-2222-222222222222" {
+		t.Errorf("a new zone is created in a workspace and project: %v", received)
 	}
 }
 
 func TestDNSCreate_requiresAuth(t *testing.T) {
 	ts := newTestServer(t)
-	_, err := runArgsNoAuth(t, ts, "dns", "create", "--name", "x.com")
+	_, err := runArgsNoAuth(t, ts, "dns", "create", "--workspace", "11111111-1111-1111-1111-111111111111", "--project", "22222222-2222-2222-2222-222222222222", "--name", "x.com")
 	assertError(t, err)
 }
 
@@ -343,4 +346,13 @@ func TestDNSRecordsDelete_apiError(t *testing.T) {
 
 	_, err := runArgs(t, ts, "dns", "records", "delete", "dns-789", "bad-id")
 	assertError(t, err)
+}
+
+// The API names a zone by "domain"; the listing must show it (not an empty NAME).
+func TestDNSListShowsTheDomainOfAZone(t *testing.T) {
+	ts := newTestServer(t)
+	ts.on("GET", "/v2/dns", respond(200, []interface{}{map[string]any{"id": "dns-1", "domain": "zone.example.org", "createdAt": "2026-01-01T00:00:00Z"}}))
+	out, err := runArgs(t, ts, "dns", "ls", "--workspace", "11111111-1111-1111-1111-111111111111", "--project", "22222222-2222-2222-2222-222222222222")
+	assertNoError(t, err)
+	assertContains(t, out, "zone.example.org")
 }

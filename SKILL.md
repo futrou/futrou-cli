@@ -827,13 +827,13 @@ futrou workspace user add [--workspace <string>] --user-id <string> [--role <str
 futrou workspace user update <workspace-user-id> [--workspace <string>] --role <string>  # Update a user's role in a workspace
 futrou workspace user rm <workspace-user-id> [--workspace <string>]                      # Remove a user from a workspace
 
-futrou project ls                                                                       # List all projects
+futrou project ls [--workspace <string>]                                                # List the projects of a workspace (defaults to futrou.json|yaml, then the login workspace)
 futrou project show <id>                                                                # Show a project by ID
 futrou project create --name <string> [--display-name <string>] [--workspace <string>]  # Create a project
 futrou project update <id> [--name <string>] [--display-name <string>]                  # Update a project
 futrou project rm <id>                                                                  # Delete a project
 
-futrou server ls [--region <string>]                                                           # List servers
+futrou server ls [--workspace <string>] [--region <string>]                                    # List the servers of a workspace (defaults to futrou.json|yaml, then the login workspace)
 futrou server show <id>                                                                        # Show a server by ID
 futrou server create --name <string> [--region <string>] [--workspace <string>]                # Create a server in the workspace
 futrou server update <id> [--name <string>] [--ipv4 <string>] [--ipv6 <string>] [--api-port <string>]  # Update a server
@@ -841,7 +841,7 @@ futrou server rm <id>                                                           
 futrou server metrics <id>                                                                     # Show server metrics
 futrou server logs <id> [--type <string>] [--id <string>] [--instance <string>] [LOG-OPTIONS]  # View server logs
 
-futrou serverlet ls                                                                  # List all serverlets
+futrou serverlet ls [--workspace <string>] [--project <string>]                      # List serverlets in a project (defaults to futrou.json|yaml, then the login workspace's "default" project)
 futrou serverlet show <id>                                                           # Show a serverlet by ID
 futrou serverlet create --name <string> --image <string> --plan <string> [--workspace <string>] [--project <string>]  # Create a new serverlet (defaults to futrou.json|yaml, then the login workspace's "default" project)
 futrou serverlet update <id> [--name <string>] [--image <string>] [--plan <string>]  # Update a serverlet
@@ -862,7 +862,7 @@ futrou serverlet instance metrics <id> <instance-id>                            
 futrou serverlet shell <id> [--instance <string>]                                    # Open an interactive shell in a serverlet
 futrou serverlet exec <id> -- <command> [--instance <string>]                        # Run a command in a serverlet and wait for it to exit
 
-futrou network ls                                                                              # List all networks
+futrou network ls [--workspace <string>] [--project <string>]                                  # List networks in a project (defaults to futrou.json|yaml, then the login workspace's "default" project)
 futrou network show <id>                                                                       # Show a network by ID
 futrou network create --name <string> [--ipv4 <string>] [--ipv6 <string>] [--internal] [--region <string>] [--workspace <string>] [--project <string>]  # Create a network (defaults to futrou.json|yaml, then the login workspace's "default" project)
 futrou network update <id> [--name <string>] [--ipv4 <string>] [--ipv6 <string>] [--internal]  # Update a network
@@ -870,29 +870,29 @@ futrou network rm <id>                                                          
 futrou network devices <id>                                                                    # List devices attached to a network
 futrou network metrics <id>                                                                    # Show network metrics
 
-futrou proxy ls                            # List all proxies
-futrou proxy show <id>                     # Show a proxy by ID
-futrou proxy create --domain <string> --target <string> [--port <int>] [--type <string>] [--strategy <string>] [--https]  # Create a new proxy
+futrou proxy ls [--workspace <string>] [--project <string>]  # List proxies in a project (defaults to futrou.json|yaml, then the login workspace's "default" project)
+futrou proxy show <id>                                       # Show a proxy by ID
+futrou proxy create [--workspace <string>] [--project <string>] --domain <string> --target <string> [--port <int>] [--type <string>] [--strategy <string>] [--https]  # Create a new proxy (defaults to futrou.json|yaml, then the login workspace's "default" project)
 futrou proxy update <id> [--domain <string>] [--target <string>] [--port <int>] [--type <string>] [--https]  # Update a proxy
-futrou proxy rm <id>                       # Delete a proxy
-futrou proxy purge <id>                    # Purge cached responses for a proxy
-futrou proxy metrics <id>                  # Get metrics for a proxy
-futrou proxy logs <id> [LOG-OPTIONS]       # View logs for a proxy
-futrou proxy logs tail <id> [LOG-OPTIONS]  # View recent logs for a proxy
+futrou proxy rm <id>                                         # Delete a proxy
+futrou proxy purge <id>                                      # Purge cached responses for a proxy
+futrou proxy metrics <id>                                    # Get metrics for a proxy
+futrou proxy logs <id> [LOG-OPTIONS]                         # View logs for a proxy
+futrou proxy logs tail <id> [LOG-OPTIONS]                    # View recent logs for a proxy
 
-futrou dns ls                                 # List all DNS zones
-futrou dns show <id>                          # Show a DNS zone by ID
-futrou dns create --name <string>             # Create a DNS zone
-futrou dns update <id> [--name <string>]      # Update a DNS zone
-futrou dns rm <id>                            # Delete a DNS zone
-futrou dns metrics <id>                       # Get metrics for a DNS zone
-futrou dns logs <id> [LOG-OPTIONS]            # View logs for a DNS zone
-futrou dns logs tail <id> [LOG-OPTIONS]       # View recent logs for a DNS zone
-futrou dns record ls <zone-id>                # List records in a DNS zone
-futrou dns record show <zone-id> <record-id>  # Show a DNS record
+futrou dns ls [--workspace <string>] [--project <string>]                      # List DNS zones in a project (defaults to futrou.json|yaml, then the login workspace's "default" project)
+futrou dns show <id>                                                           # Show a DNS zone by ID
+futrou dns create --name <string> [--workspace <string>] [--project <string>]  # Create a DNS zone (defaults to futrou.json|yaml, then the login workspace's "default" project)
+futrou dns update <id> [--name <string>]                                       # Update a DNS zone
+futrou dns rm <id>                                                             # Delete a DNS zone
+futrou dns metrics <id>                                                        # Get metrics for a DNS zone
+futrou dns logs <id> [LOG-OPTIONS]                                             # View logs for a DNS zone
+futrou dns logs tail <id> [LOG-OPTIONS]                                        # View recent logs for a DNS zone
+futrou dns record ls <zone-id>                                                 # List records in a DNS zone
+futrou dns record show <zone-id> <record-id>                                   # Show a DNS record
 futrou dns record create <zone-id> --name <string> --type <string> --value <string> [--ttl <int>] [--priority <int>]  # Create a DNS record
 futrou dns record update <zone-id> <record-id> [--name <string>] [--type <string>] [--value <string>] [--ttl <int>] [--priority <int>]  # Update a DNS record
-futrou dns record rm <zone-id> <record-id>    # Delete a DNS record
+futrou dns record rm <zone-id> <record-id>                                     # Delete a DNS record
 
 futrou storage ls [--workspace <string>] [--project <string>]                                      # List storages in a project (defaults to futrou.json|yaml, then the login workspace's "default" project)
 futrou storage show <id>                                                                           # Show a storage by ID
