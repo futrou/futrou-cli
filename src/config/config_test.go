@@ -1741,3 +1741,57 @@ func TestProjectCommandsAreLoadedSavedAndKeptByAPull(t *testing.T) {
 		t.Fatalf("a pull must keep the commands: %#v", cfg)
 	}
 }
+
+// The API expands relations in its list responses. serverletPlan carries cpu as a
+// decimal string ("8.00") and ram as a number, which the generated model rejects;
+// the pulled config only needs the plan's ID, so expanded relations are dropped.
+func TestPullIgnoresExpandedRelationsOfTheAPI(t *testing.T) {
+	api := pullFixture()
+	api["/v2/serverlets"] = []map[string]interface{}{{
+		"id": "sl-1", "name": "web", "image": "nginx", "serverletPlanId": "plan-1",
+		"serverletPlan": map[string]interface{}{"id": "plan-1", "name": "3xl", "cpu": "8.00", "ram": 12288},
+	}}
+	api["/v2/networks"] = []map[string]interface{}{{
+		"id": "net-1", "name": "backend", "regionId": "reg-1",
+		"region": map[string]interface{}{"id": "reg-1", "name": "europe"},
+	}}
+	cfg := &Config{Workspace: "acme", Project: "demo"}
+	if err := cfg.Pull(api, ""); err != nil {
+		t.Fatalf("pull must accept the API's expanded relations: %v", err)
+	}
+	if len(cfg.Serverlets) != 1 || cfg.Serverlets[0].ServerletPlanId != "plan-1" {
+		t.Fatalf("the plan ID must survive: %#v", cfg.Serverlets)
+	}
+	data, _ := cfg.ToJSON()
+	for _, leaked := range []string{`"serverletPlan"`, `"cpu"`, `"region":`} {
+		if strings.Contains(string(data), leaked) {
+			t.Errorf("pulled config must not contain %s:\n%s", leaked, data)
+		}
+	}
+}
+
+// The API stores a serverlet's networks as IDs; the config names them.
+func TestPullNamesTheNetworksOfAServerlet(t *testing.T) {
+	api := pullFixture()
+	api["/v2/serverlets"] = []map[string]interface{}{{"id": "sl-1", "name": "web", "image": "nginx", "networks": []interface{}{"net-1", "unknown-net"}}}
+	cfg := &Config{Workspace: "acme", Project: "demo"}
+	if err := cfg.Pull(api, ""); err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Serverlets[0].Networks; !reflect.DeepEqual(got, []string{"backend", "unknown-net"}) {
+		t.Fatalf("networks = %v, want the name of a known network and an unknown ID left as it is", got)
+	}
+}
+
+// The API maps a storage ID to the path; the config maps the path to the storage.
+func TestPullMapsMountsToPathAndStorage(t *testing.T) {
+	api := pullFixture()
+	api["/v2/serverlets"] = []map[string]interface{}{{"id": "sl-1", "name": "web", "image": "nginx", "mounts": map[string]interface{}{"st-1": "/data"}}}
+	cfg := &Config{Workspace: "acme", Project: "demo"}
+	if err := cfg.Pull(api, ""); err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Serverlets[0].Mounts; !reflect.DeepEqual(got, map[string]string{"/data": "st-1"}) {
+		t.Fatalf("mounts = %v, want {/data: st-1}", got)
+	}
+}

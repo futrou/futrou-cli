@@ -32,6 +32,10 @@ import (
 // resource types, with deployment-only fields added where the API response
 // models do not expose them.
 type Config struct {
+	// pulledWorkspaceID and pulledProjectID are the IDs a Pull resolved; they are
+	// not part of the file (see Scope).
+	pulledWorkspaceID, pulledProjectID string
+
 	Schema    string `json:"$schema,omitempty"`
 	Workspace string `json:"workspace,omitempty"`
 	Project   string `json:"project,omitempty"`
@@ -392,6 +396,12 @@ type APIRequester interface {
 	RequestInto(method, path string, body interface{}, value interface{}) (int, error)
 }
 
+// Scope is the workspace and project IDs the last Pull resolved, "" before one.
+// New resources are created in them: the API refuses a create without one.
+func (cfg *Config) Scope() (workspaceID, projectID string) {
+	return cfg.pulledWorkspaceID, cfg.pulledProjectID
+}
+
 // Pull fills this config from the current cloud representation of selector.
 // An empty selector uses cfg.Project.
 func (cfg *Config) Pull(client APIRequester, selector string) error {
@@ -445,6 +455,8 @@ func (cfg *Config) Pull(client APIRequester, selector string) error {
 	if err != nil {
 		return err
 	}
+	nameNetworks(serverlets, networks)
+	pathMounts(serverlets)
 	locks := resourceLocks(project, workspace, networks, serverlets, dns, proxies, storages, crons)
 	for _, item := range staticos {
 		if id, _ := item["id"].(string); id != "" && stringValue(item["name"]) != "" {
@@ -460,10 +472,56 @@ func (cfg *Config) Pull(client APIRequester, selector string) error {
 	if err := json.Unmarshal(data, cfg); err != nil {
 		return fmt.Errorf("reading pulled configuration: %w", err)
 	}
+	cfg.pulledWorkspaceID, cfg.pulledProjectID = project.WorkspaceId, project.Id
+	if cfg.pulledWorkspaceID == "" {
+		cfg.pulledWorkspaceID = workspaceID
+	}
 	if cfg.Project == "" {
 		cfg.Project = project.Id
 	}
 	return cfg.Validate()
+}
+
+// nameNetworks replaces the network IDs in the "networks" of every serverlet
+// with the network's name: the API stores IDs, the config (and a deploy that
+// compares against it) uses names. An ID of no pulled network stays.
+func nameNetworks(serverlets, networks []map[string]interface{}) {
+	names := map[string]string{}
+	for _, network := range networks {
+		if id, name := stringValue(network["id"]), stringValue(network["name"]); id != "" && name != "" {
+			names[id] = name
+		}
+	}
+	for _, serverlet := range serverlets {
+		list, ok := serverlet["networks"].([]interface{})
+		if !ok {
+			continue
+		}
+		named := make([]interface{}, len(list))
+		for i, entry := range list {
+			named[i] = entry
+			if name, ok := names[stringValue(entry)]; ok {
+				named[i] = name
+			}
+		}
+		serverlet["networks"] = named
+	}
+}
+
+// pathMounts turns the mounts of every serverlet from the API's storage ID ->
+// path into the config's path -> storage.
+func pathMounts(serverlets []map[string]interface{}) {
+	for _, serverlet := range serverlets {
+		mounts, ok := serverlet["mounts"].(map[string]interface{})
+		if !ok {
+			continue
+		}
+		inverted := make(map[string]interface{}, len(mounts))
+		for storage, path := range mounts {
+			inverted[stringValue(path)] = storage
+		}
+		serverlet["mounts"] = inverted
+	}
 }
 
 func resourceLocks(project *api.Project, workspace string, networks, serverlets, dns, proxies, storages, crons []map[string]interface{}) map[string]string {
@@ -660,6 +718,9 @@ func staticoWebsites(items []map[string]interface{}) []map[string]interface{} {
 	return out
 }
 
+// expandedRelations are the objects the API embeds next to the ID of a related resource.
+var expandedRelations = []string{"serverletPlan", "dnsPlan", "proxyPlan", "storagePlan", "cronPlan", "region", "project", "workspace"}
+
 func portableItems(items []map[string]interface{}) []map[string]interface{} {
 	for _, item := range items {
 		delete(item, "id")
@@ -673,6 +734,12 @@ func portableItems(items []map[string]interface{}) []map[string]interface{} {
 		delete(item, "dnsId")
 		delete(item, "workspaceId")
 		delete(item, "recordId")
+		// relations the API expands next to their IDs (serverletPlan next to
+		// serverletPlanId, ...): the config keeps the ID, and the expanded copy
+		// does not match the generated model (a plan's cpu is the string "8.00")
+		for _, relation := range expandedRelations {
+			delete(item, relation)
+		}
 		if records, ok := item["records"].([]map[string]interface{}); ok {
 			portableItems(records)
 		}

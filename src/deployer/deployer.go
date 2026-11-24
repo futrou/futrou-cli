@@ -98,6 +98,19 @@ func (w *planWorkspace) get() (string, error) {
 	return w.id, nil
 }
 
+// addScope puts the workspace and project of the pulled cloud project in the
+// payload of a new resource (the API refuses a create without them); an ID the
+// config already set stays.
+func addScope(payload map[string]interface{}, pulled *config.Config) {
+	workspaceID, projectID := pulled.Scope()
+	if _, ok := payload["workspaceId"]; !ok && workspaceID != "" {
+		payload["workspaceId"] = workspaceID
+	}
+	if _, ok := payload["projectId"]; !ok && projectID != "" {
+		payload["projectId"] = projectID
+	}
+}
+
 func BuildPlan(client *services.ApiClient, cfg *config.Config, destroy bool) (*Plan, error) {
 	workspace := &planWorkspace{client: client, cfg: cfg}
 	var remoteConfig *config.Config
@@ -179,6 +192,9 @@ func BuildPlan(client *services.ApiClient, cfg *config.Config, destroy bool) (*P
 				continue
 			}
 			payload := writablePayload(item)
+			if match == nil && remoteConfig != nil {
+				addScope(payload, remoteConfig)
+			}
 			if spec.resource == "statico" {
 				payload = onlyKeys(payload, staticoWebsiteKeys)
 			}
@@ -665,6 +681,33 @@ func BuildTeardownPlan(client *services.ApiClient, cfg *config.Config) (*Plan, e
 	return plan, nil
 }
 
+// apiBody is the request body of a payload: the config keeps a serverlet's
+// entrypoint as one string (the API takes an array of arguments) and its
+// mounts as path -> storage (the API takes storage ID -> path).
+func apiBody(payload map[string]interface{}) map[string]interface{} {
+	entrypoint, hasEntrypoint := payload["entrypoint"].(string)
+	mounts, hasMounts := payload["mounts"].(map[string]interface{})
+	if !hasEntrypoint && !hasMounts {
+		return payload
+	}
+	body := make(map[string]interface{}, len(payload))
+	for key, value := range payload {
+		body[key] = value
+	}
+	if hasEntrypoint {
+		body["entrypoint"] = strings.Fields(entrypoint)
+	}
+	if hasMounts {
+		// the config maps a path to a storage, the API a storage ID to the path
+		inverted := make(map[string]interface{}, len(mounts))
+		for path, storage := range mounts {
+			inverted[fmt.Sprint(storage)] = path
+		}
+		body["mounts"] = inverted
+	}
+	return body
+}
+
 // Apply executes every action in order.
 func Apply(client *services.ApiClient, plan *Plan) error {
 	for _, action := range plan.Actions {
@@ -680,7 +723,7 @@ func Apply(client *services.ApiClient, plan *Plan) error {
 		method := "POST"
 		switch action.Type {
 		case Create:
-			body = action.Payload
+			body = apiBody(action.Payload)
 		case Update:
 			if action.ID == "" {
 				var err error
@@ -689,7 +732,7 @@ func Apply(client *services.ApiClient, plan *Plan) error {
 					return err
 				}
 			}
-			method, body, path = "PATCH", action.Changes, action.Path+"/"+action.ID
+			method, body, path = "PATCH", apiBody(action.Changes), action.Path+"/"+action.ID
 		case Delete:
 			if action.ID == "" {
 				var err error

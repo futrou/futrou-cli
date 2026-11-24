@@ -1540,3 +1540,99 @@ func TestStaticoIsADeployedResourceTornDownBeforeServerlets(t *testing.T) {
 		t.Fatalf("teardown order = %s", order)
 	}
 }
+
+// The real API refuses to create a resource without workspaceId or projectId.
+func TestApplySendsTheProjectScopeWithEveryCreate(t *testing.T) {
+	f := projectFake(t)
+	plan, err := BuildPlan(f.client(), fullConfig(), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, action := range plan.Actions {
+		if action.Type != Create {
+			continue
+		}
+		if action.Payload["projectId"] != "proj-1" {
+			t.Errorf("create %s %q must carry projectId proj-1: %#v", action.Resource, action.Name, action.Payload)
+		}
+		if action.Payload["workspaceId"] != "ws-1" {
+			t.Errorf("create %s %q must carry workspaceId ws-1: %#v", action.Resource, action.Name, action.Payload)
+		}
+	}
+	if err := Apply(f.client(), plan); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Without a project there is no scope to add (the API's token decides).
+func TestPlanWithoutAProjectAddsNoScope(t *testing.T) {
+	f := projectFake(t)
+	cfg := &config.Config{Networks: []config.NetworkConfig{{Name: "backend"}}}
+	plan, err := BuildPlan(f.client(), cfg, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, action := range plan.Actions {
+		if _, ok := action.Payload["projectId"]; ok {
+			t.Errorf("no project configured, yet the payload has a projectId: %#v", action.Payload)
+		}
+	}
+}
+
+// The API takes a serverlet's entrypoint as an array; the config keeps one string.
+func TestApplySendsTheEntrypointAsAnArray(t *testing.T) {
+	f := projectFake(t)
+	cfg := &config.Config{Workspace: "acme", Project: "demo", Serverlets: []config.ServerletConfig{
+		{Serverlet: api.Serverlet{Name: "web", Image: "nginx:1"}, ServerletPlanId: "plan-1", Entrypoint: "node server.js"},
+	}}
+	plan, err := BuildPlan(f.client(), cfg, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Apply(f.client(), plan); err != nil {
+		t.Fatal(err)
+	}
+	got := f.collections["/v2/serverlets"][0]["entrypoint"]
+	if !reflect.DeepEqual(got, []interface{}{"node", "server.js"}) {
+		t.Fatalf("entrypoint sent to the API = %#v, want [node server.js]", got)
+	}
+	// planned again, the stored array equals the configured string: nothing to do
+	again, err := BuildPlan(f.client(), cfg, false)
+	if err != nil || len(again.Actions) != 0 {
+		t.Fatalf("a second plan must be empty: %v %v", err, again.Actions)
+	}
+	// an update sends an array as well
+	cfg.Serverlets[0].Entrypoint = "node other.js"
+	update, err := BuildPlan(f.client(), cfg, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Apply(f.client(), update); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.collections["/v2/serverlets"][0]["entrypoint"]; !reflect.DeepEqual(got, []interface{}{"node", "other.js"}) {
+		t.Fatalf("updated entrypoint = %#v", got)
+	}
+}
+
+// The config maps a path to a storage ("/data": id); the API maps the storage ID to the path.
+func TestApplySendsMountsAsStorageToPath(t *testing.T) {
+	f := projectFake(t)
+	cfg := &config.Config{Workspace: "acme", Project: "demo", Serverlets: []config.ServerletConfig{
+		{Serverlet: api.Serverlet{Name: "web", Image: "nginx:1", Mounts: map[string]string{"/data": "st-1"}}, ServerletPlanId: "plan-1"},
+	}}
+	plan, err := BuildPlan(f.client(), cfg, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Apply(f.client(), plan); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.collections["/v2/serverlets"][0]["mounts"]; !reflect.DeepEqual(got, map[string]interface{}{"st-1": "/data"}) {
+		t.Fatalf("mounts sent to the API = %#v, want {st-1: /data}", got)
+	}
+	again, err := BuildPlan(f.client(), cfg, false)
+	if err != nil || len(again.Actions) != 0 {
+		t.Fatalf("a second plan must be empty: %v %v", err, again.Actions)
+	}
+}
