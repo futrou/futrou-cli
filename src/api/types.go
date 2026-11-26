@@ -1,5 +1,5 @@
 // Code generated from the Futrou OpenAPI spec. DO NOT EDIT.
-// Generated at: 2026-11-15T20:47:07Z
+// Generated at: 2026-11-26T18:57:30Z
 // Source: https://api.futrou.com/v2/openapi.json
 
 package api
@@ -99,6 +99,9 @@ const (
 	ActivityTypeWorkspaceUserUpdated    ActivityType = "workspace_user_updated"
 	ActivityTypeWorkspaceUserDeleted    ActivityType = "workspace_user_deleted"
 	ActivityTypeChatCreated             ActivityType = "chat_created"
+	ActivityTypeAiProviderCreated       ActivityType = "ai_provider_created"
+	ActivityTypeAiProviderUpdated       ActivityType = "ai_provider_updated"
+	ActivityTypeAiProviderDeleted       ActivityType = "ai_provider_deleted"
 	ActivityTypeOrderCreated            ActivityType = "order_created"
 	ActivityTypeOrderCanceled           ActivityType = "order_canceled"
 	ActivityTypeVoucherCreated          ActivityType = "voucher_created"
@@ -484,6 +487,7 @@ type Proxy struct {
 	EnforceHttps    bool           `json:"enforceHttps,omitempty"`
 	FollowRedirects bool           `json:"followRedirects,omitempty"`
 	Id              string         `json:"id,omitempty"`
+	Internal        bool           `json:"internal,omitempty"`
 	IsVerified      bool           `json:"isVerified,omitempty"`
 	Port            float64        `json:"port,omitempty"`
 	PreserveHeaders bool           `json:"preserveHeaders,omitempty"`
@@ -562,30 +566,7 @@ type Region struct {
 
 // Rule Rule (Interface)
 type Rule struct {
-	If   *RuleCondition           `json:"if,omitempty"`
-	Then []map[string]interface{} `json:"then,omitempty"`
 }
-
-// RuleCondition RuleCondition (Interface)
-type RuleCondition struct {
-	Host   string      `json:"host,omitempty"`
-	Method *RuleMethod `json:"method,omitempty"`
-	Path   string      `json:"path,omitempty"`
-	Port   float64     `json:"port,omitempty"`
-}
-
-// RuleMethod Rule Method enumeration
-type RuleMethod string
-
-const (
-	RuleMethodGet     RuleMethod = "get"
-	RuleMethodPost    RuleMethod = "post"
-	RuleMethodPut     RuleMethod = "put"
-	RuleMethodDelete  RuleMethod = "delete"
-	RuleMethodPatch   RuleMethod = "patch"
-	RuleMethodOptions RuleMethod = "options"
-	RuleMethodHead    RuleMethod = "head"
-)
 
 // Server Server (Model)
 type Server struct {
@@ -760,6 +741,7 @@ type User struct {
 	SsoMicrosoftId    string                   `json:"ssoMicrosoftId,omitempty"`
 	SsoZohoId         string                   `json:"ssoZohoId,omitempty"`
 	StaffRole         *StaffRole               `json:"staffRole,omitempty"`
+	TimeZone          string                   `json:"timeZone,omitempty"`
 	UpdatedAt         time.Time                `json:"updatedAt,omitempty"`
 	WorkspaceUsers    []WorkspaceUser          `json:"workspaceUsers,omitempty"`
 	Workspaces        *Any                     `json:"workspaces,omitempty"`
