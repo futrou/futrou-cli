@@ -17,6 +17,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"futrou-cli/src/constants"
@@ -283,6 +284,22 @@ func (cfg *CliConfig) Login(
 		default:
 		}
 	}
+	// the page the browser shows is written only when the login has ended (token
+	// exchanged or failed), so it tells the truth about the result
+	finished := make(chan struct{})
+	var finishOnce sync.Once
+	var finishErr error
+	finish := func(err error) {
+		finishOnce.Do(func() {
+			finishErr = err
+			close(finished)
+		})
+	}
+	writePage := func(w http.ResponseWriter, failure error, theme string) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		fmt.Fprint(w, renderCallbackPage(failure, theme))
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		// only the redirect itself counts: anything else (favicon, probes,
@@ -293,13 +310,20 @@ func (cfg *CliConfig) Login(
 		}
 		code := r.URL.Query().Get("code")
 		errParam := r.URL.Query().Get("error")
+		theme := r.URL.Query().Get("theme")
 		switch {
 		case errParam != "":
 			sendErr(fmt.Errorf("authorization denied: %s", errParam))
-			fmt.Fprintf(w, "<html><body><h2>Authorization denied. You can close this window.</h2></body></html>")
+			writePage(w, fmt.Errorf("authorization denied (%s)", errParam), theme)
 		case code != "":
 			sendCode(code)
-			fmt.Fprintf(w, "<html><body><h2>Logged in! You can close this window.</h2></body></html>")
+			select {
+			case <-finished:
+				writePage(w, finishErr, theme)
+			case <-time.After(30 * time.Second):
+				writePage(w, nil, theme)
+			case <-r.Context().Done():
+			}
 		default:
 			http.NotFound(w, r)
 		}
@@ -333,13 +357,18 @@ func (cfg *CliConfig) Login(
 
 	token, userEmail, err := exchangeCode(discovery.TokenEndpoint, clientID, code, verifier, redirectURI)
 	if err != nil {
-		return "", false, fmt.Errorf("exchanging code for token: %w", err)
+		err = fmt.Errorf("exchanging code for token: %w", err)
+		finish(err)
+		return "", false, err
 	}
 
 	cfg.ApiUrl = apiUrl
 	if err := cfg.SetToken(apiUrl, token); err != nil {
-		return "", false, fmt.Errorf("storing the token: %w", err)
+		err = fmt.Errorf("storing the token: %w", err)
+		finish(err)
+		return "", false, err
 	}
+	finish(nil)
 
 	// every login ends with a default workspace, so that no command asks for one:
 	// the one named with --workspace, the one the caller's picker chooses, else
