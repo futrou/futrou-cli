@@ -3,6 +3,8 @@ package commands
 import (
 	"fmt"
 	"net/url"
+	"os"
+	"strings"
 
 	"github.com/urfave/cli/v2"
 )
@@ -14,6 +16,8 @@ var serverCommand = &cli.Command{
 	Name:  "server",
 	Usage: "Manage servers",
 	Subcommands: []*cli.Command{
+		serverShellCommand,
+		serverExecCommand,
 		{
 			Name:  "ls",
 			Usage: "List the servers of a workspace (defaults to futrou.json|yaml, then the login workspace)",
@@ -188,4 +192,65 @@ func serverAction(method, suffix, message string) cli.ActionFunc {
 		}
 		return printJSON(result)
 	}
+}
+
+// serverShellURL builds the shell WebSocket URL of a server.
+func serverShellURL(apiURL, serverID string) (string, error) {
+	return shellWebsocketURL(apiURL, "/v2/servers/"+url.PathEscape(serverID)+"/shell")
+}
+
+// serverShellCommand and serverExecCommand behave exactly like their serverlet versions, for the machine itself.
+var serverShellCommand = &cli.Command{
+	Name:      "shell",
+	Usage:     "Open an interactive shell on a server",
+	ArgsUsage: "<id>",
+	Action: func(c *cli.Context) error {
+		id := c.Args().First()
+		if id == "" {
+			return fmt.Errorf("server ID required")
+		}
+		client, err := requireAuth(c)
+		if err != nil {
+			return err
+		}
+		wsURL, err := serverShellURL(client.ApiUrl(), id)
+		if err != nil {
+			return err
+		}
+		return runShell(wsURL, client.ApiToken())
+	},
+}
+
+var serverExecCommand = &cli.Command{
+	Name:      "exec",
+	Usage:     "Run a command on a server and wait for it to exit",
+	ArgsUsage: "<id> -- <command>",
+	Action: func(c *cli.Context) error {
+		id := c.Args().First()
+		if id == "" {
+			return fmt.Errorf("server ID required")
+		}
+		args := c.Args().Tail()
+		if len(args) > 0 && args[0] == "--" {
+			args = args[1:]
+		}
+		command := strings.Join(args, " ")
+		if command == "" {
+			return fmt.Errorf("command required, e.g. futrou server exec <id> -- <command>")
+		}
+		client, err := requireAuth(c)
+		if err != nil {
+			return err
+		}
+		wsURL, err := serverShellURL(client.ApiUrl(), id)
+		if err != nil {
+			return err
+		}
+		code, err := runExec(wsURL, client.ApiToken(), command)
+		if err != nil {
+			return err
+		}
+		os.Exit(code)
+		return nil
+	},
 }

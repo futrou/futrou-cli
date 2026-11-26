@@ -254,3 +254,71 @@ func TestShellExitLeavesAPlainTerminalAlone(t *testing.T) {
 		t.Fatalf("a plain session changed terminal modes: %q", out)
 	}
 }
+
+// Like ssh: a proper end (the shell exited with `exit` or Ctrl+D, a normal close, a close without
+// a status) is never dialed again, a connection lost to the network always is, once.
+func TestShellReconnectsOnlyOnANetworkLoss(t *testing.T) {
+	closeWith := func(code int) func(*websocket.Conn) {
+		return func(conn *websocket.Conn) {
+			conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(code, ""), time.Now().Add(time.Second))
+		}
+	}
+	noStatus := func(conn *websocket.Conn) {
+		conn.WriteControl(websocket.CloseMessage, []byte{}, time.Now().Add(time.Second))
+	}
+	cases := map[string]struct {
+		script    func(*websocket.Conn)
+		reconnect bool
+	}{
+		"normal close (exit)":        {closeWith(websocket.CloseNormalClosure), false},
+		"close without a status":     {noStatus, false},
+		"policy violation":           {closeWith(websocket.ClosePolicyViolation), false},
+		"cloud gave up (4000)":       {closeWith(4000), false},
+		"no close frame (network)":   {dropped, true},
+		"going away (restart)":       {closeWith(websocket.CloseGoingAway), true},
+		"internal error (lost node)": {closeWith(websocket.CloseInternalServerErr), true},
+		"service restart":            {closeWith(websocket.CloseServiceRestart), true},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			fastShellTimes(t)
+			s := newReconnectServer(t, tc.script, finished)
+			if _, err := runSession(t, s); err != nil {
+				t.Fatal(err)
+			}
+			want := int32(1)
+			if tc.reconnect {
+				want = 2
+			}
+			if s.count.Load() != want {
+				t.Fatalf("connected %d times, want %d", s.count.Load(), want)
+			}
+		})
+	}
+}
+
+// Ctrl+C while the connection is down and the CLI is waiting to dial again gives up.
+func TestShellCtrlCWhileReconnectingGivesUp(t *testing.T) {
+	fastShellTimes(t)
+	reconnectUnit = 5 * time.Second
+	s := newReconnectServer(t, func(conn *websocket.Conn) {
+		dropped(conn)
+	})
+	stdin := withPipedStdin(t)
+	go func() {
+		time.Sleep(300 * time.Millisecond)
+		stdin.Write([]byte{3})
+	}()
+	done := make(chan error, 1)
+	go func() {
+		captureStdout(t, func() { done <- runShellSession(s.url(), "tok", newShellKeys(os.Stdin)) })
+	}()
+	select {
+	case err := <-done:
+		if err != nil || s.count.Load() != 1 {
+			t.Fatalf("err = %v, connections = %d, want it to end after one", err, s.count.Load())
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("Ctrl+C did not end the wait for the reconnect")
+	}
+}

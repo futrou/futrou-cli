@@ -761,6 +761,8 @@ futrou server update <id> --name edge-2
 futrou server rm <id>
 futrou server logs <id>
 futrou server metrics <id>
+futrou server shell <id>
+futrou server exec <id> -- ls -la
 ```
 
 ### Other
@@ -833,6 +835,8 @@ futrou project create --name <string> [--display-name <string>] [--workspace <st
 futrou project update <id> [--name <string>] [--display-name <string>]                  # Update a project
 futrou project rm <id>                                                                  # Delete a project
 
+futrou server shell <id>                                                                       # Open an interactive shell on a server
+futrou server exec <id> -- <command>                                                           # Run a command on a server and wait for it to exit
 futrou server ls [--workspace <string>] [--region <string>]                                    # List the servers of a workspace (defaults to futrou.json|yaml, then the login workspace)
 futrou server show <id>                                                                        # Show a server by ID
 futrou server create --name <string> [--region <string>] [--workspace <string>]                # Create a server in the workspace

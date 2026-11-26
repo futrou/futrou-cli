@@ -429,10 +429,22 @@ func runShellSession(wsURL, token string, keys *shellKeys) error {
 			return nil
 		}
 		os.Stdout.WriteString("\r\n\x1b[33m⟳ Connection closed. Reconnecting...\x1b[0m\r\n")
-		time.Sleep(reconnectBackoff(1))
+		// Like ssh, Ctrl+C while the connection is down gives up instead of waiting for it
+		select {
+		case <-time.After(reconnectBackoff(1)):
+		case <-keys.interrupted:
+			os.Stdout.WriteString("\r\n")
+			return nil
+		}
 		conn, err = dialShellWithRetry(wsURL, token)
 		if err != nil {
 			return err
+		}
+		select {
+		case <-keys.interrupted:
+			conn.Close()
+			return nil
+		default:
 		}
 	}
 }
@@ -504,11 +516,12 @@ type shellKeys struct {
 	state         escapeState
 	disconnecting bool
 	left          chan struct{} // closed once the user typed "~."
+	interrupted   chan struct{} // gets a value when Ctrl+C is typed while there is no connection
 }
 
 // newShellKeys starts reading stdin.
 func newShellKeys(stdin *os.File) *shellKeys {
-	k := &shellKeys{state: escLine, left: make(chan struct{})}
+	k := &shellKeys{state: escLine, left: make(chan struct{}), interrupted: make(chan struct{}, 1)}
 	go k.read(stdin)
 	return k
 }
@@ -543,6 +556,12 @@ func (k *shellKeys) read(stdin *os.File) {
 		k.mu.Lock()
 		for i := 0; i < n; i++ {
 			b := buf[i]
+			if b == 3 && k.conn == nil {
+				select {
+				case k.interrupted <- struct{}{}:
+				default:
+				}
+			}
 
 			switch k.state {
 			case escLine:

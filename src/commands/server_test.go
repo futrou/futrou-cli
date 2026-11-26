@@ -215,3 +215,25 @@ func TestServerLsFiltersByRegion(t *testing.T) {
 		t.Fatalf("the region filter must reach the API: %q", query)
 	}
 }
+
+func TestServerShellAndExecValidateTheirArguments(t *testing.T) {
+	ts := newTestServer(t)
+	for args, want := range map[string]string{
+		"server shell":         "server ID required",
+		"server exec":          "server ID required",
+		"server exec srv-1":    "command required",
+		"server exec srv-1 --": "command required",
+	} {
+		_, err := runArgs(t, ts, strings.Fields(args)...)
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%q: error = %v, want %q", args, err, want)
+		}
+	}
+}
+
+func TestServerShellURLTargetsTheServer(t *testing.T) {
+	got, err := serverShellURL("https://api.futrou.com", "srv-1")
+	if err != nil || got != "wss://api.futrou.com/v2/servers/srv-1/shell" {
+		t.Fatalf("url = %s, %v", got, err)
+	}
+}
