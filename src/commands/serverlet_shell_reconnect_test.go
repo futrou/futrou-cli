@@ -210,3 +210,47 @@ func TestShellKeysReachTheNewConnectionAfterAReconnect(t *testing.T) {
 		t.Fatal("the key typed after the reconnect never arrived")
 	}
 }
+
+// The reported bug (Windows): the remote program had switched mouse reporting on, the connection
+// dropped inside an escape sequence, and the new shell got "69;12M35;71;12M..." typed into it.
+// The terminal is reset before the new shell shows anything.
+func TestShellResetsTheTerminalBeforeTheNewShell(t *testing.T) {
+	fastShellTimes(t)
+	s := newReconnectServer(t,
+		func(conn *websocket.Conn) {
+			conn.WriteMessage(websocket.BinaryMessage, []byte("\x1b[?1049h\x1b[?1000h\x1b[?1006h\x1b[?25l\x1b[31mred \x1b[?10"))
+			dropped(conn)
+		},
+		func(conn *websocket.Conn) {
+			conn.WriteMessage(websocket.BinaryMessage, []byte("new shell$ "))
+			finished(conn)
+		},
+	)
+	out, err := runSession(t, s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reset := strings.Index(out, "\x18")
+	fresh := strings.Index(out, "new shell$")
+	if reset < 0 || fresh < 0 || reset > fresh {
+		t.Fatalf("the terminal was not reset before the new shell: %q", out)
+	}
+	for _, want := range []string{"\x1b[?1000l", "\x1b[?1006l", "\x1b[?1049l", "\x1b[?25h", "\x1b[0m"} {
+		if i := strings.Index(out, want); i < reset || i > fresh {
+			t.Fatalf("%q is not between the drop and the new shell: %q", want, out)
+		}
+	}
+}
+
+// A shell that exits normally leaves the terminal as it found it: nothing is reset that was never set.
+func TestShellExitLeavesAPlainTerminalAlone(t *testing.T) {
+	fastShellTimes(t)
+	s := newReconnectServer(t, func(conn *websocket.Conn) {
+		conn.WriteMessage(websocket.BinaryMessage, []byte("bye\r\n"))
+		finished(conn)
+	})
+	out, _ := runSession(t, s)
+	if strings.Contains(out, "\x1b[?") || strings.Contains(out, "\x18") {
+		t.Fatalf("a plain session changed terminal modes: %q", out)
+	}
+}

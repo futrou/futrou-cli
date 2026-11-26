@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"futrou-cli/src/logger"
 	"futrou-cli/src/services"
+	"futrou-cli/src/utils"
 	"math/rand"
 	"net/http"
 	"net/url"
@@ -417,9 +418,13 @@ func runShellSession(wsURL, token string, keys *shellKeys) error {
 	if err != nil {
 		return err
 	}
+	modes := &utils.TermModes{}
 	for {
-		end := pumpShellConn(conn, keys)
+		end := pumpShellConn(conn, keys, modes)
 		conn.Close()
+		// What the remote program left switched on in this terminal (mouse reporting, the alternate
+		// screen, ...) is undone, or a new shell would get mouse reports typed into it
+		os.Stdout.Write(modes.Reset())
 		if end == shellEnded {
 			return nil
 		}
@@ -589,7 +594,7 @@ func (k *shellKeys) read(stdin *os.File) {
 // Used where a single connection is all there is (the tests); runShell keeps one
 // shellKeys across connections.
 func pumpShell(conn *websocket.Conn) shellEnd {
-	return pumpShellConn(conn, newShellKeys(os.Stdin))
+	return pumpShellConn(conn, newShellKeys(os.Stdin), &utils.TermModes{})
 }
 
 // closeEndsShell reports whether a close frame means the session is over (the shell
@@ -617,7 +622,7 @@ func closeEndsShell(err error) bool {
 //
 // A second "~." sent while a graceful close is already in flight force-exits
 // the process immediately, in case the close hangs.
-func pumpShellConn(conn *websocket.Conn, keys *shellKeys) shellEnd {
+func pumpShellConn(conn *websocket.Conn, keys *shellKeys, modes *utils.TermModes) shellEnd {
 	keys.setConn(conn)
 	defer keys.setConn(nil)
 
@@ -647,6 +652,7 @@ func pumpShellConn(conn *websocket.Conn, keys *shellKeys) shellEnd {
 			return shellLost
 		}
 		if msgType == websocket.TextMessage || msgType == websocket.BinaryMessage {
+			modes.Feed(data)
 			os.Stdout.Write(data)
 		}
 	}
