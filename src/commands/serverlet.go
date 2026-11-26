@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"errors"
 	"fmt"
 	"futrou-cli/src/logger"
 	"futrou-cli/src/services"
@@ -10,6 +11,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -383,11 +385,16 @@ func shellWebsocketURL(apiUrl, path string) (string, error) {
 	return u.String(), nil
 }
 
+// shellPingInterval is how often the CLI pings the server, like ssh's ServerAliveInterval, so an
+// idle terminal keeps traffic flowing through Cloudflare and any NAT. A variable so tests shorten it.
+var shellPingInterval = 25 * time.Second
+
 // runShell connects to the shell WebSocket and wires it up to the local
-// terminal, retrying up to shellMaxReconnects times only when the
-// connection can't be established in the first place. Once a session is
-// open, its end — clean or abrupt, server-initiated or user-initiated via
-// "~." — is treated as the shell exiting normally, not a failure to retry.
+// terminal, like ssh: when the connection is lost (network change, idle timeout
+// of a proxy, a restart of Cloud or the node) it reconnects by itself, up to
+// shellMaxReconnects times in a row, and the server hands back the same shell
+// with what it printed meanwhile. A shell that exits, a server that ends the
+// session on purpose or the "~." escape end it for good.
 func runShell(wsURL, token string) error {
 	if !isInteractiveTerminal() {
 		return fmt.Errorf("shell requires an interactive terminal")
@@ -400,14 +407,29 @@ func runShell(wsURL, token string) error {
 	}
 	defer term.Restore(fd, oldState)
 
+	return runShellSession(wsURL, token, newShellKeys(os.Stdin))
+}
+
+// runShellSession keeps one shell session connected: it dials, pumps, and dials again when
+// the connection is lost, until the session is over.
+func runShellSession(wsURL, token string, keys *shellKeys) error {
 	conn, err := dialShellWithRetry(wsURL, token)
 	if err != nil {
 		return err
 	}
-	defer conn.Close()
-
-	pumpShell(conn)
-	return nil
+	for {
+		end := pumpShellConn(conn, keys)
+		conn.Close()
+		if end == shellEnded {
+			return nil
+		}
+		os.Stdout.WriteString("\r\n\x1b[33m⟳ Connection closed. Reconnecting...\x1b[0m\r\n")
+		time.Sleep(reconnectBackoff(1))
+		conn, err = dialShellWithRetry(wsURL, token)
+		if err != nil {
+			return err
+		}
+	}
 }
 
 // dialShellWithRetry dials the shell WebSocket, retrying up to
@@ -460,84 +482,174 @@ const (
 	escTilde                    // just saw "~" at start of a line
 )
 
-// pumpShell wires the WebSocket connection to stdin/stdout until the session
-// ends — the server closes it (including abruptly, e.g. the remote shell
-// process exiting), or the user disconnects via the "~." escape. Either way
-// it simply returns; the caller does not retry an already-open session.
+// shellEnd says why a connection ended.
+type shellEnd int
+
+const (
+	shellEnded shellEnd = iota // the shell exited, the server ended it, or the user left: done
+	shellLost                  // the connection closed without the shell ending: reconnect
+)
+
+// shellKeys reads the keyboard for as long as the shell is used and sends it to the
+// current connection, which changes when the connection is replaced. Keys typed while
+// there is no connection are dropped, as they would be in ssh.
+type shellKeys struct {
+	mu            sync.Mutex
+	conn          *websocket.Conn
+	state         escapeState
+	disconnecting bool
+	left          chan struct{} // closed once the user typed "~."
+}
+
+// newShellKeys starts reading stdin.
+func newShellKeys(stdin *os.File) *shellKeys {
+	k := &shellKeys{state: escLine, left: make(chan struct{})}
+	go k.read(stdin)
+	return k
+}
+
+func (k *shellKeys) setConn(conn *websocket.Conn) {
+	k.mu.Lock()
+	k.conn = conn
+	k.mu.Unlock()
+}
+
+func (k *shellKeys) userLeft() bool {
+	select {
+	case <-k.left:
+		return true
+	default:
+		return false
+	}
+}
+
+// write sends data to the current connection; false when there is none or it failed.
+func (k *shellKeys) write(data []byte) bool {
+	if k.conn == nil {
+		return false
+	}
+	return k.conn.WriteMessage(websocket.BinaryMessage, data) == nil
+}
+
+func (k *shellKeys) read(stdin *os.File) {
+	buf := make([]byte, 4096)
+	for {
+		n, err := stdin.Read(buf)
+		k.mu.Lock()
+		for i := 0; i < n; i++ {
+			b := buf[i]
+
+			switch k.state {
+			case escLine:
+				if b == '~' {
+					k.state = escTilde
+					continue // hold back; may be part of the escape
+				}
+			case escTilde:
+				if b == '.' {
+					if k.disconnecting {
+						// Second "~.": the graceful close hasn't
+						// finished yet, so bail out immediately.
+						term.Restore(int(stdin.Fd()), nil)
+						os.Exit(130)
+					}
+					k.disconnecting = true
+					close(k.left)
+					if k.conn != nil {
+						k.conn.WriteControl(websocket.CloseMessage,
+							websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""),
+							time.Now().Add(time.Second))
+					}
+					k.state = escLine
+					continue
+				}
+				// Not a disconnect: forward the held-back "~" first.
+				if !k.disconnecting {
+					k.write([]byte{'~'})
+				}
+			}
+
+			k.state = escNone
+			if b == '\r' || b == '\n' {
+				k.state = escLine
+			}
+
+			if !k.disconnecting {
+				k.write([]byte{b})
+			}
+		}
+		k.mu.Unlock()
+		if err != nil {
+			return
+		}
+	}
+}
+
+// pumpShell wires one WebSocket connection to stdin/stdout until it ends and returns.
+// Used where a single connection is all there is (the tests); runShell keeps one
+// shellKeys across connections.
+func pumpShell(conn *websocket.Conn) shellEnd {
+	return pumpShellConn(conn, newShellKeys(os.Stdin))
+}
+
+// closeEndsShell reports whether a close frame means the session is over (the shell
+// exited, the server gave up or ended it on purpose) rather than a lost connection.
+func closeEndsShell(err error) bool {
+	var closeErr *websocket.CloseError
+	if !errors.As(err, &closeErr) {
+		return false
+	}
+	// Cloud tried its own retries and could not reach the node; the shell is kept there for a
+	// while, so trying again from here is worth it (any other reason Cloud gives is final).
+	if closeErr.Code == 4000 && closeErr.Text == "remote unavailable" {
+		return false
+	}
+	switch closeErr.Code {
+	case websocket.CloseGoingAway, websocket.CloseAbnormalClosure, websocket.CloseInternalServerErr,
+		websocket.CloseServiceRestart, websocket.CloseTryAgainLater, 1014:
+		return false // the server or something on the way went away
+	}
+	return true
+}
+
+// pumpShellConn prints what the server sends and pings to keep the connection open until it
+// closes: the server ends it, it drops, or the user disconnects via the "~." escape.
 //
 // A second "~." sent while a graceful close is already in flight force-exits
 // the process immediately, in case the close hangs.
-func pumpShell(conn *websocket.Conn) {
-	done := make(chan struct{})
-	var disconnecting bool
-	state := escLine
-	stdin := os.Stdin
+func pumpShellConn(conn *websocket.Conn, keys *shellKeys) shellEnd {
+	keys.setConn(conn)
+	defer keys.setConn(nil)
 
+	pingEvery := shellPingInterval // read once: tests change it
+
+	stop := make(chan struct{})
+	defer close(stop)
 	go func() {
-		defer close(done)
+		ticker := time.NewTicker(pingEvery)
+		defer ticker.Stop()
 		for {
-			msgType, data, err := conn.ReadMessage()
-			if err != nil {
+			select {
+			case <-stop:
 				return
-			}
-			if msgType == websocket.TextMessage || msgType == websocket.BinaryMessage {
-				os.Stdout.Write(data)
+			case <-ticker.C:
+				_ = conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(time.Second))
 			}
 		}
 	}()
 
-	go func() {
-		buf := make([]byte, 4096)
-		for {
-			n, err := stdin.Read(buf)
-			for i := 0; i < n; i++ {
-				b := buf[i]
-
-				switch state {
-				case escLine:
-					if b == '~' {
-						state = escTilde
-						continue // hold back; may be part of the escape
-					}
-				case escTilde:
-					if b == '.' {
-						if disconnecting {
-							// Second "~.": the graceful close hasn't
-							// finished yet, so bail out immediately.
-							term.Restore(int(stdin.Fd()), nil)
-							os.Exit(130)
-						}
-						disconnecting = true
-						conn.WriteControl(websocket.CloseMessage,
-							websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""),
-							time.Now().Add(time.Second))
-						state = escLine
-						continue
-					}
-					// Not a disconnect: forward the held-back "~" first.
-					if !disconnecting {
-						conn.WriteMessage(websocket.BinaryMessage, []byte{'~'})
-					}
-				}
-
-				state = escNone
-				if b == '\r' || b == '\n' {
-					state = escLine
-				}
-
-				if !disconnecting {
-					if werr := conn.WriteMessage(websocket.BinaryMessage, []byte{b}); werr != nil {
-						return
-					}
-				}
+	for {
+		msgType, data, err := conn.ReadMessage()
+		if err != nil {
+			if keys.userLeft() || closeEndsShell(err) {
+				return shellEnded
 			}
-			if err != nil {
-				return
-			}
+			return shellLost
 		}
-	}()
-
-	<-done
+		if msgType == websocket.TextMessage || msgType == websocket.BinaryMessage {
+			os.Stdout.Write(data)
+		}
+	}
 }
 
 var execCommand = &cli.Command{
