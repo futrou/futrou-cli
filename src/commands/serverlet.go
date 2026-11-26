@@ -267,7 +267,7 @@ const shellMaxReconnects = 3
 
 var shellCommand = &cli.Command{
 	Name:      "shell",
-	Usage:     "Open an interactive shell in a serverlet",
+	Usage:     "Open an interactive shell in a serverlet (exit or Ctrl+C twice to disconnect)",
 	ArgsUsage: "<id>",
 	Flags: []cli.Flag{
 		&cli.StringFlag{Name: "instance", Usage: "Connect to a specific instance ID instead of a random one"},
@@ -517,6 +517,62 @@ type shellKeys struct {
 	disconnecting bool
 	left          chan struct{} // closed once the user typed "~."
 	interrupted   chan struct{} // gets a value when Ctrl+C is typed while there is no connection
+	line          []byte        // what was typed on the current line, to notice "exit"
+	exitTyped     time.Time     // when "exit", "logout" or Ctrl+D on an empty line was last sent
+	lastCtrlC     time.Time     // when Ctrl+C was last typed on a live connection
+}
+
+// shellCtrlCWindow is how quickly Ctrl+C must be pressed twice to close the shell. The first one
+// still goes to the remote shell, so it can interrupt a running command.
+var shellCtrlCWindow = 800 * time.Millisecond
+
+// shellExitWindow is how long after typing "exit" a closing connection counts as the shell
+// that ended, whatever close code the servers on the way turned it into.
+var shellExitWindow = 10 * time.Second
+
+// typedExit reports whether the user just asked the remote shell to end.
+func (k *shellKeys) typedExit() bool {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	return !k.exitTyped.IsZero() && time.Since(k.exitTyped) <= shellExitWindow
+}
+
+// track follows the current input line and remembers when it was an exit command; the caller
+// holds k.mu.
+func (k *shellKeys) track(b byte) {
+	switch {
+	case b == '\r' || b == '\n':
+		if cmd := strings.TrimSpace(string(k.line)); cmd == "exit" || cmd == "logout" {
+			k.exitTyped = time.Now()
+		}
+		k.line = k.line[:0]
+	case b == 4 && len(k.line) == 0: // Ctrl+D on an empty line ends a shell
+		k.exitTyped = time.Now()
+	case b == 3 || b == 21: // Ctrl+C, Ctrl+U: the line is gone
+		k.line = k.line[:0]
+	case b == 0x7f || b == 8:
+		if len(k.line) > 0 {
+			k.line = k.line[:len(k.line)-1]
+		}
+	case b >= 0x20 && len(k.line) < 64:
+		k.line = append(k.line, b)
+	}
+}
+
+// leave closes the connection gracefully; the caller holds k.mu. Asked again while the close
+// is still in flight, it exits at once in case the close hangs.
+func (k *shellKeys) leave(stdin *os.File) {
+	if k.disconnecting {
+		term.Restore(int(stdin.Fd()), nil)
+		os.Exit(130)
+	}
+	k.disconnecting = true
+	close(k.left)
+	if k.conn != nil {
+		k.conn.WriteControl(websocket.CloseMessage,
+			websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""),
+			time.Now().Add(time.Second))
+	}
 }
 
 // newShellKeys starts reading stdin.
@@ -529,6 +585,9 @@ func newShellKeys(stdin *os.File) *shellKeys {
 func (k *shellKeys) setConn(conn *websocket.Conn) {
 	k.mu.Lock()
 	k.conn = conn
+	if conn != nil {
+		k.exitTyped = time.Time{}
+	}
 	k.mu.Unlock()
 }
 
@@ -556,10 +615,21 @@ func (k *shellKeys) read(stdin *os.File) {
 		k.mu.Lock()
 		for i := 0; i < n; i++ {
 			b := buf[i]
-			if b == 3 && k.conn == nil {
-				select {
-				case k.interrupted <- struct{}{}:
-				default:
+			k.track(b)
+			if b == 3 {
+				if k.conn == nil {
+					select {
+					case k.interrupted <- struct{}{}:
+					default:
+					}
+				} else if now := time.Now(); k.disconnecting || now.Sub(k.lastCtrlC) <= shellCtrlCWindow {
+					// Ctrl+C twice in a row closes the shell instead of interrupting it again
+					k.lastCtrlC = time.Time{}
+					k.leave(stdin)
+					k.state = escLine
+					continue
+				} else {
+					k.lastCtrlC = now
 				}
 			}
 
@@ -571,19 +641,7 @@ func (k *shellKeys) read(stdin *os.File) {
 				}
 			case escTilde:
 				if b == '.' {
-					if k.disconnecting {
-						// Second "~.": the graceful close hasn't
-						// finished yet, so bail out immediately.
-						term.Restore(int(stdin.Fd()), nil)
-						os.Exit(130)
-					}
-					k.disconnecting = true
-					close(k.left)
-					if k.conn != nil {
-						k.conn.WriteControl(websocket.CloseMessage,
-							websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""),
-							time.Now().Add(time.Second))
-					}
+					k.leave(stdin)
 					k.state = escLine
 					continue
 				}
@@ -665,7 +723,7 @@ func pumpShellConn(conn *websocket.Conn, keys *shellKeys, modes *utils.TermModes
 	for {
 		msgType, data, err := conn.ReadMessage()
 		if err != nil {
-			if keys.userLeft() || closeEndsShell(err) {
+			if keys.userLeft() || keys.typedExit() || closeEndsShell(err) {
 				return shellEnded
 			}
 			return shellLost

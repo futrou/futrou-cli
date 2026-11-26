@@ -120,7 +120,7 @@ futrou project create --name <string> [--display-name <string>] [--workspace <st
 futrou project update <id> [--name <string>] [--display-name <string>]                  # Update a project
 futrou project rm <id>                                                                  # Delete a project
 
-futrou server shell <id>                                                                       # Open an interactive shell on a server
+futrou server shell <id>                                                                       # Open an interactive shell on a server (exit or Ctrl+C twice to disconnect)
 futrou server exec <id> -- <command>                                                           # Run a command on a server and wait for it to exit
 futrou server ls [--workspace <string>] [--region <string>]                                    # List the servers of a workspace (defaults to futrou.json|yaml, then the login workspace)
 futrou server show <id>                                                                        # Show a server by ID
@@ -148,7 +148,7 @@ futrou serverlet instance stop <id> <instance-id>                               
 futrou serverlet instance restart <id> <instance-id>                                 # Restart a serverlet instance
 futrou serverlet instance logs <id> <instance-id> [LOG-OPTIONS]                      # View logs of a serverlet instance
 futrou serverlet instance metrics <id> <instance-id>                                 # Show metrics of a serverlet instance
-futrou serverlet shell <id> [--instance <string>]                                    # Open an interactive shell in a serverlet
+futrou serverlet shell <id> [--instance <string>]                                    # Open an interactive shell in a serverlet (exit or Ctrl+C twice to disconnect)
 futrou serverlet exec <id> -- <command> [--instance <string>]                        # Run a command in a serverlet and wait for it to exit
 
 futrou network ls [--workspace <string>] [--project <string>]                                  # List networks in a project (defaults to futrou.json|yaml, then the login workspace's "default" project)

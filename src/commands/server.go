@@ -202,7 +202,7 @@ func serverShellURL(apiURL, serverID string) (string, error) {
 // serverShellCommand and serverExecCommand behave exactly like their serverlet versions, for the machine itself.
 var serverShellCommand = &cli.Command{
 	Name:      "shell",
-	Usage:     "Open an interactive shell on a server",
+	Usage:     "Open an interactive shell on a server (exit or Ctrl+C twice to disconnect)",
 	ArgsUsage: "<id>",
 	Action: func(c *cli.Context) error {
 		id := c.Args().First()

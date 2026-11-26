@@ -322,3 +322,163 @@ func TestShellCtrlCWhileReconnectingGivesUp(t *testing.T) {
 		t.Fatal("Ctrl+C did not end the wait for the reconnect")
 	}
 }
+
+// whatever close the servers on the way turn the shell's end into, typing exit ends the session
+func TestShellEndsAfterExitWhateverTheCloseIs(t *testing.T) {
+	closes := map[string]func(*websocket.Conn){
+		"dropped": dropped,
+		"lost 1011": func(c *websocket.Conn) {
+			c.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(1011, "remote lost"), time.Now().Add(time.Second))
+		},
+		"going away": func(c *websocket.Conn) {
+			c.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(1001, ""), time.Now().Add(time.Second))
+		},
+		"normal": finished,
+	}
+	for name, closeIt := range closes {
+		for _, typed := range []string{"exit\r", "logout\r", "\x04", "  exit  \r", "ls\x7f\x7f\x7f\x7fexit\r"} {
+			t.Run(name+"/"+strings.TrimSpace(typed), func(t *testing.T) {
+				fastShellTimes(t)
+				s := newReconnectServer(t, func(conn *websocket.Conn) {
+					conn.ReadMessage() // the typed exit
+					closeIt(conn)
+				}, func(conn *websocket.Conn) { finished(conn) })
+				stdin := withPipedStdin(t)
+				done := make(chan error, 1)
+				var out string
+				go func() {
+					out = captureStdout(t, func() { done <- runShellSession(s.url(), "tok", newShellKeys(os.Stdin)) })
+				}()
+				time.Sleep(50 * time.Millisecond)
+				stdin.Write([]byte(typed))
+				select {
+				case err := <-done:
+					if err != nil {
+						t.Fatal(err)
+					}
+				case <-time.After(5 * time.Second):
+					t.Fatal("the session did not end")
+				}
+				if s.count.Load() != 1 || strings.Contains(out, "Reconnecting") {
+					t.Fatalf("connected %d times, out = %q: exit must end the session", s.count.Load(), out)
+				}
+			})
+		}
+	}
+}
+
+// a lost connection after something other than exit is still dialled again
+func TestShellReconnectsWhenOtherInputPrecedesTheDrop(t *testing.T) {
+	fastShellTimes(t)
+	s := newReconnectServer(t, func(conn *websocket.Conn) {
+		conn.ReadMessage()
+		dropped(conn)
+	}, finished)
+	stdin := withPipedStdin(t)
+	done := make(chan error, 1)
+	go func() { captureStdout(t, func() { done <- runShellSession(s.url(), "tok", newShellKeys(os.Stdin)) }) }()
+	time.Sleep(50 * time.Millisecond)
+	stdin.Write([]byte("exits\rexit 1 \rls\r"))
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the session did not end")
+	}
+	if s.count.Load() != 2 {
+		t.Fatalf("connected %d times, want 2", s.count.Load())
+	}
+}
+
+func TestShellExitIsForgottenAfterTheWindow(t *testing.T) {
+	k := &shellKeys{}
+	k.mu.Lock()
+	k.track('x')
+	for _, b := range []byte("\x7fexit\r") {
+		k.track(b)
+	}
+	k.mu.Unlock()
+	if !k.typedExit() {
+		t.Fatal("exit was not noticed")
+	}
+	old := shellExitWindow
+	shellExitWindow = time.Millisecond
+	t.Cleanup(func() { shellExitWindow = old })
+	time.Sleep(5 * time.Millisecond)
+	if k.typedExit() {
+		t.Fatal("an old exit must not end a later lost connection")
+	}
+}
+
+func TestShellClosesOnTwoQuickCtrlCs(t *testing.T) {
+	fastShellTimes(t)
+	got := make(chan []byte, 1)
+	s := newReconnectServer(t, func(conn *websocket.Conn) {
+		var typed []byte
+		for {
+			_, d, err := conn.ReadMessage()
+			if err != nil {
+				got <- typed
+				return
+			}
+			typed = append(typed, d...)
+		}
+	}, finished)
+	stdin := withPipedStdin(t)
+	done := make(chan error, 1)
+	go func() { captureStdout(t, func() { done <- runShellSession(s.url(), "tok", newShellKeys(os.Stdin)) }) }()
+	time.Sleep(50 * time.Millisecond)
+	stdin.Write([]byte{3})
+	select {
+	case <-done:
+		t.Fatal("one Ctrl+C must go to the remote shell, not close it")
+	case <-time.After(150 * time.Millisecond):
+	}
+	stdin.Write([]byte{3})
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("two quick Ctrl+C must close the session")
+	}
+	if s.count.Load() != 1 {
+		t.Fatalf("connected %d times, want 1 (no reconnect after the user left)", s.count.Load())
+	}
+	if typed := <-got; string(typed) != "\x03" {
+		t.Fatalf("the shell got %q, want only the first Ctrl+C", typed)
+	}
+}
+
+func TestShellCtrlCsFarApartDoNotClose(t *testing.T) {
+	fastShellTimes(t)
+	old := shellCtrlCWindow
+	shellCtrlCWindow = 30 * time.Millisecond
+	t.Cleanup(func() { shellCtrlCWindow = old })
+	s := newReconnectServer(t, func(conn *websocket.Conn) {
+		for {
+			if _, _, err := conn.ReadMessage(); err != nil {
+				return
+			}
+		}
+	})
+	stdin := withPipedStdin(t)
+	done := make(chan error, 1)
+	go func() { captureStdout(t, func() { done <- runShellSession(s.url(), "tok", newShellKeys(os.Stdin)) }) }()
+	time.Sleep(50 * time.Millisecond)
+	for i := 0; i < 3; i++ {
+		stdin.Write([]byte{3})
+		time.Sleep(120 * time.Millisecond)
+	}
+	select {
+	case <-done:
+		t.Fatal("slow Ctrl+C presses must not close the shell")
+	default:
+	}
+	stdin.Write([]byte{3, 3})
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("two quick presses must close it")
+	}
+}
