@@ -49,10 +49,10 @@ func (s *reconnectServer) url() string {
 func fastShellTimes(t *testing.T) {
 	t.Helper()
 	reconnectUnit = time.Millisecond
-	oldPing := shellPingInterval
+	oldPing, oldDead := shellPingInterval, shellDeadAfter
 	t.Cleanup(func() {
 		reconnectUnit = time.Second
-		shellPingInterval = oldPing
+		shellPingInterval, shellDeadAfter = oldPing, oldDead
 	})
 }
 
@@ -480,5 +480,108 @@ func TestShellCtrlCsFarApartDoNotClose(t *testing.T) {
 	case <-done:
 	case <-time.After(5 * time.Second):
 		t.Fatal("two quick presses must close it")
+	}
+}
+
+// A connection that goes silent without a close frame (a dropped NAT, a laptop that slept) used to
+// hang the terminal for ever: now it counts as lost and the shell dials again.
+func TestShellReconnectsWhenTheConnectionGoesSilent(t *testing.T) {
+	fastShellTimes(t)
+	shellPingInterval = 20 * time.Millisecond
+	shellDeadAfter = 150 * time.Millisecond
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	s := newReconnectServer(t,
+		func(conn *websocket.Conn) { <-release }, // never reads, so never answers a ping
+		func(conn *websocket.Conn) {
+			conn.WriteMessage(websocket.BinaryMessage, []byte("second\r\n"))
+			finished(conn)
+		},
+	)
+	out, err := runSession(t, s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "second") || s.count.Load() != 2 {
+		t.Fatalf("want a second connection that printed its output, got %d connections and %q", s.count.Load(), out)
+	}
+}
+
+// A live connection is never cut for being quiet: the pings keep it alive.
+func TestShellStaysOpenWhileTheServerAnswersPings(t *testing.T) {
+	fastShellTimes(t)
+	shellPingInterval = 20 * time.Millisecond
+	shellDeadAfter = 150 * time.Millisecond
+	s := newReconnectServer(t, func(conn *websocket.Conn) {
+		go func() { // reading answers the client's pings
+			for {
+				if _, _, err := conn.ReadMessage(); err != nil {
+					return
+				}
+			}
+		}()
+		time.Sleep(500 * time.Millisecond) // longer than shellDeadAfter
+		finished(conn)
+	})
+	if _, err := runSession(t, s); err != nil {
+		t.Fatal(err)
+	}
+	if s.count.Load() != 1 {
+		t.Fatalf("a quiet but live connection was dialed %d times, want 1", s.count.Load())
+	}
+}
+
+// A command that prints nothing for longer than the dead time still finishes (it used to fail after 30 s).
+func TestExecWaitsForASilentCommandOnALiveConnection(t *testing.T) {
+	fastShellTimes(t)
+	shellPingInterval = 20 * time.Millisecond
+	shellDeadAfter = 150 * time.Millisecond
+	s := newReconnectServer(t, func(conn *websocket.Conn) {
+		_, payload, err := conn.ReadMessage()
+		if err != nil {
+			return
+		}
+		go func() {
+			for {
+				if _, _, err := conn.ReadMessage(); err != nil {
+					return
+				}
+			}
+		}()
+		time.Sleep(500 * time.Millisecond)
+		sentinel := strings.Fields(strings.TrimPrefix(string(payload), "sleep; echo "))[0]
+		conn.WriteMessage(websocket.BinaryMessage, []byte(strings.Split(sentinel, ":")[0]+":0\n"))
+	})
+	code, err := runExec(s.url(), "tok", "sleep")
+	if err != nil || code != 0 {
+		t.Fatalf("exec = %d, %v; want 0, nil", code, err)
+	}
+}
+
+// A dead connection ends exec with an error instead of waiting for ever.
+func TestExecFailsWhenTheConnectionGoesSilent(t *testing.T) {
+	fastShellTimes(t)
+	shellPingInterval = 20 * time.Millisecond
+	shellDeadAfter = 150 * time.Millisecond
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	s := newReconnectServer(t, func(conn *websocket.Conn) { <-release })
+	if _, err := runExec(s.url(), "tok", "sleep"); err == nil {
+		t.Fatal("exec on a silent connection returned no error")
+	}
+}
+
+// An instance that never starts closes every connection at once: the shell gives up after a few tries.
+func TestShellGivesUpWhenEveryConnectionClosesAtOnce(t *testing.T) {
+	fastShellTimes(t)
+	always := func(conn *websocket.Conn) {
+		conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(4000, "remote unavailable"), time.Now().Add(time.Second))
+	}
+	s := newReconnectServer(t, always, always, always, always, always, always, always, always)
+	if _, err := runSession(t, s); err == nil {
+		t.Fatal("the shell kept reconnecting for ever")
+	}
+	if got := s.count.Load(); got != int32(shellMaxReconnects)+1 {
+		t.Fatalf("connections = %d, want %d", got, shellMaxReconnects+1)
 	}
 }

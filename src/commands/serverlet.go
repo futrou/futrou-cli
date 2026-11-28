@@ -265,6 +265,10 @@ func serverletAction(action string) cli.ActionFunc {
 
 const shellMaxReconnects = 3
 
+// shellMinLife is how long a connection must stay open to count as a working one: shorter ones that
+// end without the shell ending are failed attempts and only shellMaxReconnects of them are made in a row.
+var shellMinLife = 5 * time.Second
+
 var shellCommand = &cli.Command{
 	Name:      "shell",
 	Usage:     "Open an interactive shell in a serverlet (exit or Ctrl+C twice to disconnect)",
@@ -390,11 +394,45 @@ func shellWebsocketURL(apiUrl, path string) (string, error) {
 // idle terminal keeps traffic flowing through Cloudflare and any NAT. A variable so tests shorten it.
 var shellPingInterval = 25 * time.Second
 
+// shellDeadAfter is how long a connection may stay completely silent (no data, no ping, no pong)
+// before it counts as lost. A network that drops without a close frame (a NAT, a proxy, a laptop
+// that slept) never makes a read fail by itself, so without this the terminal would hang for ever.
+var shellDeadAfter = 3 * shellPingInterval
+
+// keepConnAlive pings conn every pingEvery and makes a read fail once nothing has arrived for
+// deadAfter. Everything the peer sends (data, pings, pongs) pushes the deadline back. The returned
+// function stops the pings; call `extend` after every message read.
+func keepConnAlive(conn *websocket.Conn, pingEvery, deadAfter time.Duration) (extend func(), stop func()) {
+	extend = func() { _ = conn.SetReadDeadline(time.Now().Add(deadAfter)) }
+	extend()
+	conn.SetPongHandler(func(string) error { extend(); return nil })
+	conn.SetPingHandler(func(data string) error {
+		extend()
+		// A failed pong shows up as a failed read soon enough
+		_ = conn.WriteControl(websocket.PongMessage, []byte(data), time.Now().Add(time.Second))
+		return nil
+	})
+
+	done := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(pingEvery)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+				_ = conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(time.Second))
+			}
+		}
+	}()
+	return extend, func() { close(done) }
+}
+
 // runShell connects to the shell WebSocket and wires it up to the local
 // terminal, like ssh: when the connection is lost (network change, idle timeout
 // of a proxy, a restart of Cloud or the node) it reconnects by itself, up to
-// shellMaxReconnects times in a row, and the server hands back the same shell
-// with what it printed meanwhile. A shell that exits, a server that ends the
+// shellMaxReconnects times in a row and starts a fresh shell. A shell that exits, a server that ends the
 // session on purpose or the "~." escape end it for good.
 func runShell(wsURL, token string) error {
 	if !isInteractiveTerminal() {
@@ -419,7 +457,9 @@ func runShellSession(wsURL, token string, keys *shellKeys) error {
 		return err
 	}
 	modes := &utils.TermModes{}
+	quickLosses := 0
 	for {
+		openedAt := time.Now()
 		end := pumpShellConn(conn, keys, modes)
 		conn.Close()
 		// What the remote program left switched on in this terminal (mouse reporting, the alternate
@@ -427,6 +467,15 @@ func runShellSession(wsURL, token string, keys *shellKeys) error {
 		os.Stdout.Write(modes.Reset())
 		if end == shellEnded {
 			return nil
+		}
+		// A server that keeps closing at once (an instance that does not start) is given up on, not retried for ever
+		if time.Since(openedAt) < shellMinLife {
+			quickLosses++
+			if quickLosses > shellMaxReconnects {
+				return fmt.Errorf("the shell keeps closing right after it connects, giving up")
+			}
+		} else {
+			quickLosses = 0
 		}
 		os.Stdout.WriteString("\r\n\x1b[33m⟳ Connection closed. Reconnecting...\x1b[0m\r\n")
 		// Like ssh, Ctrl+C while the connection is down gives up instead of waiting for it
@@ -703,25 +752,12 @@ func pumpShellConn(conn *websocket.Conn, keys *shellKeys, modes *utils.TermModes
 	keys.setConn(conn)
 	defer keys.setConn(nil)
 
-	pingEvery := shellPingInterval // read once: tests change it
-
-	stop := make(chan struct{})
-	defer close(stop)
-	go func() {
-		ticker := time.NewTicker(pingEvery)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-stop:
-				return
-			case <-ticker.C:
-				_ = conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(time.Second))
-			}
-		}
-	}()
+	extend, stopPings := keepConnAlive(conn, shellPingInterval, shellDeadAfter) // read once: tests change them
+	defer stopPings()
 
 	for {
 		msgType, data, err := conn.ReadMessage()
+		extend()
 		if err != nil {
 			if keys.userLeft() || keys.typedExit() || closeEndsShell(err) {
 				return shellEnded
@@ -809,16 +845,20 @@ func runExec(wsURL, token, command string) (int, error) {
 func pumpExec(conn *websocket.Conn, sentinel string) (int, error) {
 	var pending strings.Builder
 
+	// A command may be silent for minutes; only a dead connection ends it.
+	extend, stopPings := keepConnAlive(conn, shellPingInterval, shellDeadAfter)
+	defer stopPings()
+
 	flushLine := func(line string) {
 		fmt.Fprintln(os.Stdout, line)
 	}
 
 	for {
-		conn.SetReadDeadline(time.Now().Add(30 * time.Second))
 		msgType, data, err := conn.ReadMessage()
 		if err != nil {
 			return 0, fmt.Errorf("command did not complete: %w", err)
 		}
+		extend()
 		if msgType != websocket.TextMessage && msgType != websocket.BinaryMessage {
 			continue
 		}
